@@ -6,9 +6,9 @@ from fastmcp.utilities.types import Image
 from mcp.types import ToolAnnotations
 from typing import Literal, Optional
 from humancursor import SystemCursor
+from fastmcp import FastMCP, Context
 from dotenv import load_dotenv
 from textwrap import dedent
-from fastmcp import FastMCP
 import pyautogui as pg
 import asyncio
 import click
@@ -63,7 +63,7 @@ mcp=FastMCP(name='windows-mcp',instructions=instructions,lifespan=lifespan)
     )
     )
 @with_analytics(analytics, "App-Tool")
-def app_tool(mode:Literal['launch','resize','switch'],name:str|None=None,window_loc:list[int]|None=None,window_size:list[int]|None=None):
+def app_tool(mode:Literal['launch','resize','switch'],name:str|None=None,window_loc:list[int]|None=None,window_size:list[int]|None=None, ctx: Context = None):
     return desktop.app(mode,name,window_loc,window_size)
     
 @mcp.tool(
@@ -78,7 +78,7 @@ def app_tool(mode:Literal['launch','resize','switch'],name:str|None=None,window_
     )
     )
 @with_analytics(analytics, "Powershell-Tool")
-def powershell_tool(command: str) -> str:
+def powershell_tool(command: str, ctx: Context = None) -> str:
     response,status_code=desktop.execute_command(command)
     return f'Response: {response}\nStatus Code: {status_code}'
 
@@ -94,7 +94,7 @@ def powershell_tool(command: str) -> str:
     )
     )
 @with_analytics(analytics, "State-Tool")
-def state_tool(use_vision:bool=False,use_dom:bool=False):
+def state_tool(use_vision:bool=False,use_dom:bool=False, ctx: Context = None):
     # Calculate scale factor to cap resolution at 1080p (1920x1080)
     max_width, max_height = 1920, 1080
     scale_width = max_width / screen_width if screen_width > max_width else 1.0
@@ -135,7 +135,7 @@ def state_tool(use_vision:bool=False,use_dom:bool=False):
     )
     )
 @with_analytics(analytics, "Click-Tool")
-def click_tool(loc:list[int],button:Literal['left','right','middle']='left',clicks:int=1)->str:
+def click_tool(loc:list[int],button:Literal['left','right','middle']='left',clicks:int=1, ctx: Context = None)->str:
     if len(loc) != 2:
         raise ValueError("Location must be a list of exactly 2 integers [x, y]")
     x,y=loc[0],loc[1]
@@ -155,7 +155,7 @@ def click_tool(loc:list[int],button:Literal['left','right','middle']='left',clic
     )
     )
 @with_analytics(analytics, "Type-Tool")
-def type_tool(loc:list[int],text:str,clear:bool=False,press_enter:bool=False)->str:
+def type_tool(loc:list[int],text:str,clear:bool=False,press_enter:bool=False, ctx: Context = None)->str:
     if len(loc) != 2:
         raise ValueError("Location must be a list of exactly 2 integers [x, y]")
     x,y=loc[0],loc[1]
@@ -174,7 +174,7 @@ def type_tool(loc:list[int],text:str,clear:bool=False,press_enter:bool=False)->s
     )
     )
 @with_analytics(analytics, "Scroll-Tool")
-def scroll_tool(loc:list[int]=None,type:Literal['horizontal','vertical']='vertical',direction:Literal['up','down','left','right']='down',wheel_times:int=1)->str:
+def scroll_tool(loc:list[int]=None,type:Literal['horizontal','vertical']='vertical',direction:Literal['up','down','left','right']='down',wheel_times:int=1, ctx: Context = None)->str:
     if loc and len(loc) != 2:
         raise ValueError("Location must be a list of exactly 2 integers [x, y]")
     response=desktop.scroll(loc,type,direction,wheel_times)
@@ -194,7 +194,7 @@ def scroll_tool(loc:list[int]=None,type:Literal['horizontal','vertical']='vertic
     )
     )
 @with_analytics(analytics, "Drag-Tool")
-def drag_tool(to_loc:list[int])->str:
+def drag_tool(to_loc:list[int], ctx: Context = None)->str:
     if len(to_loc) != 2:
         raise ValueError("to_loc must be a list of exactly 2 integers [x, y]")
     desktop.drag(to_loc)
@@ -213,7 +213,7 @@ def drag_tool(to_loc:list[int])->str:
     )
     )
 @with_analytics(analytics, "Move-Tool")
-def move_tool(to_loc:list[int])->str:
+def move_tool(to_loc:list[int], ctx: Context = None)->str:
     if len(to_loc) != 2:
         raise ValueError("to_loc must be a list of exactly 2 integers [x, y]")
     x,y=to_loc[0],to_loc[1]
@@ -232,7 +232,7 @@ def move_tool(to_loc:list[int])->str:
     )
     )
 @with_analytics(analytics, "Shortcut-Tool")
-def shortcut_tool(shortcut:str):
+def shortcut_tool(shortcut:str, ctx: Context = None):
     desktop.shortcut(shortcut)
     return f"Pressed {shortcut}."
 
@@ -248,7 +248,7 @@ def shortcut_tool(shortcut:str):
     )
     )
 @with_analytics(analytics, "Wait-Tool")
-def wait_tool(duration:int)->str:
+def wait_tool(duration:int, ctx: Context = None)->str:
     pg.sleep(duration)
     return f'Waited for {duration} seconds.'
 
@@ -264,7 +264,7 @@ def wait_tool(duration:int)->str:
     )
     )
 @with_analytics(analytics, "Scrape-Tool")
-def scrape_tool(url:str,use_dom:bool=False)->str:
+def scrape_tool(url:str,use_dom:bool=False, ctx: Context = None)->str:
     if not use_dom:
         content=desktop.scrape(url)
         return f'URL:{url}\nContent:\n{content}'

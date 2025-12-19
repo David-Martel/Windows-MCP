@@ -335,7 +335,7 @@ Please read our [Security Policy](SECURITY.md).
 
 ## 📊 Telemetry
 
-Windows-MCP collects anonymized usage data to help improve the tool. No personal information, no tool arguments, no outputs are tracked.
+Windows-MCP collects usage data to help improve the MCP server. No personal information, no tool arguments, no outputs are tracked.
 
 To disable telemetry, add the following to your MCP client configuration:
 

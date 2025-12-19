@@ -506,15 +506,15 @@ wheels = [
 
 [[package]]
 name = "live-inspect"
-version = "0.1.1"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "clr" },
     { name = "pythonnet" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/49/19/17117df902e41bff25d0880b7e72ea7def90c0f575d9704abc8707728e1f/live_inspect-0.1.1.tar.gz", hash = "sha256:b2beaf0a74dd8656aeac9343810e09c5a8efa83c2ce183577040cae7e3acd80a", size = 235834, upload-time = "2025-06-25T14:04:00.17Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/57/e8/720c2b160126c19d1b03decc7db4f5101f05c8a6e83875da845eb383f6a5/live_inspect-0.1.2.tar.gz", hash = "sha256:c78e4f59f080c8c53486fa4a8686651b5af0fcbec43c9cd651c5eb703df9a19d", size = 235924, upload-time = "2025-12-19T21:11:36.083Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/45/f7/3ee6a7ddb88ad0bf8e4fbc581f90a55079b383c1c1ac229917d6da7dd198/live_inspect-0.1.1-py3-none-any.whl", hash = "sha256:406daee02db1d5b76783ad61952582caf76aae02c816ad466d788f6dd671199d", size = 237608, upload-time = "2025-06-25T14:03:58.638Z" },
+    { url = "https://files.pythonhosted.org/packages/84/98/ad29db410762e9415a5171b0da7d6a282f45070f2ca13df12fd084c0072f/live_inspect-0.1.2-py3-none-any.whl", hash = "sha256:de1966789a3d745c33dbf914dea81e42c7dcb7f5561ce4fe3deefb9cbfbbbf73", size = 237670, upload-time = "2025-12-19T21:11:34.013Z" },
 ]
 
 [[package]]
@@ -1503,7 +1503,7 @@ requires-dist = [
     { name = "fuzzywuzzy", specifier = ">=0.18.0" },
     { name = "humancursor", specifier = ">=1.1.5" },
     { name = "ipykernel", specifier = ">=6.30.0" },
-    { name = "live-inspect", specifier = ">=0.1.1" },
+    { name = "live-inspect", specifier = ">=0.1.2" },
     { name = "markdownify", specifier = ">=1.1.0" },
     { name = "pdfplumber", specifier = ">=0.11.7" },
     { name = "pillow", specifier = ">=11.2.1" },

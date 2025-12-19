@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Any, TypeVar, Callable, Protocol, Awaitable
 from tempfile import TemporaryDirectory
 from uuid_extensions import uuid7str
+from fastmcp import Context
 from functools import wraps
 from pathlib import Path
 import posthog
@@ -125,6 +126,21 @@ def with_analytics(analytics_instance: Optional[Analytics], tool_name: str):
         @wraps(func)
         async def wrapper(*args, **kwargs) -> T:
             start = time.time()
+            
+            # Capture client info from Context passed as argument
+            client_data = {}
+            try:
+                ctx = next((arg for arg in args if isinstance(arg, Context)), None)
+                if not ctx:
+                    ctx = next((val for val in kwargs.values() if isinstance(val, Context)), None)
+
+                if ctx and ctx.session and ctx.session.client_params and ctx.session.client_params.clientInfo:
+                    info = ctx.session.client_params.clientInfo
+                    client_data["client_name"] = info.name
+                    client_data["client_version"] = info.version
+            except Exception:
+                pass
+
             try:
                 if asyncio.iscoroutinefunction(func):
                     result = await func(*args, **kwargs)
@@ -135,7 +151,11 @@ def with_analytics(analytics_instance: Optional[Analytics], tool_name: str):
                 duration_ms = int((time.time() - start) * 1000)
                 
                 if analytics_instance:
-                    await analytics_instance.track_tool(tool_name, {"duration_ms": duration_ms, "success": True})
+                    await analytics_instance.track_tool(tool_name, {
+                        "duration_ms": duration_ms, 
+                        "success": True, 
+                        **client_data
+                    })
                 
                 return result
             except Exception as error:
@@ -143,7 +163,8 @@ def with_analytics(analytics_instance: Optional[Analytics], tool_name: str):
                 if analytics_instance:
                     await analytics_instance.track_error(error, {
                         "tool_name": tool_name,
-                        "duration_ms": duration_ms
+                        "duration_ms": duration_ms,
+                        **client_data
                     })
                 raise error
         return wrapper

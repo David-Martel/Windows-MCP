@@ -1,10 +1,10 @@
 from windows_mcp.desktop.config import BROWSER_NAMES, PROCESS_PER_MONITOR_DPI_AWARE
 from windows_mcp.desktop.views import DesktopState, App, Size, Status
+from windows_mcp.tree.service import Tree
 from locale import getpreferredencoding
 from contextlib import contextmanager
 from typing import Optional,Literal
 from markdownify import markdownify
-from windows_mcp.tree.service import Tree
 from fuzzywuzzy import process
 from psutil import Process
 from time import sleep
