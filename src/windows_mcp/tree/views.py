@@ -3,36 +3,38 @@ from tabulate import tabulate
 from typing import Optional
 
 @dataclass
-class DOMInfo:
-    horizontal_scrollable: bool
-    horizontal_scroll_percent: float
-    vertical_scrollable: bool
-    vertical_scroll_percent: float
-
-@dataclass
 class TreeState:
+    root_node:Optional['TreeElementNode']=None
+    dom_node:Optional['ScrollElementNode']=None
     interactive_nodes:list['TreeElementNode']=field(default_factory=list)
     scrollable_nodes:list['ScrollElementNode']=field(default_factory=list)
     dom_informative_nodes:list['TextElementNode']=field(default_factory=list)
-    dom_info:Optional['DOMInfo']=None
 
     def interactive_elements_to_string(self) -> str:
         if not self.interactive_nodes:
             return "No interactive elements"
-        headers = ["Label", "App Name", "ControlType", "Name", "Value", "Shortcut", "Coordinates" ,"IsFocused"]
-        rows = [node.to_row(idx) for idx, node in enumerate(self.interactive_nodes)]
-        return tabulate(rows, headers=headers, tablefmt="simple")
+        # TOON-like format: Pipe-separated values with clear header
+        # Using abbreviations in header to save tokens
+        header = "# id|app|type|name|val|keys|coords|focus"
+        rows = [header]
+        for idx, node in enumerate(self.interactive_nodes):
+            row = f"{idx}|{node.app_name}|{node.control_type}|{node.name}|{node.value}|{node.shortcut}|{node.center.to_string()}|{node.is_focused}"
+            rows.append(row)
+        return "\n".join(rows)
 
     def scrollable_elements_to_string(self) -> str:
         if not self.scrollable_nodes:
             return "No scrollable elements"
-        headers = [
-            "Label", "App Name", "ControlType", "Name", "Coordinates",
-            "Horizontal Scrollable", "Horizontal Scroll Percent(%)", "Vertical Scrollable", "Vertical Scroll Percent(%)", "IsFocused"
-        ]
+        # TOON-like format
+        header = "# id|app|type|name|coords|h_scroll|h_pct|v_scroll|v_pct|focus"
+        rows = [header]
         base_index = len(self.interactive_nodes)
-        rows = [node.to_row(idx, base_index) for idx, node in enumerate(self.scrollable_nodes)]
-        return tabulate(rows, headers=headers, tablefmt="simple")
+        for idx, node in enumerate(self.scrollable_nodes):
+            row = (f"{base_index + idx}|{node.app_name}|{node.control_type}|{node.name}|"
+                   f"{node.center.to_string()}|{node.horizontal_scrollable}|{node.horizontal_scroll_percent}|"
+                   f"{node.vertical_scrollable}|{node.vertical_scroll_percent}|{node.is_focused}")
+            rows.append(row)
+        return "\n".join(rows)
     
 @dataclass
 class BoundingBox:
@@ -42,6 +44,17 @@ class BoundingBox:
     bottom:int
     width:int
     height:int
+
+    @classmethod
+    def from_bounding_rectangle(cls,bounding_rectangle:'BoundingRectangle')->'BoundingBox':
+        return cls(
+            left=bounding_rectangle.left,
+            top=bounding_rectangle.top,
+            right=bounding_rectangle.right,
+            bottom=bounding_rectangle.bottom,
+            width=bounding_rectangle.width(),
+            height=bounding_rectangle.height()
+        )
 
     def get_center(self)->'Center':
         return Center(x=self.left+self.width//2,y=self.top+self.height//2)
@@ -68,22 +81,39 @@ class Center:
 
 @dataclass
 class TreeElementNode:
-    name: str
-    control_type: str
-    app_name: str
-    value:str
-    shortcut: str
     bounding_box: BoundingBox
     center: Center
-    xpath:str
-    is_focused:bool
+    name: str=''
+    runtime_id:tuple[int, ...]=()
+    cursor_type:str=''
+    control_type: str=''
+    app_name: str=''
+    value:str=''
+    shortcut: str=''
+    xpath:str=''
+    is_focused:bool=False
 
+    def update_from_node(self,node:'TreeElementNode'):
+        self.name=node.name
+        self.runtime_id=node.runtime_id
+        self.cursor_type=node.cursor_type
+        self.control_type=node.control_type
+        self.app_name=node.app_name
+        self.value=node.value
+        self.shortcut=node.shortcut
+        self.bounding_box=node.bounding_box
+        self.center=node.center
+        self.xpath=node.xpath
+        self.is_focused=node.is_focused
+
+    # Legacy method kept for compatibility if needed, but not used in new format
     def to_row(self, index: int):
         return [index, self.app_name, self.control_type, self.name, self.value, self.shortcut, self.center.to_string(),self.is_focused]
 
 @dataclass
 class ScrollElementNode:
     name: str
+    runtime_id:tuple[int, ...]
     control_type: str
     xpath:str
     app_name: str
@@ -95,6 +125,7 @@ class ScrollElementNode:
     vertical_scroll_percent: float
     is_focused: bool
 
+    # Legacy method kept for compatibility
     def to_row(self, index: int, base_index: int):
         return [
             base_index + index,
@@ -113,4 +144,4 @@ class ScrollElementNode:
 class TextElementNode:
     text:str
 
-ElementNode=TreeElementNode|ScrollElementNode
+ElementNode=TreeElementNode|ScrollElementNode|TextElementNode

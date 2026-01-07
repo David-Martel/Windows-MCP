@@ -355,6 +355,8 @@ To disable telemetry, add the following to your MCP client configuration:
 }
 ```
 
+For detailed information on what data is collected and how it is handled, please refer to the [Telemetry and Data Privacy](SECURITY.md#telemetry-and-data-privacy) section in our Security Policy.
+
 ## 📝 Limitations
 
 - Selecting specific sections of the text in a paragraph, as the MCP is relying on a11y tree. (⌛ Working on it.)

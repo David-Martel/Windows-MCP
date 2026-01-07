@@ -1,5 +1,5 @@
 from windows_mcp.analytics import PostHogAnalytics, with_analytics
-from live_inspect.watch_cursor import WatchCursor
+from windows_mcp.watchdog.service import WatchDog
 from windows_mcp.desktop.service import Desktop
 from contextlib import asynccontextmanager
 from fastmcp.utilities.types import Image
@@ -20,11 +20,12 @@ pg.FAILSAFE=False
 pg.PAUSE=1.0
 
 desktop=Desktop()
+watchdog=WatchDog()
 cursor=SystemCursor()
-watch_cursor=WatchCursor()
 windows_version=desktop.get_windows_version()
 default_language=desktop.get_default_language()
 screen_width,screen_height=desktop.get_resolution()
+watchdog.set_focus_callback(desktop.tree._on_focus_change)
 
 instructions=dedent(f'''
 Windows MCP server provides tools to interact directly with the {windows_version} desktop, 
@@ -41,11 +42,11 @@ else:
 async def lifespan(app: FastMCP):
     """Runs initialization code before the server starts and cleanup code after it shuts down."""
     try:
-        watch_cursor.start()
+        watchdog.start()
         await asyncio.sleep(1) # Simulate startup latency
         yield
     finally:
-        watch_cursor.stop()
+        watchdog.stop()
         if analytics:
             await analytics.close()
 

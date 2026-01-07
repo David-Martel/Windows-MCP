@@ -1,5 +1,6 @@
 from windows_mcp.desktop.config import BROWSER_NAMES, PROCESS_PER_MONITOR_DPI_AWARE
-from windows_mcp.desktop.views import DesktopState, App, Size, Status
+from windows_mcp.desktop.views import DesktopState, App, Status, Size
+from windows_mcp.tree.views import BoundingBox
 from windows_mcp.tree.service import Tree
 from locale import getpreferredencoding
 from contextlib import contextmanager
@@ -34,7 +35,7 @@ try:
 except Exception:  
     ctypes.windll.user32.SetProcessDPIAware()  
 
-import uiautomation as uia
+import windows_mcp.uia as uia
 import pyautogui as pg
 
 pg.FAILSAFE=False
@@ -45,7 +46,7 @@ class Desktop:
         self.encoding=getpreferredencoding()
         self.tree=Tree(self)
         self.desktop_state=None
-        
+
     def get_resolution(self)->tuple[int,int]:
         return pg.size()
         
@@ -53,13 +54,13 @@ class Desktop:
         sleep(0.1)
         apps=self.get_apps()
         active_app=self.get_active_app()
-        if active_app is not None and active_app in apps:
+        if active_app is not None and (active_app in apps):
             apps.remove(active_app)
         logger.debug(f"Active app: {active_app}")
         logger.debug(f"Apps: {apps}")
         tree_state=self.tree.get_state(active_app,apps,use_dom=use_dom)
         if use_vision:
-            screenshot=self.tree.get_annotated_screenshot(tree_state.interactive_nodes,scale=scale)
+            screenshot=self.tree.annotated_screenshot(tree_state.interactive_nodes,scale=scale)
             if as_bytes:
                 bytes_io=io.BytesIO()
                 screenshot.save(bytes_io,format='PNG')
@@ -70,9 +71,12 @@ class Desktop:
         return self.desktop_state
     
     def get_window_element_from_element(self,element:uia.Control)->uia.Control|None:
+        '''Give any element of the app and it will return the top level window element.'''
         while element is not None:
+            # Check if handle is top-level AND the element is structurally a Window or Pane
             if uia.IsTopLevelWindow(element.NativeWindowHandle):
-                return element
+                if element.ControlTypeName in ['WindowControl', 'PaneControl']:
+                    return element
             element = element.GetParentControl()
         return None
     
@@ -129,6 +133,7 @@ class Desktop:
             return ('Command execution failed', 1)
         
     def is_app_browser(self,node:uia.Control):
+        '''Give any node of the app and it will return True if the app is a browser, False otherwise.'''
         process=Process(node.ProcessId)
         return process.name() in BROWSER_NAMES
     
@@ -172,7 +177,7 @@ class Desktop:
                 sleep(1.25)
                 if status!=0:
                     return response
-                consecutive_waits=10
+                consecutive_waits=3
                 for _ in range(consecutive_waits):
                     if not self.is_app_running(name):
                         sleep(1.25)
@@ -200,12 +205,11 @@ class Desktop:
         app_name,_=matched_app
         appid=apps_map.get(app_name)
         if appid is None:
-            return (f'{name.title()} not found in start menu.',1)
-        if appid.endswith('.exe'):
-            command=f"Start-Process '{appid}'"
+            return (name,f'{name.title()} not found in start menu.',1)
+        if name.endswith('.exe'):
+            response,status=self.execute_command(f'Start-Process {appid}')
         else:
-            command=f"Start-Process shell:AppsFolder\\{appid}"
-        response,status=self.execute_command(command)
+            response,status=self.execute_command(f'Start-Process shell:AppsFolder\\{appid}')
         return response,status
     
     def switch_app(self,name:str):
@@ -340,15 +344,21 @@ class Desktop:
         content=markdownify(html=html)
         return content
     
-    def get_app_size(self,control:uia.Control):
-        window=control.BoundingRectangle
-        if window.isempty():
-            return Size(width=0,height=0)
-        return Size(width=window.width(),height=window.height())
+    def get_app_from_element(self,element:uia.Control)->App|None:
+        if element is None:
+            return None
+        top_window=element.GetTopLevelControl()
+        if top_window is None:
+            return None
+        handle=top_window.NativeWindowHandle
+        for app in self.get_apps():
+            if app.handle==handle:
+                return app
+        return None
     
     def is_app_visible(self,app)->bool:
         is_minimized=self.get_app_status(app)!=Status.MINIMIZED
-        size=self.get_app_size(app)
+        size=app.bounding_box
         area=size.width*size.height
         is_overlay=self.is_overlay_app(app)
         return not is_overlay and is_minimized and area>10
@@ -369,15 +379,27 @@ class Desktop:
                     if (window_pattern is None):
                         continue
                     if window_pattern.CanMinimize and window_pattern.CanMaximize:
+                        bounding_rect=child.BoundingRectangle
+                        if bounding_rect.isempty():
+                            continue
                         status = self.get_app_status(child)
-                        size=self.get_app_size(child)
+                        bounding_box=BoundingBox(
+                            left=bounding_rect.left,
+                            top=bounding_rect.top,
+                            right=bounding_rect.right,
+                            bottom=bounding_rect.bottom,
+                            width=bounding_rect.width(),
+                            height=bounding_rect.height()
+                        )
                         apps.append(App(**{
                             "name":child.Name,
+                            "runtime_id":tuple(child.GetRuntimeId()),
                             "depth":depth,
                             "status":status,
-                            "size":size,
+                            "bounding_box":bounding_box,
                             "handle":child.NativeWindowHandle,
-                            "process_id":child.ProcessId
+                            "process_id":child.ProcessId,
+                            "is_browser":self.is_app_browser(child)
                         }))
         except Exception as ex:
             logger.error(f"Error in get_apps: {ex}")

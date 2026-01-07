@@ -10,8 +10,12 @@ import logging
 import time
 import os
 
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter('[%(levelname)s] %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 T = TypeVar("T")
 
@@ -43,7 +47,7 @@ class PostHogAnalytics:
             host=self.HOST, 
             disable_geoip=False, 
             enable_exception_autocapture=True,
-            debug=True
+            debug=False
         )
         self._user_id = None
         self.mcp_interaction_id = f"mcp_{int(time.time()*1000)}_{os.getpid()}"

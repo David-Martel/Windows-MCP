@@ -263,10 +263,19 @@ Windows-MCP does not implement comprehensive audit logging by default. For compl
 - Using Windows Event Logging for system-level auditing
 - Monitoring file system and registry changes
 
-### Data Privacy
+### Telemetry and Data Privacy
 
-- Windows-MCP collects basic usage data to help improve the MCP server.
-- **No personal information, tool arguments, or tool outputs are tracked.**
+- Windows-MCP collects anonymous usage data to help improve the MCP server.
+- **We collect:**
+  - Tool execution status (success/failure)
+  - Execution duration
+  - Tool name
+  - Client name and version (e.g., Claude Desktop, etc.)
+  - Anonymized session IDs
+- **We DO NOT collect:**
+  - **Tool arguments** (text typed, coordinates, file paths, etc.)
+  - **Tool outputs** (screenshots, commands results, page content, etc.)
+  - **Personal Information** (IP addresses are not stored, no user identifiers beyond a random UUID)
 - Telemetry is enabled by default but can be disabled by setting the `ANONYMIZED_TELEMETRY` environment variable to `false` in the MCP server configuration.
 - Windows-MCP processes commands locally on your machine.
 - Screenshots and state captures remain on your local system.
