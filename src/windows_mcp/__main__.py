@@ -304,11 +304,13 @@ def scrape_tool(url:str,use_dom:bool=False, ctx: Context = None)->str:
     show_default=True
 )
 def main(transport, host, port):
-
-    if transport=='stdio':
-        mcp.run()
-    else:
-        mcp.run(transport=transport,host=host,port=port)
+    match transport:
+        case 'stdio':
+            mcp.run(transport=transport,show_banner=False)
+        case 'sse'|'streamable-http':
+            mcp.run(transport=transport,host=host,port=port,show_banner=False)
+        case _:
+            raise ValueError(f"Invalid transport: {transport}")
 
 if __name__ == "__main__":
     main()
