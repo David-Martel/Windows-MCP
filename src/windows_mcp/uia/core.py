@@ -62,6 +62,15 @@ def WheelUp(wheelTimes: int = 1, interval: float = 0.05, waitTime: float = OPERA
 def GetScreenSize() -> Tuple[int, int]:
     return ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
 
+def GetVirtualScreenRect() -> Tuple[int, int, int, int]:
+    """Returns (left, top, width, height) of the virtual screen."""
+    return (
+        ctypes.windll.user32.GetSystemMetrics(76), # SM_XVIRTUALSCREEN
+        ctypes.windll.user32.GetSystemMetrics(77), # SM_YVIRTUALSCREEN
+        ctypes.windll.user32.GetSystemMetrics(78), # SM_CXVIRTUALSCREEN
+        ctypes.windll.user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
+    )
+
 def IsTopLevelWindow(handle: int) -> bool:
     return ctypes.windll.user32.GetParent(handle) == 0
 

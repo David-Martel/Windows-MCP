@@ -57,6 +57,10 @@ class BoundingBox:
         x1,y1=self.left,self.top
         x2,y2=self.left+self.width,self.top+self.height
         return x1,y1,x2,y2
+    
+    @classmethod
+    def from_bounding_rectangle(cls, rect):
+        return cls(left=rect.left, top=rect.top, right=rect.right, bottom=rect.bottom, width=rect.right-rect.left, height=rect.bottom-rect.top)
 
 @dataclass
 class Center:

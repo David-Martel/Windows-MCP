@@ -2,5 +2,6 @@
 __pycache__
 build
 dist
-notebook.ipynb
+*.ipynb
 .github
+assets

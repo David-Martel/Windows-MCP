@@ -8,7 +8,7 @@ from markdownify import markdownify
 from fuzzywuzzy import process
 from psutil import Process
 from time import sleep
-from PIL import Image
+from PIL import Image, ImageGrab
 import win32process
 import subprocess
 import win32gui
@@ -47,7 +47,8 @@ class Desktop:
         self.desktop_state=None
         
     def get_resolution(self)->tuple[int,int]:
-        return pg.size()
+        left,top,width,height=self.get_virtual_screen_rect()
+        return width,height
         
     def get_state(self,use_vision:bool=False,use_dom:bool=False,as_bytes:bool=False,scale:float=1.0)->DesktopState:
         sleep(0.1)
@@ -454,8 +455,15 @@ class Desktop:
         width, height = uia.GetScreenSize()
         return Size(width=width,height=height)
 
+    def get_virtual_screen_rect(self)->tuple[int,int,int,int]:
+        return uia.GetVirtualScreenRect()
+
     def get_screenshot(self)->Image.Image:
-        return pg.screenshot()
+        try:
+            return ImageGrab.grab(all_screens=True)
+        except Exception as e:
+            logger.warning(f"Failed to capture all screens: {e}. Fallback to primary.")
+            return pg.screenshot()
     
     @contextmanager
     def auto_minimize(self):
