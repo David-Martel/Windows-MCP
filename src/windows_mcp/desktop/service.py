@@ -125,13 +125,13 @@ class Desktop:
             logger.error(f"Error parsing start menu apps: {e}")
             return {}
     
-    def execute_command(self, command: str) -> tuple[str, int]:
+    def execute_command(self, command: str,timeout:int=10) -> tuple[str, int]:
         try:
             encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
             result = subprocess.run(
                 ['powershell', '-NoProfile', '-EncodedCommand', encoded], 
                 capture_output=True,  # No errors='ignore' - let subprocess return bytes
-                timeout=25,
+                timeout=timeout,
                 cwd=os.path.expanduser(path='~')
             )
             # Handle both bytes and str output (subprocess behavior varies by environment)
@@ -265,37 +265,46 @@ class Desktop:
             content=f'Switched to {app_name.title()} window.'
         return content,0
     
-    def bring_window_to_top(self,target_handle:int):
-        foreground_handle=win32gui.GetForegroundWindow()
-        foreground_thread,_=win32process.GetWindowThreadProcessId(foreground_handle)
-        target_thread,_=win32process.GetWindowThreadProcessId(target_handle)
-        
-        # Validate thread IDs before attempting to attach
-        if not foreground_thread or not target_thread or foreground_thread == target_thread:
-            # If threads are invalid or the same, just try to set foreground directly
-            try:
+    def bring_window_to_top(self, target_handle: int):
+        if not win32gui.IsWindow(target_handle):
+            raise ValueError("Invalid window handle")
+
+        try:
+            if win32gui.IsIconic(target_handle):
+                win32gui.ShowWindow(target_handle, win32con.SW_RESTORE)
+
+            foreground_handle = win32gui.GetForegroundWindow()
+            foreground_thread, _ = win32process.GetWindowThreadProcessId(foreground_handle)
+            target_thread, _ = win32process.GetWindowThreadProcessId(target_handle)
+
+            if not foreground_thread or not target_thread or foreground_thread == target_thread:
                 win32gui.SetForegroundWindow(target_handle)
                 win32gui.BringWindowToTop(target_handle)
-            except Exception as e:
-                logger.error(f'Failed to bring window to top (direct): {e}')
-            return
-        
-        attached = False
-        try:
+                return
+
             ctypes.windll.user32.AllowSetForegroundWindow(-1)
-            win32process.AttachThreadInput(foreground_thread,target_thread,True)
-            attached = True
-            win32gui.SetForegroundWindow(target_handle)
-            win32gui.BringWindowToTop(target_handle)
+
+            attached = False
+            try:
+                win32process.AttachThreadInput(foreground_thread, target_thread, True)
+                attached = True
+
+                win32gui.SetForegroundWindow(target_handle)
+                win32gui.BringWindowToTop(target_handle)
+
+                win32gui.SetWindowPos(
+                    target_handle,
+                    win32con.HWND_TOP,
+                    0, 0, 0, 0,
+                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW
+                )
+
+            finally:
+                if attached:
+                    win32process.AttachThreadInput(foreground_thread, target_thread, False)
+
         except Exception as e:
-            logger.error(f'Failed to bring window to top: {e}')
-        finally:
-            # Only detach if we successfully attached
-            if attached:
-                try:
-                    win32process.AttachThreadInput(foreground_thread,target_thread,False)
-                except Exception as e:
-                    logger.error(f'Failed to detach thread input: {e}')
+            logger.exception(f"Failed to bring window to top: {e}")
     
     def get_element_handle_from_label(self,label:int)->uia.Control:
         tree_state=self.desktop_state.tree_state

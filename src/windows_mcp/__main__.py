@@ -81,8 +81,8 @@ def app_tool(mode:Literal['launch','resize','switch'],name:str|None=None,window_
     )
     )
 @with_analytics(analytics, "Powershell-Tool")
-def powershell_tool(command: str, ctx: Context = None) -> str:
-    response,status_code=desktop.execute_command(command)
+def powershell_tool(command: str,timeout:int=10, ctx: Context = None) -> str:
+    response,status_code=desktop.execute_command(command,timeout)
     return f'Response: {response}\nStatus Code: {status_code}'
 
 @mcp.tool(
