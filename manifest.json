@@ -43,48 +43,44 @@
   },
   "tools": [
     {
-      "name": "App Tool",
-      "description": "Manages Windows applications through launch, resize, and window switching operations."
+      "name": "App",
+      "description": "Manages Windows applications with three modes: 'launch' (start app by name), 'resize' (set window position/size using window_loc=[x,y] and window_size=[width,height]), 'switch' (activate app by name). Essential for application lifecycle management."
     },
     {
-      "name": "Powershell Tool",
-      "description": "Execute PowerShell commands and return the output with status code"
+      "name": "Shell",
+      "description": "A comprehensive system tool for executing any PowerShell commands. Use it to navigate the file system, manage files and processes, and execute system-level operations. Capable of accessing web content, interacting with network resources, and performing complex administrative tasks."
     },
     {
-      "name": "State Tool",
-      "description": "Capture comprehensive desktop state including focused/opened applications, interactive UI elements (buttons, text fields, menus), informative content (text, labels, status), and scrollable areas. Optionally includes visual screenshot when use_vision=True. Essential for understanding current desktop context and available UI interactions."
+      "name": "Snapshot",
+      "description": "Captures complete desktop state including: system language, focused/opened apps, interactive elements (buttons, text fields, links, menus with coordinates), and scrollable areas. Set use_vision=True to include screenshot. Set use_dom=True for browser content to get web page elements instead of browser UI. Always call this first to understand the current desktop state before taking actions."
     },
     {
-      "name": "Click Tool",
-      "description": "Click on UI elements at specific coordinates. Supports left/right/middle mouse buttons and single/double/triple clicks. Use coordinates from State Tool output."
+      "name": "Click",
+      "description": "Performs mouse clicks at specified coordinates [x, y]. Supports button types: left (default), right (context menu), middle. Supports clicks: 1 (single), 2 (double), 3 (triple). Always use coordinates from State-Tool output to ensure accuracy."
     },
     {
-      "name": "Type Tool",
-      "description": "Type text into input fields, text areas, or focused elements. Set clear=True to replace existing text, False to append. Click on target element coordinates first."
+      "name": "Type",
+      "description": "Types text at specified coordinates [x, y]. Set clear=True to clear existing text first (Ctrl+A then type), clear=False to append. Set press_enter=True to submit after typing. Always click on the target input field first to ensure focus."
     },
     {
-      "name": "Scroll Tool",
-      "description": "Scroll at specific coordinates or current mouse position. Use wheel_times to control scroll amount (1 wheel = ~3-5 lines). Essential for navigating lists, web pages, and long content."
+      "name": "Scroll",
+      "description": "Scrolls at coordinates [x, y] or current mouse position if loc=None. Type: vertical (default) or horizontal. Direction: up/down for vertical, left/right for horizontal. wheel_times controls amount (1 wheel ≈ 3-5 lines). Use for navigating long content, lists, and web pages."
     },
     {
-      "name": "Drag Tool",
-      "description": "Drag and drop operation from source coordinates to destination coordinates. Useful for moving files, resizing windows, or drag-and-drop interactions."
+      "name": "Move",
+      "description": "Moves mouse cursor to coordinates [x, y]. Set drag=True to perform a drag-and-drop operation from the current mouse position to the target coordinates. Default (drag=False) is a simple cursor move (hover)."
     },
     {
-      "name": "Move Tool",
-      "description": "Move mouse cursor to specific coordinates without clicking. Useful for hovering over elements or positioning cursor before other actions."
+      "name": "Shortcut",
+      "description": "Executes keyboard shortcuts using key combinations separated by +. Examples: \"ctrl+c\" (copy), \"ctrl+v\" (paste), \"alt+tab\" (switch apps), \"win+r\" (Run dialog), \"win\" (Start menu), \"ctrl+shift+esc\" (Task Manager). Use for quick actions and system commands."
     },
     {
-      "name": "Shortcut Tool",
-      "description": "Execute keyboard shortcuts using key combinations. Pass keys as list (e.g., 'ctrl'+'c' for copy, 'alt'+'tab' for app switching, 'win'+'r' for Run dialog, 'win' is for opening the start menu)."
+      "name": "Wait",
+      "description": "Pauses execution for specified duration in seconds. Use when waiting for: applications to launch/load, UI animations to complete, page content to render, dialogs to appear, or between rapid actions. Helps ensure UI is ready before next interaction."
     },
     {
-      "name": "Wait Tool",
-      "description": "Pause execution for specified duration in seconds. Useful for waiting for applications to load, animations to complete, or adding delays between actions."
-    },
-    {
-      "name": "Scrape Tool",
-      "description": "Fetch content from a URL or the active browser tab. By default (use_dom=False), performs a lightweight HTTP request to the URL and returns markdown content of complete webpage. Note: Some websites may block automated HTTP requests. If this fails, open the page in a browser and retry with use_dom=True to extract visible text from the active tab's DOM within the viewport."
+      "name": "Scrape",
+      "description": "Fetch content from a URL or the active browser tab. By default (use_dom=False), performs a lightweight HTTP request to the URL and returns markdown content of complete webpage. Note: Some websites may block automated HTTP requests. If this fails, open the page in a browser and retry with use_dom=True to extract visible text from the active tab's DOM within the viewport using the accessibility tree data."
     }
   ],
   "compatibility": {

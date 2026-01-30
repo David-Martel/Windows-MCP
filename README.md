@@ -26,7 +26,7 @@
 mcp-name: io.github.CursorTouch/Windows-MCP
 
 ## Updates
-- Windows-MCP reached 1M+ Users in [Claude Desktop Extensiosn](https://claude.ai/directory). 
+- Windows-MCP reached `1M+ Users` in [Claude Desktop Extensiosn](https://claude.ai/directory). 
 - Windows-MCP is now available on [PyPI](https://pypi.org/project/windows-mcp/) (thus supports `uvx windows-mcp`)
 - Windows-MCP is added to [MCP Registry](https://github.com/modelcontextprotocol/registry)
 - Try out 🪟[Windows-Use](https://github.com/CursorTouch/Windows-Use)!!, an agent built using Windows-MCP.
@@ -300,8 +300,7 @@ MCP Client can access the following tools to interact with Windows:
 - `Click`: Click on the screen at the given coordinates.
 - `Type`: Type text on an element (optionally clears existing text).
 - `Scroll`: Scroll vertically or horizontally on the window or specific regions.
-- `Drag`: Drag from one point to another.
-- `Move`: Move mouse pointer.
+- `Move`: Move mouse pointer or drag (set drag=True) to coordinates.
 - `Shortcut`: Press keyboard shortcuts (`Ctrl+c`, `Alt+Tab`, etc).
 - `Wait`: Pause for a defined duration.
 - `Snapshot`: Combined snapshot of default language, browser, active apps and interactive, textual and scrollable elements along with screenshot of the desktop. Supports `use_dom=True` for browser content extraction (web page elements only) and `use_vision=True` for including screenshots.
