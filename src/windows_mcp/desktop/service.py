@@ -147,7 +147,7 @@ class Desktop:
                 capture_output=True,  # No errors='ignore' - let subprocess return bytes
                 timeout=timeout,
                 cwd=os.path.expanduser(path='~'),
-                env=os.environ.copy()  # Inherit PATH
+                env=os.environ.copy()  # Inherit environment variables including PATH
             )
             # Handle both bytes and str output (subprocess behavior varies by environment)
             stdout = result.stdout
