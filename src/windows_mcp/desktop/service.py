@@ -47,7 +47,6 @@ class Desktop:
         self.desktop_state=None
         
     def get_state(self,use_annotation:bool=True,use_vision:bool=False,use_dom:bool=False,as_bytes:bool=False,scale:float=1.0)->DesktopState:
-        sleep(0.1)
         start_time = time()
 
         controls_handles=self.get_controls_handles() # Taskbar,Program Manager,Apps, Dialogs
@@ -132,8 +131,8 @@ class Desktop:
         try:
             reader = csv.DictReader(io.StringIO(apps_info.strip()))
             return {
-                row.get('Name').lower(): row.get('AppID') 
-                for row in reader 
+                row.get('Name', '').lower(): row.get('AppID', '')
+                for row in reader
                 if row.get('Name') and row.get('AppID')
             }
         except Exception as e:
@@ -144,10 +143,11 @@ class Desktop:
         try:
             encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
             result = subprocess.run(
-                ['powershell', '-NoProfile', '-EncodedCommand', encoded], 
+                ['powershell', '-NoProfile', '-OutputFormat', 'Text', '-EncodedCommand', encoded], 
                 capture_output=True,  # No errors='ignore' - let subprocess return bytes
                 timeout=timeout,
-                cwd=os.path.expanduser(path='~')
+                cwd=os.path.expanduser(path='~'),
+                env=os.environ.copy()  # Inherit PATH
             )
             # Handle both bytes and str output (subprocess behavior varies by environment)
             stdout = result.stdout
@@ -247,17 +247,21 @@ class Desktop:
         app_name,_=matched_app
         appid=apps_map.get(app_name)
         if appid is None:
-            return (name,f'{name.title()} not found in start menu.',1,0)
+            return (f'{name.title()} not found in start menu.',1,0)
         
         pid = 0
         if os.path.exists(appid) or "\\" in appid:
             # It's a file path, we can try to get the PID using PassThru
-            command = f'Start-Process "{appid}" -PassThru | Select-Object -ExpandProperty Id'
+            # Escape any single quotes and wrap in single quotes for PowerShell safety
+            safe_appid = appid.replace("'", "''")
+            command = f"Start-Process '{safe_appid}' -PassThru | Select-Object -ExpandProperty Id"
             response, status = self.execute_command(command)
             if status == 0 and response.strip().isdigit():
                 pid = int(response.strip())
         else:
-            # It's an AUMID (Store App)
+            # It's an AUMID (Store App) - validate it only contains expected characters
+            if not appid.replace('\\', '').replace('_', '').replace('.', '').replace('-', '').isalnum():
+                return (f'Invalid app identifier: {appid}', 1, 0)
             command = f'Start-Process "shell:AppsFolder\\{appid}"'
             response, status = self.execute_command(command)
             
@@ -289,6 +293,14 @@ class Desktop:
                 win32gui.ShowWindow(target_handle, win32con.SW_RESTORE)
 
             foreground_handle = win32gui.GetForegroundWindow()
+
+            # Validate both handles before proceeding
+            if not win32gui.IsWindow(foreground_handle):
+                # No valid foreground window, just try to set target as foreground
+                win32gui.SetForegroundWindow(target_handle)
+                win32gui.BringWindowToTop(target_handle)
+                return
+
             foreground_thread, _ = win32process.GetWindowThreadProcessId(foreground_handle)
             target_thread, _ = win32process.GetWindowThreadProcessId(target_handle)
 
@@ -451,8 +463,13 @@ class Desktop:
         handles = set()
         # For even more faster results (still under development)
         def callback(hwnd, _):
-            if win32gui.IsWindowVisible(hwnd) and is_window_on_current_desktop(hwnd):
-                handles.add(hwnd)
+            try:
+                # Validate handle before checking properties
+                if win32gui.IsWindow(hwnd) and win32gui.IsWindowVisible(hwnd) and is_window_on_current_desktop(hwnd):
+                    handles.add(hwnd)
+            except Exception:
+                # Skip invalid handles without logging (common during window enumeration)
+                pass
 
         win32gui.EnumWindows(callback, None)
 
@@ -614,9 +631,13 @@ class Desktop:
         return "Local Account" if response.strip()=='Local' else "Microsoft Account" if status==0 else "Local Account"
     
     def get_dpi_scaling(self):
-        user32 = ctypes.windll.user32
-        dpi = user32.GetDpiForSystem()
-        return dpi / 96.0
+        try:
+            user32 = ctypes.windll.user32
+            dpi = user32.GetDpiForSystem()
+            return dpi / 96.0 if dpi > 0 else 1.0
+        except Exception:
+            # Fallback to standard DPI if system call fails
+            return 1.0
     
     def get_screen_size(self)->Size:
         width, height = uia.GetVirtualScreenSize()
@@ -631,7 +652,6 @@ class Desktop:
 
     def get_annotated_screenshot(self, nodes: list[TreeElementNode]) -> Image.Image:
         screenshot = self.get_screenshot()
-        sleep(0.10)
         # Add padding
         padding = 5
         width = int(screenshot.width + (1.5 * padding))
