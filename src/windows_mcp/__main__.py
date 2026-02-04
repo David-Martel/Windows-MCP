@@ -162,7 +162,7 @@ def click_tool(loc:list[int],button:Literal['left','right','middle']='left',clic
     )
     )
 @with_analytics(analytics, "Type-Tool")
-def type_tool(loc:list[int],text:str,clear:bool=False,caret_position:Literal['start', 'idle', 'end']='idle',press_enter:bool=False, ctx: Context = None)->str:
+def type_tool(loc:list[int],text:str,clear:bool|str=False,caret_position:Literal['start', 'idle', 'end']='idle',press_enter:bool|str=False, ctx: Context = None)->str:
     if len(loc) != 2:
         raise ValueError("Location must be a list of exactly 2 integers [x, y]")
     x,y=loc[0],loc[1]

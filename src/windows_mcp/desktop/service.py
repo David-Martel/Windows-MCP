@@ -349,7 +349,7 @@ class Desktop:
         x,y=loc
         pg.click(x,y,button=button,clicks=clicks,duration=0.1)
 
-    def type(self,loc:tuple[int,int],text:str,caret_position:Literal['start', 'idle', 'end']='idle',clear:bool=False,press_enter:bool=False):
+    def type(self,loc:tuple[int,int],text:str,caret_position:Literal['start', 'idle', 'end']='idle',clear:bool|str=False,press_enter:bool|str=False):
         x,y=loc
         pg.leftClick(x,y)
         if caret_position == 'start':
@@ -358,12 +358,16 @@ class Desktop:
             pg.press('end')
         else:
             pass
-        if clear: # Handles both bool True and string 'true' if we want to be safe, but bool is better
+        
+        # Handle both boolean and string 'true'/'false'
+        if clear is True or (isinstance(clear, str) and clear.lower() == 'true'):
             pg.sleep(0.5)
             pg.hotkey('ctrl','a')
             pg.press('backspace')
+            
         pg.typewrite(text,interval=0.02)
-        if press_enter:
+        
+        if press_enter is True or (isinstance(press_enter, str) and press_enter.lower() == 'true'):
             pg.press('enter')
 
     def scroll(self,loc:tuple[int,int]=None,type:Literal['horizontal','vertical']='vertical',direction:Literal['up','down','left','right']='down',wheel_times:int=1)->str|None:
