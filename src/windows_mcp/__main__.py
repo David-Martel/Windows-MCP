@@ -81,9 +81,12 @@ def app_tool(mode:Literal['launch','resize','switch'],name:str|None=None,window_
     )
     )
 @with_analytics(analytics, "Powershell-Tool")
-def powershell_tool(command: str,timeout:int=10, ctx: Context = None) -> str:
-    response,status_code=desktop.execute_command(command,timeout)
-    return f'Response: {response}\nStatus Code: {status_code}'
+def powershell_tool(command: str,timeout:int=30, ctx: Context = None) -> str:
+    try:
+        response,status_code=desktop.execute_command(command,timeout)
+        return f'Response: {response}\nStatus Code: {status_code}'
+    except Exception as e:
+        return f'Error executing command: {str(e)}\nStatus Code: 1'
 
 @mcp.tool(
     name='Snapshot',
@@ -98,21 +101,24 @@ def powershell_tool(command: str,timeout:int=10, ctx: Context = None) -> str:
     )
 @with_analytics(analytics, "State-Tool")
 def state_tool(use_vision:bool|str=False,use_dom:bool|str=False, ctx: Context = None):
-    use_vision = use_vision is True or (isinstance(use_vision, str) and use_vision.lower() == 'true')
-    use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == 'true')
-    
-    # Calculate scale factor to cap resolution at 1080p (1920x1080)
-    scale_width = MAX_IMAGE_WIDTH / screen_size.width if screen_size.width > MAX_IMAGE_WIDTH else 1.0
-    scale_height = MAX_IMAGE_HEIGHT / screen_size.height if screen_size.height > MAX_IMAGE_HEIGHT else 1.0
-    scale = min(scale_width, scale_height)  # Use the smaller scale to ensure both dimensions fit
-    
-    desktop_state=desktop.get_state(use_vision=use_vision,use_dom=use_dom,as_bytes=True,scale=scale)
-    interactive_elements=desktop_state.tree_state.interactive_elements_to_string()
-    scrollable_elements=desktop_state.tree_state.scrollable_elements_to_string()
-    windows=desktop_state.windows_to_string()
-    active_window=desktop_state.active_window_to_string()
-    active_desktop=desktop_state.active_desktop_to_string()
-    all_desktops=desktop_state.desktops_to_string()
+    try:
+        use_vision = use_vision is True or (isinstance(use_vision, str) and use_vision.lower() == 'true')
+        use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == 'true')
+        
+        # Calculate scale factor to cap resolution at 1080p (1920x1080)
+        scale_width = MAX_IMAGE_WIDTH / screen_size.width if screen_size.width > MAX_IMAGE_WIDTH else 1.0
+        scale_height = MAX_IMAGE_HEIGHT / screen_size.height if screen_size.height > MAX_IMAGE_HEIGHT else 1.0
+        scale = min(scale_width, scale_height)  # Use the smaller scale to ensure both dimensions fit
+        
+        desktop_state=desktop.get_state(use_vision=use_vision,use_dom=use_dom,as_bytes=True,scale=scale)
+        interactive_elements=desktop_state.tree_state.interactive_elements_to_string()
+        scrollable_elements=desktop_state.tree_state.scrollable_elements_to_string()
+        windows=desktop_state.windows_to_string()
+        active_window=desktop_state.active_window_to_string()
+        active_desktop=desktop_state.active_desktop_to_string()
+        all_desktops=desktop_state.desktops_to_string()
+    except Exception as e:
+        return [f'Error capturing desktop state: {str(e)}. Please try again.']
     return [dedent(f'''
     Active Desktop:
     {active_desktop}
@@ -311,6 +317,253 @@ def multi_edit_tool(locs:list[list], ctx: Context = None)->str:
     desktop.multi_edit(locs)
     elements_str = ', '.join([f"({e[0]},{e[1]}) with text '{e[2]}'" for e in locs])
     return f"Multi-edited elements at: {elements_str}"
+
+
+
+@mcp.tool(
+    name='MinimizeAll',
+    description='Minimizes all windows and shows the desktop (equivalent to Win+D shortcut).',
+    annotations=ToolAnnotations(
+        title="MinimizeAll",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=False
+    )
+)
+@with_analytics(analytics, "MinimizeAll-Tool")
+def minimize_all_tool(ctx: Context = None) -> str:
+    try:
+        pg.hotkey('win', 'd')
+        return 'Minimized all windows (Win+D).'
+    except Exception as e:
+        return f'Error minimizing windows: {str(e)}'
+
+
+@mcp.tool(
+    name='Clipboard',
+    description='Manages Windows clipboard operations. Use mode="get" to read current clipboard content, mode="set" to set clipboard text.',
+    annotations=ToolAnnotations(
+        title="Clipboard",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    )
+)
+@with_analytics(analytics, "Clipboard-Tool")
+def clipboard_tool(mode: Literal['get', 'set'], text: str | None = None, ctx: Context = None) -> str:
+    try:
+        import win32clipboard
+        if mode == 'get':
+            win32clipboard.OpenClipboard()
+            try:
+                if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_UNICODETEXT):
+                    data = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                    return f'Clipboard content:\n{data}'
+                else:
+                    return 'Clipboard is empty or contains non-text data.'
+            finally:
+                win32clipboard.CloseClipboard()
+        elif mode == 'set':
+            if text is None:
+                return 'Error: text parameter required for set mode.'
+            win32clipboard.OpenClipboard()
+            try:
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
+                return f'Clipboard set to: {text[:100]}{"..." if len(text) > 100 else ""}'
+            finally:
+                win32clipboard.CloseClipboard()
+        else:
+            return 'Error: mode must be either "get" or "set".'
+    except Exception as e:
+        return f'Error managing clipboard: {str(e)}'
+
+@mcp.tool(
+    name='ProcessManager',
+    description='Manages system processes. Use mode="list" to list running processes with filtering and sorting options. Use mode="kill" to terminate processes by PID or name.',
+    annotations=ToolAnnotations(
+        title="ProcessManager",
+        readOnlyHint=False,
+        destructiveHint=True,
+        idempotentHint=False,
+        openWorldHint=False
+    )
+)
+@with_analytics(analytics, "ProcessManager-Tool")
+def process_manager_tool(mode: Literal['list', 'kill'], name: str | None = None, pid: int | None = None, sort_by: Literal['memory', 'cpu', 'name'] = 'memory', limit: int = 20, force: bool | str = False, ctx: Context = None) -> str:
+    try:
+        import psutil
+        if mode == 'list':
+            procs = []
+            for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_info']):
+                try:
+                    info = p.info
+                    mem_mb = info['memory_info'].rss / (1024 * 1024) if info['memory_info'] else 0
+                    procs.append({
+                        'pid': info['pid'],
+                        'name': info['name'] or 'Unknown',
+                        'cpu': info['cpu_percent'] or 0,
+                        'mem_mb': round(mem_mb, 1)
+                    })
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            if name:
+                from thefuzz import fuzz
+                procs = [p for p in procs if fuzz.partial_ratio(name.lower(), p['name'].lower()) > 60]
+            sort_key = {'memory': lambda x: x['mem_mb'], 'cpu': lambda x: x['cpu'], 'name': lambda x: x['name'].lower()}
+            procs.sort(key=sort_key.get(sort_by, sort_key['memory']), reverse=(sort_by != 'name'))
+            procs = procs[:limit]
+            if not procs:
+                return f'No processes found{f" matching {name}" if name else ""}.'
+            from tabulate import tabulate
+            table = tabulate(
+                [[p['pid'], p['name'], f"{p['cpu']:.1f}%", f"{p['mem_mb']:.1f} MB"] for p in procs],
+                headers=['PID', 'Name', 'CPU%', 'Memory'],
+                tablefmt='simple'
+            )
+            return f'Processes ({len(procs)} shown):\n{table}'
+        elif mode == 'kill':
+            force = force is True or (isinstance(force, str) and force.lower() == 'true')
+            if pid is None and name is None:
+                return 'Error: Provide either pid or name parameter for kill mode.'
+            killed = []
+            if pid is not None:
+                try:
+                    p = psutil.Process(pid)
+                    pname = p.name()
+                    if force:
+                        p.kill()
+                    else:
+                        p.terminate()
+                    killed.append(f'{pname} (PID {pid})')
+                except psutil.NoSuchProcess:
+                    return f'No process with PID {pid} found.'
+                except psutil.AccessDenied:
+                    return f'Access denied to kill PID {pid}. Try running as administrator.'
+            else:
+                for p in psutil.process_iter(['pid', 'name']):
+                    try:
+                        if p.info['name'] and p.info['name'].lower() == name.lower():
+                            if force:
+                                p.kill()
+                            else:
+                                p.terminate()
+                            killed.append(f"{p.info['name']} (PID {p.info['pid']})")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+            if not killed:
+                return f'No process matching "{name}" found or access denied.'
+            return f'{"Force killed" if force else "Terminated"}: {", ".join(killed)}'
+        else:
+            return 'Error: mode must be either "list" or "kill".'
+    except Exception as e:
+        return f'Error managing processes: {str(e)}'
+
+@mcp.tool(
+    name='GetSystemInfo',
+    description='Returns system information including CPU usage, memory usage, disk space, network stats, and uptime. Useful for monitoring system health remotely.',
+    annotations=ToolAnnotations(
+        title="GetSystemInfo",
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False
+    )
+)
+@with_analytics(analytics, "GetSystemInfo-Tool")
+def get_system_info_tool(ctx: Context = None) -> str:
+    try:
+        import psutil, platform
+        from datetime import datetime, timedelta
+        cpu_pct = psutil.cpu_percent(interval=1)
+        cpu_count = psutil.cpu_count()
+        mem = psutil.virtual_memory()
+        disk = psutil.disk_usage('C:\\')
+        boot = datetime.fromtimestamp(psutil.boot_time())
+        uptime = datetime.now() - boot
+        uptime_str = str(timedelta(seconds=int(uptime.total_seconds())))
+        net = psutil.net_io_counters()
+        return dedent(f'''System Information:
+  OS: {platform.system()} {platform.release()} ({platform.version()})
+  Machine: {platform.machine()}
+  
+  CPU: {cpu_pct}% ({cpu_count} cores)
+  Memory: {mem.percent}% used ({round(mem.used/1024**3,1)} / {round(mem.total/1024**3,1)} GB)
+  Disk C: {disk.percent}% used ({round(disk.used/1024**3,1)} / {round(disk.total/1024**3,1)} GB)
+  
+  Network: ↑ {round(net.bytes_sent/1024**2,1)} MB sent, ↓ {round(net.bytes_recv/1024**2,1)} MB received
+  Uptime: {uptime_str} (booted {boot.strftime("%Y-%m-%d %H:%M")})''')
+    except Exception as e:
+        return f'Error getting system info: {str(e)}'
+
+@mcp.tool(
+    name='Notification',
+    description='Sends a Windows toast notification with a title and message. Useful for alerting the user remotely.',
+    annotations=ToolAnnotations(
+        title="Notification",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=False
+    )
+)
+@with_analytics(analytics, "Notification-Tool")
+def notification_tool(title: str, message: str, ctx: Context = None) -> str:
+    try:
+        from windows_mcp.desktop.service import Desktop
+        import subprocess
+        # Use PowerShell to send toast notification
+        ps_script = f'''
+        [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+        [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+        $template = @"
+        <toast>
+            <visual>
+                <binding template="ToastGeneric">
+                    <text>{title.replace('"', "'")}</text>
+                    <text>{message.replace('"', "'")}</text>
+                </binding>
+            </visual>
+        </toast>
+"@
+        $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+        $xml.LoadXml($template)
+        $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Windows MCP")
+        $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
+        $notifier.Show($toast)
+        '''
+        result = subprocess.run(
+            ['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            return f'Notification sent: "{title}" - {message}'
+        else:
+            return f'Notification may have been sent. PowerShell output: {result.stderr[:200]}'
+    except Exception as e:
+        return f'Error sending notification: {str(e)}'
+
+@mcp.tool(
+    name='LockScreen',
+    description='Locks the Windows workstation. Requires the user to enter their password to unlock.',
+    annotations=ToolAnnotations(
+        title="LockScreen",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=False
+    )
+)
+@with_analytics(analytics, "LockScreen-Tool")
+def lock_screen_tool(ctx: Context = None) -> str:
+    try:
+        import ctypes
+        ctypes.windll.user32.LockWorkStation()
+        return 'Screen locked.'
+    except Exception as e:
+        return f'Error locking screen: {str(e)}'
 
 
 @click.command()

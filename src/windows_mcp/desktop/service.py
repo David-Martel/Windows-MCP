@@ -273,21 +273,34 @@ class Desktop:
         return response, status, pid
     
     def switch_app(self,name:str):
-        windows={window.name:window for window in [self.desktop_state.active_window]+self.desktop_state.windows if window is not None}
-        matched_window:Optional[tuple[str,float]]=process.extractOne(name,list(windows.keys()),score_cutoff=70)
-        if matched_window is None:
-            return (f'Application {name.title()} not found.',1)
-        window_name,_=matched_window
-        window=windows.get(window_name)
-        target_handle=window.handle
+        try:
+            # Refresh state if desktop_state is None or has no windows
+            if self.desktop_state is None or not self.desktop_state.windows:
+                self.get_state()
+            if self.desktop_state is None:
+                return ('Failed to get desktop state. Please try again.',1)
 
-        if uia.IsIconic(target_handle):
-            uia.ShowWindow(target_handle, win32con.SW_RESTORE)
-            content=f'{window_name.title()} restored from Minimized state.'
-        else:
-            self.bring_window_to_top(target_handle)
-            content=f'Switched to {window_name.title()} window.'
-        return content,0
+            window_list = [w for w in [self.desktop_state.active_window]+self.desktop_state.windows if w is not None]
+            if not window_list:
+                return ('No windows found on the desktop.',1)
+
+            windows={window.name:window for window in window_list}
+            matched_window:Optional[tuple[str,float]]=process.extractOne(name,list(windows.keys()),score_cutoff=70)
+            if matched_window is None:
+                return (f'Application {name.title()} not found.',1)
+            window_name,_=matched_window
+            window=windows.get(window_name)
+            target_handle=window.handle
+
+            if uia.IsIconic(target_handle):
+                uia.ShowWindow(target_handle, win32con.SW_RESTORE)
+                content=f'{window_name.title()} restored from Minimized state.'
+            else:
+                self.bring_window_to_top(target_handle)
+                content=f'Switched to {window_name.title()} window.'
+            return content,0
+        except Exception as e:
+            return (f'Error switching app: {str(e)}',1)
     
     def bring_window_to_top(self, target_handle: int):
         if not win32gui.IsWindow(target_handle):
