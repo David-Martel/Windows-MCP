@@ -11,7 +11,7 @@ from PIL import ImageGrab, ImageFont, ImageDraw, Image
 from windows_mcp.tree.service import Tree
 from locale import getpreferredencoding
 from contextlib import contextmanager
-from typing import Optional, Literal
+from typing import Literal
 from markdownify import markdownify
 from thefuzz import process
 from time import time
@@ -256,9 +256,9 @@ class Desktop:
     def app(
         self,
         mode: Literal["launch", "switch", "resize"],
-        name: Optional[str] = None,
-        loc: Optional[tuple[int, int]] = None,
-        size: Optional[tuple[int, int]] = None,
+        name: str | None = None,
+        loc: tuple[int, int] | None = None,
+        size: tuple[int, int] | None = None,
     ):
         match mode:
             case "launch":
@@ -347,7 +347,7 @@ class Desktop:
                 return ("No windows found on the desktop.", 1)
 
             windows = {window.name: window for window in window_list}
-            matched_window: Optional[tuple[str, float]] = process.extractOne(
+            matched_window: tuple[str, float] | None = process.extractOne(
                 name, list(windows.keys()), score_cutoff=70
             )
             if matched_window is None:

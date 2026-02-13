@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, TypeVar, Callable, Protocol, Awaitable
+from typing import Dict, Any, TypeVar, Callable, Protocol, Awaitable
 from tempfile import TemporaryDirectory
 from uuid_extensions import uuid7str
 from fastmcp import Context
@@ -124,7 +124,7 @@ class PostHogAnalytics:
             logger.debug("Closed analytics")
 
 
-def with_analytics(analytics_instance: Optional[Analytics], tool_name: str):
+def with_analytics(analytics_instance: Analytics | None, tool_name: str):
     """
     Decorator to wrap tool functions with analytics tracking.
     """

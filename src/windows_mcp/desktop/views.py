@@ -1,7 +1,6 @@
 from windows_mcp.tree.views import TreeState, BoundingBox
 from dataclasses import dataclass
 from tabulate import tabulate
-from typing import Optional
 from PIL.Image import Image
 from enum import Enum
 
@@ -59,10 +58,10 @@ class Size:
 class DesktopState:
     active_desktop: dict
     all_desktops: list[dict]
-    active_window: Optional[Window]
+    active_window: Window | None
     windows: list[Window]
-    screenshot: Optional[Image] = None
-    tree_state: Optional[TreeState] = None
+    screenshot: Image | None = None
+    tree_state: TreeState | None = None
 
     def active_desktop_to_string(self):
         desktop_name = self.active_desktop.get("name")

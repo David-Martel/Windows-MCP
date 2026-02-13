@@ -4,7 +4,7 @@ from windows_mcp.watchdog.service import WatchDog
 from contextlib import asynccontextmanager
 from fastmcp.utilities.types import Image
 from mcp.types import ToolAnnotations
-from typing import Literal, Optional
+from typing import Literal
 from fastmcp import FastMCP, Context
 from dotenv import load_dotenv
 from textwrap import dedent
@@ -19,10 +19,10 @@ MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT = 1920, 1080
 pg.FAILSAFE = False
 pg.PAUSE = 1.0
 
-desktop: Optional[Desktop] = None
-watchdog: Optional[WatchDog] = None
-analytics: Optional[PostHogAnalytics] = None
-screen_size: Optional[Size] = None
+desktop: Desktop | None = None
+watchdog: WatchDog | None = None
+analytics: PostHogAnalytics | None = None
+screen_size: Size | None = None
 
 instructions = dedent("""
 Windows MCP server provides tools to interact directly with the Windows desktop, 

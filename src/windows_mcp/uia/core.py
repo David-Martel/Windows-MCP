@@ -24,7 +24,7 @@ import ctypes.wintypes
 import comtypes
 import comtypes.client
 from io import TextIOWrapper
-from typing import Any, Callable, Dict, Generator, List, Tuple, Optional, Union
+from typing import Any, Callable, Dict, Generator, List, Tuple, Union
 
 
 METRO_WINDOW_CLASS_NAME = "Windows.UI.Core.CoreWindow"  # for Windows 8 and 8.1
@@ -104,7 +104,7 @@ ctypes.windll.ntdll.NtQueryInformationProcess.restype = ctypes.c_uint32
 def _GetDictKeyName(
     theDict: Dict[str, Any],
     theValue: Any,
-    keyCondition: Optional[Callable[[str], bool]] = None,
+    keyCondition: Callable[[str], bool] | None = None,
 ) -> str:
     for key, value in theDict.items():
         if keyCondition:
@@ -1010,7 +1010,7 @@ def DwmIsCompositionEnabled() -> bool:
         return False
 
 
-def DwmGetWindowExtendFrameBounds(handle: int) -> Optional[Rect]:
+def DwmGetWindowExtendFrameBounds(handle: int) -> Rect | None:
     """
     Get Native Window Rect without invisible resize borders.
     Return Rect or None. If handle is not top level, return None.
@@ -1033,7 +1033,7 @@ def DwmGetWindowExtendFrameBounds(handle: int) -> Optional[Rect]:
         return None
 
 
-def GetWindowRect(handle: int) -> Optional[Rect]:
+def GetWindowRect(handle: int) -> Rect | None:
     """
     GetWindowRect from user32.
     Return RECT.
@@ -1101,7 +1101,7 @@ def PlayWaveFile(
         )
 
 
-def IsProcess64Bit(processId: int) -> Optional[bool]:
+def IsProcess64Bit(processId: int) -> bool | None:
     """
     Return True if process is 64 bit.
     Return False if process is 32 bit.
@@ -1942,7 +1942,7 @@ class Logger:
         consoleColor: int = ConsoleColor.Default,
         writeToFile: bool = True,
         printToStdout: bool = True,
-        logFile: Optional[str] = None,
+        logFile: str | None = None,
         printTruncateLen: int = 0,
     ) -> None:
         """
@@ -2010,7 +2010,7 @@ class Logger:
         consoleColor: int = ConsoleColor.Default,
         writeToFile: bool = True,
         printToStdout: bool = True,
-        logFile: Optional[str] = None,
+        logFile: str | None = None,
     ) -> None:
         """
         log: any type.
@@ -2029,7 +2029,7 @@ class Logger:
         consoleColor: int = ConsoleColor.Default,
         writeToFile: bool = True,
         printToStdout: bool = True,
-        logFile: Optional[str] = None,
+        logFile: str | None = None,
     ) -> None:
         """
         log: str.
@@ -2073,7 +2073,7 @@ class Logger:
         consoleColor: int = ConsoleColor.Default,
         writeToFile: bool = True,
         printToStdout: bool = True,
-        logFile: Optional[str] = None,
+        logFile: str | None = None,
     ) -> None:
         """
         log: str.
@@ -2094,7 +2094,7 @@ class Logger:
         consoleColor: int = ConsoleColor.Default,
         writeToFile: bool = True,
         printToStdout: bool = True,
-        logFile: Optional[str] = None,
+        logFile: str | None = None,
     ) -> None:
         """
         log: any type.
@@ -2133,7 +2133,7 @@ class Logger:
         consoleColor: int = ConsoleColor.Default,
         writeToFile: bool = True,
         printToStdout: bool = True,
-        logFile: Optional[str] = None,
+        logFile: str | None = None,
     ) -> None:
         """
         log: any type.

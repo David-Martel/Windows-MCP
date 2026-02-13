@@ -27,7 +27,7 @@ from windows_mcp.tree.views import (
 from windows_mcp.tree.cache_utils import CacheRequestFactory, CachedControlHelper
 from windows_mcp.tree.utils import random_point_within_bounding_box
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import TYPE_CHECKING, Optional, Any
+from typing import TYPE_CHECKING, Any
 from time import time
 import logging
 import weakref
@@ -44,7 +44,7 @@ class Tree:
     def __init__(self, desktop: "Desktop"):
         self.desktop = weakref.proxy(desktop)
         self.screen_size = desktop.get_screen_size()
-        self.dom: Optional[Control] = None
+        self.dom: Control | None = None
         self.dom_bounding_box: BoundingBox = None
         self.screen_box = BoundingBox(
             top=0,
@@ -330,14 +330,14 @@ class Tree:
         window_bounding_box: Rect,
         window_name: str,
         is_browser: bool,
-        interactive_nodes: Optional[list[TreeElementNode]] = None,
-        scrollable_nodes: Optional[list[ScrollElementNode]] = None,
-        dom_interactive_nodes: Optional[list[TreeElementNode]] = None,
-        dom_informative_nodes: Optional[list[TextElementNode]] = None,
+        interactive_nodes: list[TreeElementNode] | None = None,
+        scrollable_nodes: list[ScrollElementNode] | None = None,
+        dom_interactive_nodes: list[TreeElementNode] | None = None,
+        dom_informative_nodes: list[TextElementNode] | None = None,
         is_dom: bool = False,
         is_dialog: bool = False,
-        element_cache_req: Optional[Any] = None,
-        children_cache_req: Optional[Any] = None,
+        element_cache_req: Any | None = None,
+        children_cache_req: Any | None = None,
     ):
         try:
             # Build cached control if caching is enabled

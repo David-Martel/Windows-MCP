@@ -6,7 +6,6 @@ to reduce cross-process COM calls during tree traversal.
 """
 
 from windows_mcp.uia import CacheRequest, PropertyId, TreeScope, Control
-from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -65,7 +64,7 @@ class CachedControlHelper:
 
     @staticmethod
     def build_cached_control(
-        node: Control, cache_request: Optional[CacheRequest] = None
+        node: Control, cache_request: CacheRequest | None = None
     ) -> Control:
         """
         Build a cached version of a control.
@@ -90,7 +89,7 @@ class CachedControlHelper:
 
     @staticmethod
     def get_cached_children(
-        node: Control, cache_request: Optional[CacheRequest] = None
+        node: Control, cache_request: CacheRequest | None = None
     ) -> list[Control]:
         """
         Get children with pre-cached properties.

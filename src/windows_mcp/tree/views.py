@@ -1,11 +1,11 @@
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
 class TreeState:
-    root_node: Optional["TreeElementNode"] = None
-    dom_node: Optional["ScrollElementNode"] = None
+    root_node: "TreeElementNode" | None = None
+    dom_node: "ScrollElementNode" | None = None
     interactive_nodes: list["TreeElementNode"] = field(default_factory=list)
     scrollable_nodes: list["ScrollElementNode"] = field(default_factory=list)
     dom_informative_nodes: list["TextElementNode"] = field(default_factory=list)
