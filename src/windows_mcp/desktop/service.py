@@ -730,33 +730,44 @@ class Desktop:
         return padded_screenshot
     
     def send_notification(self, title: str, message: str) -> str:
-        ps_script = f'''
-        [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-        [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-        $template = @"
-        <toast>
-            <visual>
-                <binding template="ToastGeneric">
-                    <text>{title.replace('"', "'")}</text>
-                    <text>{message.replace('"', "'")}</text>
-                </binding>
-            </visual>
-        </toast>
-"@
-        $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
-        $xml.LoadXml($template)
-        $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Windows MCP")
-        $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
-        $notifier.Show($toast)
-        '''
-        result = subprocess.run(
-            ['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
-            capture_output=True, text=True, timeout=10
+        from xml.sax.saxutils import escape as xml_escape
+
+        # Sanitize for XML context (escape <, >, &, ", ')
+        safe_title = xml_escape(title, {'"': '&quot;', "'": '&apos;'})
+        safe_message = xml_escape(message, {'"': '&quot;', "'": '&apos;'})
+
+        # Escape for PowerShell single-quoted strings (only single quotes need doubling)
+        safe_title_ps = safe_title.replace("'", "''")
+        safe_message_ps = safe_message.replace("'", "''")
+
+        # Build script using PS variables assigned via single-quoted strings
+        # (single-quoted strings do NOT expand $() or backtick sequences)
+        ps_script = (
+            "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null\n"
+            "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null\n"
+            f"$notifTitle = '{safe_title_ps}'\n"
+            f"$notifMessage = '{safe_message_ps}'\n"
+            '$template = @"\n'
+            "<toast>\n"
+            "    <visual>\n"
+            '        <binding template="ToastGeneric">\n'
+            "            <text>$notifTitle</text>\n"
+            "            <text>$notifMessage</text>\n"
+            "        </binding>\n"
+            "    </visual>\n"
+            "</toast>\n"
+            '"@\n'
+            "$xml = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
+            "$xml.LoadXml($template)\n"
+            '$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Windows MCP")\n'
+            "$toast = New-Object Windows.UI.Notifications.ToastNotification $xml\n"
+            "$notifier.Show($toast)"
         )
-        if result.returncode == 0:
+        response, status = self.execute_command(ps_script)
+        if status == 0:
             return f'Notification sent: "{title}" - {message}'
         else:
-            return f'Notification may have been sent. PowerShell output: {result.stderr[:200]}'
+            return f'Notification may have been sent. PowerShell output: {response[:200]}'
 
     def list_processes(self, name: str | None = None, sort_by: Literal['memory', 'cpu', 'name'] = 'memory', limit: int = 20) -> str:
         import psutil

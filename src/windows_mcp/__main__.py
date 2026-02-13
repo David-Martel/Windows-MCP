@@ -406,7 +406,7 @@ def system_info_tool(ctx: Context = None) -> str:
     annotations=ToolAnnotations(
         title="Notification",
         readOnlyHint=False,
-        destructiveHint=False,
+        destructiveHint=True,
         idempotentHint=False,
         openWorldHint=False
     )
