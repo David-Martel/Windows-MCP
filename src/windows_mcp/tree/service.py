@@ -74,12 +74,10 @@ class Tree:
         else:
             windows_handles = other_windows_handles
 
-        interactive_nodes, scrollable_nodes, dom_informative_nodes = (
-            self.get_windowwise_nodes(
-                windows_handles=windows_handles,
-                active_window_flag=active_window_flag,
-                use_dom=use_dom,
-            )
+        interactive_nodes, scrollable_nodes, dom_informative_nodes = self.get_windowwise_nodes(
+            windows_handles=windows_handles,
+            active_window_flag=active_window_flag,
+            use_dom=use_dom,
         )
         root_node = TreeElementNode(
             name="Desktop",
@@ -174,9 +172,7 @@ class Tree:
                         )
                         if retry_counts[handle] < THREAD_MAX_RETRIES:
                             # Need to find is_browser again for retry
-                            is_browser = next(
-                                (ib for h, ib in task_inputs if h == handle), False
-                            )
+                            is_browser = next((ib for h, ib in task_inputs if h == handle), False)
                             new_future = executor.submit(
                                 self.get_nodes, handle, is_browser, use_dom
                             )
@@ -205,10 +201,7 @@ class Tree:
         intersection_bottom = min(self.screen_box.bottom, intersection_bottom)
 
         # Step 3: Validate intersection
-        if (
-            intersection_right > intersection_left
-            and intersection_bottom > intersection_top
-        ):
+        if intersection_right > intersection_left and intersection_bottom > intersection_top:
             bounding_box = BoundingBox(
                 left=intersection_left,
                 top=intersection_top,
@@ -219,14 +212,10 @@ class Tree:
             )
         else:
             # No valid visible intersection (either outside window or screen)
-            bounding_box = BoundingBox(
-                left=0, top=0, right=0, bottom=0, width=0, height=0
-            )
+            bounding_box = BoundingBox(left=0, top=0, right=0, bottom=0, width=0, height=0)
         return bounding_box
 
-    def element_has_child_element(
-        self, node: Control, control_type: str, child_control_type: str
-    ):
+    def element_has_child_element(self, node: Control, control_type: str, child_control_type: str):
         if node.LocalizedControlType == control_type:
             first_child = node.GetFirstChildControl()
             if first_child is None:
@@ -276,9 +265,7 @@ class Tree:
                 legacy_pattern = node.GetLegacyIAccessiblePattern()
                 value = legacy_pattern.Value
                 element_bounding_box = node.BoundingRectangle
-                bounding_box = self.iou_bounding_box(
-                    self.dom_bounding_box, element_bounding_box
-                )
+                bounding_box = self.iou_bounding_box(self.dom_bounding_box, element_bounding_box)
                 center = bounding_box.get_center()
                 is_focused = node.HasKeyboardFocus
                 dom_interactive_nodes.append(
@@ -303,9 +290,7 @@ class Tree:
             legacy_pattern = node.GetLegacyIAccessiblePattern()
             value = legacy_pattern.Value
             element_bounding_box = node.BoundingRectangle
-            bounding_box = self.iou_bounding_box(
-                self.dom_bounding_box, element_bounding_box
-            )
+            bounding_box = self.iou_bounding_box(self.dom_bounding_box, element_bounding_box)
             center = bounding_box.get_center()
             is_focused = node.HasKeyboardFocus
             dom_interactive_nodes.append(
@@ -351,19 +336,13 @@ class Tree:
             if scrollable_nodes is not None:
                 if (
                     control_type_name
-                    not in (
-                        INTERACTIVE_CONTROL_TYPE_NAMES | INFORMATIVE_CONTROL_TYPE_NAMES
-                    )
+                    not in (INTERACTIVE_CONTROL_TYPE_NAMES | INFORMATIVE_CONTROL_TYPE_NAMES)
                 ) and not is_offscreen:
                     try:
-                        scroll_pattern: ScrollPattern = node.GetPattern(
-                            PatternId.ScrollPattern
-                        )
+                        scroll_pattern: ScrollPattern = node.GetPattern(PatternId.ScrollPattern)
                         if scroll_pattern and scroll_pattern.VerticallyScrollable:
                             box = node.CachedBoundingRectangle
-                            x, y = random_point_within_bounding_box(
-                                node=node, scale_factor=0.8
-                            )
+                            x, y = random_point_within_bounding_box(node=node, scale_factor=0.8)
                             center = Center(x=x, y=y)
                             name = node.CachedName
                             automation_id = node.CachedAutomationId
@@ -442,8 +421,7 @@ class Tree:
                         is_interactive = False
                         if (
                             is_browser
-                            and control_type_name
-                            in set(["DataItemControl", "ListItemControl"])
+                            and control_type_name in set(["DataItemControl", "ListItemControl"])
                             and not is_keyboard_focusable
                         ):
                             is_interactive = False
@@ -460,9 +438,7 @@ class Tree:
                             try:
                                 legacy_pattern = node.GetLegacyIAccessiblePattern()
                                 is_role_interactive = (
-                                    AccessibleRoleNames.get(
-                                        legacy_pattern.Role, "Default"
-                                    )
+                                    AccessibleRoleNames.get(legacy_pattern.Role, "Default")
                                     in INTERACTIVE_ROLES
                                 )
                             except Exception:
@@ -475,9 +451,7 @@ class Tree:
                                 if localized == "graphic" or not is_keyboard_focusable:
                                     is_image = True
 
-                            if is_role_interactive and (
-                                not is_image or is_keyboard_focusable
-                            ):
+                            if is_role_interactive and (not is_image or is_keyboard_focusable):
                                 is_interactive = True
 
                         elif control_type_name == "GroupControl":
@@ -485,9 +459,7 @@ class Tree:
                                 try:
                                     legacy_pattern = node.GetLegacyIAccessiblePattern()
                                     is_role_interactive = (
-                                        AccessibleRoleNames.get(
-                                            legacy_pattern.Role, "Default"
-                                        )
+                                        AccessibleRoleNames.get(legacy_pattern.Role, "Default")
                                         in INTERACTIVE_ROLES
                                     )
                                 except Exception:
@@ -496,10 +468,7 @@ class Tree:
                                 is_default_action = False
                                 try:
                                     legacy_pattern = node.GetLegacyIAccessiblePattern()
-                                    if (
-                                        legacy_pattern.DefaultAction.title()
-                                        in DEFAULT_ACTIONS
-                                    ):
+                                    if legacy_pattern.DefaultAction.title() in DEFAULT_ACTIONS:
                                         is_default_action = True
                                 except Exception:
                                     pass
@@ -540,9 +509,7 @@ class Tree:
                                     }
                                 )
                                 dom_interactive_nodes.append(tree_node)
-                                self._dom_correction(
-                                    node, dom_interactive_nodes, window_name
-                                )
+                                self._dom_correction(node, dom_interactive_nodes, window_name)
                             else:
                                 bounding_box = self.iou_bounding_box(
                                     window_bounding_box, element_bounding_box

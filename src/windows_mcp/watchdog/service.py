@@ -106,9 +106,7 @@ class WatchDog:
 
                 # --- Structure Monitoring ---
                 # Check if we need to UNREGISTER because configuration changed or disabled
-                config_changed = (
-                    self._structure_element != self._active_structure_element
-                )
+                config_changed = self._structure_element != self._active_structure_element
 
                 should_be_active = self._structure_callback is not None
                 is_active = self._structure_handler is not None
@@ -120,9 +118,7 @@ class WatchDog:
                             if self._active_structure_element
                             else self.uia.GetRootElement()
                         )
-                        self.uia.RemoveStructureChangedEventHandler(
-                            target, self._structure_handler
-                        )
+                        self.uia.RemoveStructureChangedEventHandler(target, self._structure_handler)
                     except Exception as e:
                         logger.debug(f"Failed to remove structure handler: {e}")
                     self._structure_handler = None
@@ -147,9 +143,9 @@ class WatchDog:
                         logger.debug(f"Failed to add structure handler: {e}")
 
                 # --- Property Monitoring ---
-                config_changed = (
-                    self._property_element != self._active_property_element
-                ) or (self._property_ids != self._active_property_ids)
+                config_changed = (self._property_element != self._active_property_element) or (
+                    self._property_ids != self._active_property_ids
+                )
 
                 should_be_active = self._property_callback is not None
                 is_active = self._property_handler is not None
@@ -161,9 +157,7 @@ class WatchDog:
                             if self._active_property_element
                             else self.uia.GetRootElement()
                         )
-                        self.uia.RemovePropertyChangedEventHandler(
-                            target, self._property_handler
-                        )
+                        self.uia.RemovePropertyChangedEventHandler(target, self._property_handler)
                     except Exception as e:
                         logger.debug(f"Failed to remove property handler: {e}")
                     self._property_handler = None
@@ -219,9 +213,7 @@ class WatchDog:
                         if self._active_structure_element
                         else self.uia.GetRootElement()
                     )
-                    self.uia.RemoveStructureChangedEventHandler(
-                        target, self._structure_handler
-                    )
+                    self.uia.RemoveStructureChangedEventHandler(target, self._structure_handler)
                 except Exception:
                     pass
                 self._structure_handler = None
@@ -234,9 +226,7 @@ class WatchDog:
                         if self._active_property_element
                         else self.uia.GetRootElement()
                     )
-                    self.uia.RemovePropertyChangedEventHandler(
-                        target, self._property_handler
-                    )
+                    self.uia.RemovePropertyChangedEventHandler(target, self._property_handler)
                 except Exception:
                     pass
                 self._property_handler = None

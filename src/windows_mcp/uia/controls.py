@@ -40,9 +40,7 @@ S_OK = 0
 IsPy38OrHigher = sys.version_info[:2] >= (3, 8)
 IsNT6orHigher = os.sys.getwindowsversion().major >= 6
 CurrentProcessIs64Bit = sys.maxsize > 0xFFFFFFFF
-ProcessTime = (
-    time.perf_counter
-)  # this returns nearly 0 when first call it if python version <= 3.6
+ProcessTime = time.perf_counter  # this returns nearly 0 when first call it if python version <= 3.6
 ProcessTime()  # need to call it once if python version <= 3.6
 TreeNode = Any
 
@@ -140,13 +138,15 @@ class Control:
         )
 
     def __repr__(self) -> str:
-        return "<{0} ClassName={1!r} AutomationId={2} Rect={3} Name={4!r} Handle=0x{5:X}({5})>".format(
-            self.__class__.__name__,
-            self.ClassName,
-            self.AutomationId,
-            self.BoundingRectangle,
-            self.Name,
-            self.NativeWindowHandle,
+        return (
+            "<{0} ClassName={1!r} AutomationId={2} Rect={3} Name={4!r} Handle=0x{5:X}({5})>".format(
+                self.__class__.__name__,
+                self.ClassName,
+                self.AutomationId,
+                self.BoundingRectangle,
+                self.Name,
+                self.NativeWindowHandle,
+            )
         )
 
     def __getitem__(self, pos: int) -> "Control" | None:
@@ -239,9 +239,7 @@ class Control:
         ]
         return "{" + ", ".join(strs) + "}"
 
-    def GetColorfulSearchPropertiesStr(
-        self, keyColor="DarkGreen", valueColor="DarkCyan"
-    ) -> str:
+    def GetColorfulSearchPropertiesStr(self, keyColor="DarkGreen", valueColor="DarkCyan") -> str:
         """keyColor, valueColor: str, color name in class ConsoleColor"""
         strs = [
             "<Color={}>{}</Color>: <Color={}>{}</Color>".format(
@@ -750,9 +748,7 @@ class Control:
 
         Refer https://docs.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationelement-findallbuildcache
         """
-        elementArray = self.Element.FindAllBuildCache(
-            scope, condition, cacheRequest.check_request
-        )
+        elementArray = self.Element.FindAllBuildCache(scope, condition, cacheRequest.check_request)
         if not elementArray:
             return []
 
@@ -793,9 +789,7 @@ class Control:
 
         Refer https://docs.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationelement-findfirstbuildcache
         """
-        element = self.Element.FindFirstBuildCache(
-            scope, condition, cacheRequest.check_request
-        )
+        element = self.Element.FindFirstBuildCache(scope, condition, cacheRequest.check_request)
         return Control.CreateControlFromElement(element)
 
     def GetCachedChildren(self) -> List["Control"]:
@@ -1010,9 +1004,7 @@ class Control:
         """
         return self.GetPattern(PatternId.LegacyIAccessiblePattern)
 
-    def GetAncestorControl(
-        self, condition: Callable[["Control", int], bool]
-    ) -> "Control" | None:
+    def GetAncestorControl(self, condition: Callable[["Control", int], bool]) -> "Control" | None:
         """
         Get an ancestor control that matches the condition.
         condition: Callable[[Control, int], bool], function(control: Control, depth: int) -> bool,
@@ -1054,18 +1046,14 @@ class Control:
         """
         Return `Control` subclass or None.
         """
-        ele = _AutomationClient.instance().ViewWalker.GetNextSiblingElement(
-            self.Element
-        )
+        ele = _AutomationClient.instance().ViewWalker.GetNextSiblingElement(self.Element)
         return Control.CreateControlFromElement(ele)
 
     def GetPreviousSiblingControl(self) -> "Control" | None:
         """
         Return `Control` subclass or None.
         """
-        ele = _AutomationClient.instance().ViewWalker.GetPreviousSiblingElement(
-            self.Element
-        )
+        ele = _AutomationClient.instance().ViewWalker.GetPreviousSiblingElement(self.Element)
         return Control.CreateControlFromElement(ele)
 
     def GetSiblingControl(
@@ -1164,10 +1152,8 @@ class Control:
             ):
                 return True
             else:
-                parentElement = (
-                    _AutomationClient.instance().ViewWalker.GetParentElement(
-                        self._element
-                    )
+                parentElement = _AutomationClient.instance().ViewWalker.GetParentElement(
+                    self._element
                 )
                 if parentElement:
                     return True
@@ -1180,15 +1166,10 @@ class Control:
         startTime = ProcessTime()
         # Use same timeout(s) parameters for resolve all parents
         prev = self.searchFromControl
-        if (
-            prev
-            and not prev._element
-            and not prev.Exists(maxSearchSeconds, searchIntervalSeconds)
-        ):
+        if prev and not prev._element and not prev.Exists(maxSearchSeconds, searchIntervalSeconds):
             if printIfNotExist or DEBUG_EXIST_DISAPPEAR:
                 Logger.ColorfullyLog(
-                    self.GetColorfulSearchPropertiesStr()
-                    + "<Color=Red> does not exist.</Color>"
+                    self.GetColorfulSearchPropertiesStr() + "<Color=Red> does not exist.</Color>"
                 )
             return False
         startTime2 = ProcessTime()
@@ -1293,9 +1274,7 @@ class Control:
                 return False
         return True
 
-    def GetPosition(
-        self, ratioX: float = 0.5, ratioY: float = 0.5
-    ) -> Tuple[int, int] | None:
+    def GetPosition(self, ratioX: float = 0.5, ratioY: float = 0.5) -> Tuple[int, int] | None:
         """
         Gets the position of the center of the control.
         ratioX: float.
@@ -1559,9 +1538,7 @@ class Control:
         WheelUp(wheelTimes, interval, waitTime)
         SetCursorPos(cursorX, cursorY)
 
-    def ShowWindow(
-        self, cmdShow: int, waitTime: float = OPERATION_WAIT_TIME
-    ) -> bool | None:
+    def ShowWindow(self, cmdShow: int, waitTime: float = OPERATION_WAIT_TIME) -> bool | None:
         """
         Get a native handle from self or ancestors until valid and call native `ShowWindow` with cmdShow.
         cmdShow: int, a value in in class `SW`.
@@ -1599,9 +1576,7 @@ class Control:
         """
         return self.ShowWindow(SW.Hide, waitTime)
 
-    def MoveWindow(
-        self, x: int, y: int, width: int, height: int, repaint: bool = True
-    ) -> bool:
+    def MoveWindow(self, x: int, y: int, width: int, height: int, repaint: bool = True) -> bool:
         """
         Call native MoveWindow if control has a valid native handle.
         x: int.
@@ -3248,9 +3223,7 @@ class ComboBoxControl(Control):
             self.Click(x=-10, ratioY=0.5, simulateMove=simulateMove)
         find = False
         if condition:
-            listItemControl = self.ListItemControl(
-                Compare=lambda c, d: condition(c.Name)
-            )
+            listItemControl = self.ListItemControl(Compare=lambda c, d: condition(c.Name))
         else:
             listItemControl = self.ListItemControl(Name=itemName)
         if listItemControl.Exists(1):
@@ -3285,9 +3258,7 @@ class ComboBoxControl(Control):
             if expandCollapsePattern:
                 expandCollapsePattern.Collapse(waitTime)
             else:
-                self.Click(
-                    x=-10, ratioY=0.5, simulateMove=simulateMove, waitTime=waitTime
-                )
+                self.Click(x=-10, ratioY=0.5, simulateMove=simulateMove, waitTime=waitTime)
         return find
 
 
@@ -4092,9 +4063,7 @@ class MenuItemControl(Control):
 class TopLevel:
     """Class TopLevel"""
 
-    def SetTopmost(
-        self, isTopmost: bool = True, waitTime: float = OPERATION_WAIT_TIME
-    ) -> bool:
+    def SetTopmost(self, isTopmost: bool = True, waitTime: float = OPERATION_WAIT_TIME) -> bool:
         """
         Set top level window topmost.
         isTopmost: bool.
@@ -4109,9 +4078,7 @@ class TopLevel:
     def IsTopmost(self) -> bool:
         if self.IsTopLevel():
             WS_EX_TOPMOST = 0x00000008
-            return bool(
-                GetWindowLong(self.NativeWindowHandle, GWL.ExStyle) & WS_EX_TOPMOST
-            )
+            return bool(GetWindowLong(self.NativeWindowHandle, GWL.ExStyle) & WS_EX_TOPMOST)
         return False
 
     def SwitchToThisWindow(self, waitTime: float = OPERATION_WAIT_TIME) -> None:
@@ -4166,9 +4133,7 @@ class TopLevel:
                 x = 0
             if y < 0:
                 y = 0
-            return SetWindowPos(
-                self.NativeWindowHandle, SWP.HWND_Top, x, y, 0, 0, SWP.SWP_NoSize
-            )
+            return SetWindowPos(self.NativeWindowHandle, SWP.HWND_Top, x, y, 0, 0, SWP.SWP_NoSize)
         return False
 
     def SetActive(self, waitTime: float = OPERATION_WAIT_TIME) -> bool:
@@ -4803,12 +4768,7 @@ class TableControl(Control):
         """
         table = []
         for item in self.GetChildren():
-            table.append(
-                [
-                    cell.GetLegacyIAccessiblePattern().Value
-                    for cell in item.GetChildren()
-                ]
-            )
+            table.append([cell.GetLegacyIAccessiblePattern().Value for cell in item.GetChildren()])
         if row > 0 and column > 0:
             return table[row][column]
         if row > 0:
@@ -5227,9 +5187,7 @@ class WindowControl(Control, TopLevel):
         if self.ClassName == METRO_WINDOW_CLASS_NAME:
             screenWidth, screenHeight = GetScreenSize()
             MoveTo(screenWidth // 2, 0, waitTime=0)
-            DragDrop(
-                screenWidth // 2, 0, screenWidth // 2, screenHeight, waitTime=waitTime
-            )
+            DragDrop(screenWidth // 2, 0, screenWidth // 2, screenHeight, waitTime=waitTime)
         else:
             Logger.WriteLine("Window is not Metro!", ConsoleColor.Yellow)
 
@@ -5452,8 +5410,7 @@ def GetRootControl() -> PaneControl:
     if control is None:
         raise AssertionError("Expected valid root element")
     raise AssertionError(
-        "Expected root element to be a PaneControl. Found: %s (%s)"
-        % (type(control), control)
+        "Expected root element to be a PaneControl. Found: %s (%s)" % (type(control), control)
     )
 
 
@@ -5507,9 +5464,7 @@ def ControlFromPoint2(x: int, y: int) -> Control | None:
     Return `Control` subclass.
     """
     return Control.CreateControlFromElement(
-        _AutomationClient.instance().IUIAutomation.ElementFromHandle(
-            WindowFromPoint(x, y)
-        )
+        _AutomationClient.instance().IUIAutomation.ElementFromHandle(WindowFromPoint(x, y))
     )
 
 
@@ -5608,13 +5563,9 @@ def LogControl(
     Logger.Write("    Rect: ")
     Logger.Write(control.BoundingRectangle, ConsoleColor.DarkGreen)
     Logger.Write("    Name: ")
-    Logger.Write(
-        control.Name, ConsoleColor.DarkGreen, printTruncateLen=0 if showAllName else 30
-    )
+    Logger.Write(control.Name, ConsoleColor.DarkGreen, printTruncateLen=0 if showAllName else 30)
     Logger.Write("    Handle: ")
-    Logger.Write(
-        "0x{0:X}({0})".format(control.NativeWindowHandle), ConsoleColor.DarkGreen
-    )
+    Logger.Write("0x{0:X}({0})".format(control.NativeWindowHandle), ConsoleColor.DarkGreen)
     Logger.Write("    Depth: ")
     Logger.Write(depth, ConsoleColor.DarkGreen)
     if showPid:
@@ -5861,9 +5812,7 @@ def RunByHotKey(
         id2Name[hotKeyId] = str((modName, keyName))
         if ctypes.windll.user32.RegisterHotKey(0, hotKeyId, hotkey[0], hotkey[1]):
             Logger.ColorfullyWrite(
-                "Register hotkey <Color=Cyan>{}</Color> successfully\n".format(
-                    (modName, keyName)
-                ),
+                "Register hotkey <Color=Cyan>{}</Color> successfully\n".format((modName, keyName)),
                 writeToFile=False,
             )
         else:
@@ -5878,9 +5827,7 @@ def RunByHotKey(
     if stopHotKey and len(stopHotKey) == 2:
         modName = getModName(ModifierKey.__dict__, stopHotKey[0])
         keyName = _GetDictKeyName(Keys.__dict__, stopHotKey[1])
-        if ctypes.windll.user32.RegisterHotKey(
-            0, stopHotKeyId, stopHotKey[0], stopHotKey[1]
-        ):
+        if ctypes.windll.user32.RegisterHotKey(0, stopHotKeyId, stopHotKey[0], stopHotKey[1]):
             Logger.ColorfullyWrite(
                 "Register stop hotkey <Color=DarkYellow>{}</Color> successfully\n".format(
                     (modName, keyName)
@@ -5900,9 +5847,7 @@ def RunByHotKey(
     if exitHotKey and len(exitHotKey) == 2:
         modName = getModName(ModifierKey.__dict__, exitHotKey[0])
         keyName = _GetDictKeyName(Keys.__dict__, exitHotKey[1])
-        if ctypes.windll.user32.RegisterHotKey(
-            0, exitHotKeyId, exitHotKey[0], exitHotKey[1]
-        ):
+        if ctypes.windll.user32.RegisterHotKey(0, exitHotKeyId, exitHotKey[0], exitHotKey[1]):
             Logger.ColorfullyWrite(
                 "Register exit hotkey <Color=DarkYellow>{}</Color> successfully\n".format(
                     (modName, keyName)

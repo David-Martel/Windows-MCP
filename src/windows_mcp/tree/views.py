@@ -26,9 +26,7 @@ class TreeState:
         if not self.scrollable_nodes:
             return "No scrollable elements"
         # TOON-like format
-        header = (
-            "# id|window|control_type|name|coords|h_scroll|h_pct|v_scroll|v_pct|focus"
-        )
+        header = "# id|window|control_type|name|coords|h_scroll|h_pct|v_scroll|v_pct|focus"
         rows = [header]
         base_index = len(self.interactive_nodes)
         for idx, node in enumerate(self.scrollable_nodes):

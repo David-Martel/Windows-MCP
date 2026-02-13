@@ -40,9 +40,7 @@ S_OK = 0
 IsPy38OrHigher = sys.version_info[:2] >= (3, 8)
 IsNT6orHigher = os.sys.getwindowsversion().major >= 6
 CurrentProcessIs64Bit = sys.maxsize > 0xFFFFFFFF
-ProcessTime = (
-    time.perf_counter
-)  # this returns nearly 0 when first call it if python version <= 3.6
+ProcessTime = time.perf_counter  # this returns nearly 0 when first call it if python version <= 3.6
 ProcessTime()  # need to call it once if python version <= 3.6
 TreeNode = Any
 from .enums import *  # noqa: E402
@@ -66,9 +64,7 @@ class _AutomationClient:
         tryCount = 3
         for retry in range(tryCount):
             try:
-                self.UIAutomationCore = comtypes.client.GetModule(
-                    "UIAutomationCore.dll"
-                )
+                self.UIAutomationCore = comtypes.client.GetModule("UIAutomationCore.dll")
                 self.IUIAutomation = comtypes.client.CreateObject(
                     "{ff48dba4-60ef-4201-aa87-54103eef594e}",
                     interface=self.UIAutomationCore.IUIAutomation,
@@ -142,9 +138,7 @@ def SetConsoleColor(color: int) -> bool:
     if sys.stdout:
         sys.stdout.flush()
     return bool(
-        ctypes.windll.kernel32.SetConsoleTextAttribute(
-            _ConsoleOutputHandle, ctypes.c_ushort(color)
-        )
+        ctypes.windll.kernel32.SetConsoleTextAttribute(_ConsoleOutputHandle, ctypes.c_ushort(color))
     )
 
 
@@ -442,9 +436,7 @@ def MiddleReleaseMouse(waitTime: float = OPERATION_WAIT_TIME) -> None:
     time.sleep(waitTime)
 
 
-def MoveTo(
-    x: int, y: int, moveSpeed: float = 1, waitTime: float = OPERATION_WAIT_TIME
-) -> None:
+def MoveTo(x: int, y: int, moveSpeed: float = 1, waitTime: float = OPERATION_WAIT_TIME) -> None:
     """
     Simulate mouse move to point x, y from current cursor.
     x: int.
@@ -607,9 +599,7 @@ def SetScreenSize(width: int, height: int) -> bool:
     devMode = bytearray(devModeSize)
     devMode[dmSizeOffset : dmSizeOffset + 2] = struct.pack("<H", devModeSize)
     cDevMode = (ctypes.c_byte * devModeSize).from_buffer(devMode)
-    if ctypes.windll.user32.EnumDisplaySettingsW(
-        None, ctypes.wintypes.DWORD(-1), cDevMode
-    ):
+    if ctypes.windll.user32.EnumDisplaySettingsW(None, ctypes.wintypes.DWORD(-1), cDevMode):
         curWidth, curHeight = struct.unpack(
             "<II", devMode[dmPelsWidthOffset : dmPelsWidthOffset + 8]
         )
@@ -618,13 +608,8 @@ def SetScreenSize(width: int, height: int) -> bool:
         devMode[dmFieldsOffset : dmFieldsOffset + 4] = struct.pack(
             "<I", DM_PELSWIDTH | DM_PELSHEIGHT
         )
-        devMode[dmPelsWidthOffset : dmPelsWidthOffset + 8] = struct.pack(
-            "<II", width, height
-        )
-        if (
-            ctypes.windll.user32.ChangeDisplaySettingsW(cDevMode, 0)
-            == DISP_CHANGE_SUCCESSFUL
-        ):
+        devMode[dmPelsWidthOffset : dmPelsWidthOffset + 8] = struct.pack("<II", width, height)
+        if ctypes.windll.user32.ChangeDisplaySettingsW(cDevMode, 0) == DISP_CHANGE_SUCCESSFUL:
             return True
     return False
 
@@ -781,9 +766,7 @@ def GetWindowLong(handle: int, index: int) -> int:
     handle: int, the handle of a native window.
     index: int.
     """
-    return ctypes.windll.user32.GetWindowLongW(
-        ctypes.c_void_p(handle), ctypes.c_int(index)
-    )
+    return ctypes.windll.user32.GetWindowLongW(ctypes.c_void_p(handle), ctypes.c_int(index))
 
 
 def SetWindowLong(handle: int, index: int, value: int) -> int:
@@ -833,14 +816,10 @@ def ShowWindow(handle: int, cmdShow: int) -> bool:
     cmdShow: int, a value in clas `SW`.
     Return bool, True if succeed otherwise False.
     """
-    return bool(
-        ctypes.windll.user32.ShowWindow(ctypes.c_void_p(handle), ctypes.c_int(cmdShow))
-    )
+    return bool(ctypes.windll.user32.ShowWindow(ctypes.c_void_p(handle), ctypes.c_int(cmdShow)))
 
 
-def MoveWindow(
-    handle: int, x: int, y: int, width: int, height: int, repaint: int = 1
-) -> bool:
+def MoveWindow(handle: int, x: int, y: int, width: int, height: int, repaint: int = 1) -> bool:
     """
     MoveWindow from Win32.
     handle: int, the handle of a native window.
@@ -914,9 +893,7 @@ def GetWindowText(handle: int) -> str:
     """
     arrayType = ctypes.c_wchar * MAX_PATH
     values = arrayType()
-    ctypes.windll.user32.GetWindowTextW(
-        ctypes.c_void_p(handle), values, ctypes.c_int(MAX_PATH)
-    )
+    ctypes.windll.user32.GetWindowTextW(ctypes.c_void_p(handle), values, ctypes.c_int(MAX_PATH))
     return values.value
 
 
@@ -928,9 +905,7 @@ def SetWindowText(handle: int, text: str) -> bool:
     Return bool, True if succeed otherwise False.
     """
     return bool(
-        ctypes.windll.user32.SetWindowTextW(
-            ctypes.c_void_p(handle), ctypes.c_wchar_p(text)
-        )
+        ctypes.windll.user32.SetWindowTextW(ctypes.c_void_p(handle), ctypes.c_wchar_p(text))
     )
 
 
@@ -959,9 +934,7 @@ def GetConsoleOriginalTitle() -> str:
         ctypes.windll.kernel32.GetConsoleOriginalTitleW(values, ctypes.c_uint(MAX_PATH))
         return values.value
     else:
-        raise RuntimeError(
-            "GetConsoleOriginalTitle is not supported on Windows XP or lower."
-        )
+        raise RuntimeError("GetConsoleOriginalTitle is not supported on Windows XP or lower.")
 
 
 def GetConsoleTitle() -> str:
@@ -1389,16 +1362,12 @@ def SendKeys(
             if rindex == i + 1:  # {}}
                 rindex = text.find("}", i + 2)
             if rindex == -1:
-                raise ValueError(
-                    '"{" or "{}" is not valid, use "{{}" for "{", use "{}}" for "}"'
-                )
+                raise ValueError('"{" or "{}" is not valid, use "{{}" for "{", use "{}}" for "}"')
             keyStr = text[i + 1 : rindex]
             key = [it for it in keyStr.split(" ") if it]
             if not key:
                 raise ValueError(
-                    '"{}" is not valid, use "{{Space}}" or " " for " "'.format(
-                        text[i : rindex + 1]
-                    )
+                    '"{}" is not valid, use "{{Space}}" or " " for " "'.format(text[i : rindex + 1])
                 )
             if (len(key) == 2 and not key[1].isdigit()) or len(key) > 2:
                 raise ValueError('"{}" is not valid'.format(text[i : rindex + 1]))
@@ -1410,21 +1379,15 @@ def SendKeys(
                 if hold:
                     if upperKey in SpecialKeyNames:
                         keyValue = SpecialKeyNames[upperKey]
-                        if (
-                            type(lastKeyValue) is type(keyValue)
-                            and lastKeyValue == keyValue
-                        ):
+                        if type(lastKeyValue) is type(keyValue) and lastKeyValue == keyValue:
                             insertIndex += 1
                         printKeys.insert(insertIndex, (key[0], "KeyDown | ExtendedKey"))
-                        printKeys.insert(
-                            insertIndex + 1, (key[0], "KeyUp | ExtendedKey")
-                        )
+                        printKeys.insert(insertIndex + 1, (key[0], "KeyUp | ExtendedKey"))
                         keys.insert(
                             insertIndex,
                             (
                                 keyValue,
-                                KeyboardEventFlag.KeyDown
-                                | KeyboardEventFlag.ExtendedKey,
+                                KeyboardEventFlag.KeyDown | KeyboardEventFlag.ExtendedKey,
                             ),
                         )
                         keys.insert(
@@ -1437,21 +1400,15 @@ def SendKeys(
                         lastKeyValue = keyValue
                     elif key[0] in CharacterCodes:
                         keyValue = CharacterCodes[key[0]]
-                        if (
-                            type(lastKeyValue) is type(keyValue)
-                            and lastKeyValue == keyValue
-                        ):
+                        if type(lastKeyValue) is type(keyValue) and lastKeyValue == keyValue:
                             insertIndex += 1
                         printKeys.insert(insertIndex, (key[0], "KeyDown | ExtendedKey"))
-                        printKeys.insert(
-                            insertIndex + 1, (key[0], "KeyUp | ExtendedKey")
-                        )
+                        printKeys.insert(insertIndex + 1, (key[0], "KeyUp | ExtendedKey"))
                         keys.insert(
                             insertIndex,
                             (
                                 keyValue,
-                                KeyboardEventFlag.KeyDown
-                                | KeyboardEventFlag.ExtendedKey,
+                                KeyboardEventFlag.KeyDown | KeyboardEventFlag.ExtendedKey,
                             ),
                         )
                         keys.insert(
@@ -1481,8 +1438,7 @@ def SendKeys(
                         keys.append(
                             (
                                 keyValue,
-                                KeyboardEventFlag.KeyDown
-                                | KeyboardEventFlag.ExtendedKey,
+                                KeyboardEventFlag.KeyDown | KeyboardEventFlag.ExtendedKey,
                             )
                         )
                         keys.append(
@@ -1568,9 +1524,7 @@ def SendKeys(
             time.sleep(interval)
             if debug:
                 Logger.ColorfullyWrite(
-                    "<Color=DarkGreen>{}</Color>, sleep({})\n".format(
-                        printKeys[i], interval
-                    ),
+                    "<Color=DarkGreen>{}</Color>, sleep({})\n".format(printKeys[i], interval),
                     writeToFile=False,
                 )
         else:
@@ -1590,9 +1544,7 @@ def SendKeys(
                     ):
                         time.sleep(interval)
                         if debug:
-                            Logger.Write(
-                                ", sleep({})\n".format(interval), writeToFile=False
-                            )
+                            Logger.Write(", sleep({})\n".format(interval), writeToFile=False)
                     else:
                         time.sleep(
                             hotkeyInterval
@@ -1605,9 +1557,7 @@ def SendKeys(
                 else:  # KeyboardEventFlag.KeyDown
                     time.sleep(hotkeyInterval)
                     if debug:
-                        Logger.Write(
-                            ", sleep({})\n".format(hotkeyInterval), writeToFile=False
-                        )
+                        Logger.Write(", sleep({})\n".format(hotkeyInterval), writeToFile=False)
     # make sure hold keys are not pressed
     # win = ctypes.windll.user32.GetAsyncKeyState(Keys.VK_LWIN)
     # ctrl = ctypes.windll.user32.GetAsyncKeyState(Keys.VK_CONTROL)
@@ -1718,9 +1668,7 @@ def GetProcesses(detailedInfo: bool = True) -> List[ProcessInfo]:
             IsWow64Process = ctypes.windll.kernel32.IsWow64Process
         except Exception:
             IsWow64Process = None
-    hSnapshot = ctypes.windll.kernel32.CreateToolhelp32Snapshot(
-        15, 0
-    )  # TH32CS_SNAPALL = 15
+    hSnapshot = ctypes.windll.kernel32.CreateToolhelp32Snapshot(15, 0)  # TH32CS_SNAPALL = 15
     processEntry32 = tagPROCESSENTRY32()
     processEntry32.dwSize = ctypes.sizeof(processEntry32)
     processList = []
@@ -1855,9 +1803,7 @@ def EnumProcessByWMI() -> Generator[ProcessInfo, None, None]:
 
     wobj = wmi.WMI()
     fields = ["Name", "ProcessId", "ParentProcessId", "ExecutablePath", "CommandLine"]
-    for it in wobj.Win32_Process(
-        fields
-    ):  # only query the specified fields, speed up the process
+    for it in wobj.Win32_Process(fields):  # only query the specified fields, speed up the process
         pinfo = ProcessInfo(
             it.Name, it.ProcessId, it.ParentProcessId, it.ExecutablePath, it.CommandLine
         )
@@ -1865,9 +1811,7 @@ def EnumProcessByWMI() -> Generator[ProcessInfo, None, None]:
 
 
 def TerminateProcess(pid: int) -> bool:
-    hProcess = ctypes.windll.kernel32.OpenProcess(
-        0x0001, 0, pid
-    )  # PROCESS_TERMINATE=0x0001
+    hProcess = ctypes.windll.kernel32.OpenProcess(0x0001, 0, pid)  # PROCESS_TERMINATE=0x0001
     if hProcess:
         hProcess = ctypes.c_void_p(hProcess)
         ret = ctypes.windll.kernel32.TerminateProcess(hProcess, -1)
@@ -1956,10 +1900,7 @@ class Logger:
         if not isinstance(log, str):
             log = str(log)
         if printToStdout and sys.stdout:
-            isValidColor = (
-                consoleColor >= ConsoleColor.Black
-                and consoleColor <= ConsoleColor.White
-            )
+            isValidColor = consoleColor >= ConsoleColor.Black and consoleColor <= ConsoleColor.White
             if isValidColor:
                 SetConsoleColor(consoleColor)
             try:
@@ -2019,9 +1960,7 @@ class Logger:
         printToStdout: bool.
         logFile: str, log file path.
         """
-        Logger.Write(
-            "{}\n".format(log), consoleColor, writeToFile, printToStdout, logFile
-        )
+        Logger.Write("{}\n".format(log), consoleColor, writeToFile, printToStdout, logFile)
 
     @staticmethod
     def ColorfullyWrite(
@@ -2084,9 +2023,7 @@ class Logger:
 
         ColorfullyWriteLine('Hello <Color=Green>Green Text</Color> !!!'), Color name must be in `Logger.ColorNames` and can't be nested.
         """
-        Logger.ColorfullyWrite(
-            log + "\n", consoleColor, writeToFile, printToStdout, logFile
-        )
+        Logger.ColorfullyWrite(log + "\n", consoleColor, writeToFile, printToStdout, logFile)
 
     @staticmethod
     def Log(
@@ -2215,9 +2152,7 @@ def GetClipboardFormats() -> Dict[int, str]:
                 if formatType == 0:
                     break
                 values = arrayType()
-                ctypes.windll.user32.GetClipboardFormatNameW(
-                    formatType, values, len(values)
-                )
+                ctypes.windll.user32.GetClipboardFormatNameW(formatType, values, len(values))
                 formatName = values.value
                 if not formatName:
                     formatName = _GetDictKeyName(
@@ -2233,15 +2168,11 @@ def GetClipboardFormats() -> Dict[int, str]:
 def GetClipboardText() -> str:
     with _ClipboardLock:
         if _OpenClipboard(0):
-            if ctypes.windll.user32.IsClipboardFormatAvailable(
-                ClipboardFormat.CF_UNICODETEXT
-            ):
+            if ctypes.windll.user32.IsClipboardFormatAvailable(ClipboardFormat.CF_UNICODETEXT):
                 hClipboardData = ctypes.windll.user32.GetClipboardData(
                     ClipboardFormat.CF_UNICODETEXT
                 )
-                hText = ctypes.windll.kernel32.GlobalLock(
-                    ctypes.c_void_p(hClipboardData)
-                )
+                hText = ctypes.windll.kernel32.GlobalLock(ctypes.c_void_p(hClipboardData))
                 text = ctypes.c_wchar_p(hText).value
                 ctypes.windll.kernel32.GlobalUnlock(ctypes.c_void_p(hClipboardData))
                 ctypes.windll.user32.CloseClipboard()
@@ -2260,12 +2191,8 @@ def SetClipboardText(text: str) -> bool:
         if _OpenClipboard(0):
             ctypes.windll.user32.EmptyClipboard()
             textByteLen = (len(text) + 1) * 2
-            hClipboardData = ctypes.windll.kernel32.GlobalAlloc(
-                0x2, textByteLen
-            )  # GMEM_MOVEABLE
-            hDestText = ctypes.windll.kernel32.GlobalLock(
-                ctypes.c_void_p(hClipboardData)
-            )
+            hClipboardData = ctypes.windll.kernel32.GlobalAlloc(0x2, textByteLen)  # GMEM_MOVEABLE
+            hDestText = ctypes.windll.kernel32.GlobalLock(ctypes.c_void_p(hClipboardData))
             ctypes.cdll.msvcrt.wcsncpy(
                 ctypes.c_wchar_p(hDestText),
                 ctypes.c_wchar_p(text),
@@ -2295,12 +2222,8 @@ def GetClipboardHtml() -> str:
     with _ClipboardLock:
         if _OpenClipboard(0):
             if ctypes.windll.user32.IsClipboardFormatAvailable(ClipboardFormat.CF_HTML):
-                hClipboardData = ctypes.windll.user32.GetClipboardData(
-                    ClipboardFormat.CF_HTML
-                )
-                hText = ctypes.windll.kernel32.GlobalLock(
-                    ctypes.c_void_p(hClipboardData)
-                )
+                hClipboardData = ctypes.windll.user32.GetClipboardData(ClipboardFormat.CF_HTML)
+                hText = ctypes.windll.kernel32.GlobalLock(ctypes.c_void_p(hClipboardData))
                 v = ctypes.c_char_p(hText).value
                 ctypes.windll.kernel32.GlobalUnlock(ctypes.c_void_p(hClipboardData))
                 ctypes.windll.user32.CloseClipboard()
@@ -2343,9 +2266,7 @@ def SetClipboardHtml(htmlText: str) -> bool:
             hClipboardData = ctypes.windll.kernel32.GlobalAlloc(
                 0x2002, len(u8Result) + 4
             )  # GMEM_MOVEABLE |GMEM_DDESHARE
-            hDestText = ctypes.windll.kernel32.GlobalLock(
-                ctypes.c_void_p(hClipboardData)
-            )
+            hDestText = ctypes.windll.kernel32.GlobalLock(ctypes.c_void_p(hClipboardData))
             ctypes.cdll.msvcrt.strncpy(
                 ctypes.c_char_p(hDestText), ctypes.c_char_p(u8Result), len(u8Result)
             )
@@ -2661,9 +2582,7 @@ class CacheRequest:
         if cache_request:
             self.check_request = cache_request
         else:
-            self.check_request = (
-                _AutomationClient.instance().IUIAutomation.CreateCacheRequest()
-            )
+            self.check_request = _AutomationClient.instance().IUIAutomation.CreateCacheRequest()
 
     @property
     def TreeScope(self) -> int:
@@ -2721,9 +2640,7 @@ def CreateCacheRequest() -> CacheRequest:
 # Event Handling Implementations for core.py
 
 
-def AddAutomationEventHandler(
-    eventId: int, element, scope: int, cacheRequest, handler
-) -> None:
+def AddAutomationEventHandler(eventId: int, element, scope: int, cacheRequest, handler) -> None:
     """
     Registers a method that handles Microsoft UI Automation events.
     """
@@ -2764,9 +2681,7 @@ def RemovePropertyChangedEventHandler(element, handler) -> None:
     """
     Removes the specified property-changed event handler.
     """
-    _AutomationClient.instance().IUIAutomation.RemovePropertyChangedEventHandler(
-        element, handler
-    )
+    _AutomationClient.instance().IUIAutomation.RemovePropertyChangedEventHandler(element, handler)
 
 
 def AddStructureChangedEventHandler(element, scope: int, cacheRequest, handler) -> None:
@@ -2782,18 +2697,14 @@ def RemoveStructureChangedEventHandler(element, handler) -> None:
     """
     Removes the specified structure-changed event handler.
     """
-    _AutomationClient.instance().IUIAutomation.RemoveStructureChangedEventHandler(
-        element, handler
-    )
+    _AutomationClient.instance().IUIAutomation.RemoveStructureChangedEventHandler(element, handler)
 
 
 def AddFocusChangedEventHandler(cacheRequest, handler) -> None:
     """
     Registers a method that handles UI Automation focus-changed events.
     """
-    _AutomationClient.instance().IUIAutomation.AddFocusChangedEventHandler(
-        cacheRequest, handler
-    )
+    _AutomationClient.instance().IUIAutomation.AddFocusChangedEventHandler(cacheRequest, handler)
 
 
 def RemoveFocusChangedEventHandler(handler) -> None:
@@ -2843,9 +2754,7 @@ def CreatePropertyCondition(propertyId: int, value):
 
     Refer https://docs.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation-createpropertycondition
     """
-    return _AutomationClient.instance().IUIAutomation.CreatePropertyCondition(
-        propertyId, value
-    )
+    return _AutomationClient.instance().IUIAutomation.CreatePropertyCondition(propertyId, value)
 
 
 def CreateAndCondition(condition1, condition2):
@@ -2858,9 +2767,7 @@ def CreateAndCondition(condition1, condition2):
 
     Refer https://docs.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation-createandcondition
     """
-    return _AutomationClient.instance().IUIAutomation.CreateAndCondition(
-        condition1, condition2
-    )
+    return _AutomationClient.instance().IUIAutomation.CreateAndCondition(condition1, condition2)
 
 
 def CreateOrCondition(condition1, condition2):
@@ -2873,9 +2780,7 @@ def CreateOrCondition(condition1, condition2):
 
     Refer https://docs.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation-createorcondition
     """
-    return _AutomationClient.instance().IUIAutomation.CreateOrCondition(
-        condition1, condition2
-    )
+    return _AutomationClient.instance().IUIAutomation.CreateOrCondition(condition1, condition2)
 
 
 def CreateNotCondition(condition):

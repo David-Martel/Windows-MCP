@@ -152,14 +152,10 @@ class IVirtualDesktop(IUnknown):
     _iid_ = IID_IVirtualDesktop
     # Methods for 22621+
     _methods_ = [
-        STDMETHOD(
-            HRESULT, "IsViewVisible", (POINTER(IUnknown), POINTER(UINT))
-        ),  # IApplicationView
+        STDMETHOD(HRESULT, "IsViewVisible", (POINTER(IUnknown), POINTER(UINT))),  # IApplicationView
         COMMETHOD([], HRESULT, "GetID", (["out"], POINTER(GUID), "pGuid")),
         COMMETHOD([], HRESULT, "GetName", (["out"], POINTER(HSTRING), "pName")),
-        COMMETHOD(
-            [], HRESULT, "GetWallpaperPath", (["out"], POINTER(HSTRING), "pPath")
-        ),
+        COMMETHOD([], HRESULT, "GetWallpaperPath", (["out"], POINTER(HSTRING), "pPath")),
         COMMETHOD([], HRESULT, "IsRemote", (["out"], POINTER(HWND), "pW")),
     ]
 
@@ -404,13 +400,9 @@ class VirtualDesktopManager:
                     byref(CLSID_VirtualDesktopManagerInternal),
                     byref(IVirtualDesktopManagerInternal._iid_),
                 )
-                self._internal_manager = unk.QueryInterface(
-                    IVirtualDesktopManagerInternal
-                )
+                self._internal_manager = unk.QueryInterface(IVirtualDesktopManagerInternal)
             except Exception as e:
-                logger.warning(
-                    f"Failed to initialize VirtualDesktopManagerInternal: {e}"
-                )
+                logger.warning(f"Failed to initialize VirtualDesktopManagerInternal: {e}")
                 self._internal_manager = None
 
         except Exception as e:

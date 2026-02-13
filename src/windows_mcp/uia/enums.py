@@ -33,9 +33,7 @@ S_OK = 0
 IsPy38OrHigher = sys.version_info[:2] >= (3, 8)
 IsNT6orHigher = os.sys.getwindowsversion().major >= 6
 CurrentProcessIs64Bit = sys.maxsize > 0xFFFFFFFF
-ProcessTime = (
-    time.perf_counter
-)  # this returns nearly 0 when first call it if python version <= 3.6
+ProcessTime = time.perf_counter  # this returns nearly 0 when first call it if python version <= 3.6
 ProcessTime()  # need to call it once if python version <= 3.6
 TreeNode = Any
 
@@ -647,9 +645,7 @@ class AccessibleRole:
     OutlineButton = 0x40
 
 
-AccessibleRoleNames = {
-    v: k for k, v in AccessibleRole.__dict__.items() if not k.startswith("_")
-}
+AccessibleRoleNames = {v: k for k, v in AccessibleRole.__dict__.items() if not k.startswith("_")}
 
 
 class AccessibleState:
@@ -1332,7 +1328,9 @@ class Keys:
     VK_OEM_6 = 0xDD  # Used for miscellaneous characters; it can vary by keyboard.For the US standard keyboard, the ']}' key
     VK_OEM_7 = 0xDE  # Used for miscellaneous characters; it can vary by keyboard.For the US standard keyboard, the 'single-quote/double-quote' key
     VK_OEM_8 = 0xDF  # Used for miscellaneous characters; it can vary by keyboard.
-    VK_OEM_102 = 0xE2  # Either the angle bracket key or the backslash key on the RT 102-key keyboard
+    VK_OEM_102 = (
+        0xE2  # Either the angle bracket key or the backslash key on the RT 102-key keyboard
+    )
     VK_PROCESSKEY = 0xE5  # IME PROCESS key
     VK_PACKET = 0xE7  # Used to pass Unicode characters as if they were keystrokes. The VK_PACKET key is the low word of a 32-bit Virtual Key value used for non-keyboard input methods. For more information, see Remark in KEYBDINPUT, SendInput, WM_KEYDOWN, and WM_KeyUp
     VK_ATTN = 0xF6  # Attn key

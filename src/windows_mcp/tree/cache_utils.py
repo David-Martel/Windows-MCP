@@ -30,9 +30,7 @@ class CacheRequestFactory:
 
         # Set scope to cache element and its children
         # This allows us to get children with pre-cached properties
-        cache_request.TreeScope = (
-            TreeScope.TreeScope_Element | TreeScope.TreeScope_Children
-        )
+        cache_request.TreeScope = TreeScope.TreeScope_Element | TreeScope.TreeScope_Children
 
         # Basic identification properties
         cache_request.AddProperty(PropertyId.NameProperty)
@@ -63,9 +61,7 @@ class CachedControlHelper:
     """Helper class for working with cached controls."""
 
     @staticmethod
-    def build_cached_control(
-        node: Control, cache_request: CacheRequest | None = None
-    ) -> Control:
+    def build_cached_control(node: Control, cache_request: CacheRequest | None = None) -> Control:
         """
         Build a cached version of a control.
 
@@ -129,7 +125,5 @@ class CachedControlHelper:
             return children
 
         except Exception as e:
-            logger.debug(
-                f"Failed to get cached children, falling back to regular access: {e}"
-            )
+            logger.debug(f"Failed to get cached children, falling back to regular access: {e}")
             return node.GetChildren()

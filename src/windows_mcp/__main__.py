@@ -25,7 +25,7 @@ analytics: PostHogAnalytics | None = None
 screen_size: Size | None = None
 
 instructions = dedent("""
-Windows MCP server provides tools to interact directly with the Windows desktop, 
+Windows MCP server provides tools to interact directly with the Windows desktop,
 thus enabling to operate the desktop on the user's behalf.
 """)
 
@@ -111,27 +111,19 @@ def powershell_tool(command: str, timeout: int = 30, ctx: Context = None) -> str
     ),
 )
 @with_analytics(analytics, "State-Tool")
-def state_tool(
-    use_vision: bool | str = False, use_dom: bool | str = False, ctx: Context = None
-):
+def state_tool(use_vision: bool | str = False, use_dom: bool | str = False, ctx: Context = None):
     try:
         use_vision = use_vision is True or (
             isinstance(use_vision, str) and use_vision.lower() == "true"
         )
-        use_dom = use_dom is True or (
-            isinstance(use_dom, str) and use_dom.lower() == "true"
-        )
+        use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == "true")
 
         # Calculate scale factor to cap resolution at 1080p (1920x1080)
         scale_width = (
-            MAX_IMAGE_WIDTH / screen_size.width
-            if screen_size.width > MAX_IMAGE_WIDTH
-            else 1.0
+            MAX_IMAGE_WIDTH / screen_size.width if screen_size.width > MAX_IMAGE_WIDTH else 1.0
         )
         scale_height = (
-            MAX_IMAGE_HEIGHT / screen_size.height
-            if screen_size.height > MAX_IMAGE_HEIGHT
-            else 1.0
+            MAX_IMAGE_HEIGHT / screen_size.height if screen_size.height > MAX_IMAGE_HEIGHT else 1.0
         )
         scale = min(
             scale_width, scale_height
@@ -155,7 +147,7 @@ def state_tool(
 
     All Desktops:
     {all_desktops}
-        
+
     Focused Window:
     {active_window}
 
@@ -255,8 +247,7 @@ def scroll_tool(
     if response:
         return response
     return (
-        f"Scrolled {type} {direction} by {wheel_times} wheel times"
-        + f" at ({loc[0]},{loc[1]})."
+        f"Scrolled {type} {direction} by {wheel_times} wheel times" + f" at ({loc[0]},{loc[1]})."
         if loc
         else ""
     )
@@ -334,9 +325,7 @@ def wait_tool(duration: int, ctx: Context = None) -> str:
 )
 @with_analytics(analytics, "Scrape-Tool")
 def scrape_tool(url: str, use_dom: bool | str = False, ctx: Context = None) -> str:
-    use_dom = use_dom is True or (
-        isinstance(use_dom, str) and use_dom.lower() == "true"
-    )
+    use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == "true")
     if not use_dom:
         content = desktop.scrape(url)
         return f"URL:{url}\nContent:\n{content}"
@@ -348,13 +337,9 @@ def scrape_tool(url: str, use_dom: bool | str = False, ctx: Context = None) -> s
     dom_node = tree_state.dom_node
     vertical_scroll_percent = dom_node.vertical_scroll_percent
     content = "\n".join([node.text for node in tree_state.dom_informative_nodes])
-    header_status = (
-        "Reached top" if vertical_scroll_percent <= 0 else "Scroll up to see more"
-    )
+    header_status = "Reached top" if vertical_scroll_percent <= 0 else "Scroll up to see more"
     footer_status = (
-        "Reached bottom"
-        if vertical_scroll_percent >= 100
-        else "Scroll down to see more"
+        "Reached bottom" if vertical_scroll_percent >= 100 else "Scroll down to see more"
     )
     return f"URL:{url}\nContent:\n{header_status}\n{content}\n{footer_status}"
 
@@ -421,12 +406,8 @@ def clipboard_tool(
         if mode == "get":
             win32clipboard.OpenClipboard()
             try:
-                if win32clipboard.IsClipboardFormatAvailable(
-                    win32clipboard.CF_UNICODETEXT
-                ):
-                    data = win32clipboard.GetClipboardData(
-                        win32clipboard.CF_UNICODETEXT
-                    )
+                if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_UNICODETEXT):
+                    data = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
                     return f"Clipboard content:\n{data}"
                 else:
                     return "Clipboard is empty or contains non-text data."
@@ -439,9 +420,7 @@ def clipboard_tool(
             try:
                 win32clipboard.EmptyClipboard()
                 win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
-                return (
-                    f"Clipboard set to: {text[:100]}{'...' if len(text) > 100 else ''}"
-                )
+                return f"Clipboard set to: {text[:100]}{'...' if len(text) > 100 else ''}"
             finally:
                 win32clipboard.CloseClipboard()
         else:
@@ -475,9 +454,7 @@ def process_tool(
         if mode == "list":
             return desktop.list_processes(name=name, sort_by=sort_by, limit=limit)
         elif mode == "kill":
-            force = force is True or (
-                isinstance(force, str) and force.lower() == "true"
-            )
+            force = force is True or (isinstance(force, str) and force.lower() == "true")
             return desktop.kill_process(name=name, pid=pid, force=force)
         else:
             return 'Error: mode must be either "list" or "kill".'

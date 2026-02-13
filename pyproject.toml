@@ -7,9 +7,17 @@ authors = [
 ]
 readme = "README.md"
 license = { file = "LICENSE.md" }
-urls = { homepage = "https://github.com/CursorTouch" }
-keywords = ["windows", "mcp", "ai", "desktop","ai agent"]
+keywords = ["windows", "mcp", "ai", "desktop", "ai agent"]
 requires-python = ">=3.13"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Desktop Environment",
+    "Topic :: System :: Shells",
+]
 dependencies = [
     "click>=8.2.1",
     "comtypes>=1.4.15",
@@ -28,6 +36,17 @@ dependencies = [
     "uuid7>=0.1.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.9.0",
+    "pytest>=8.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/CursorTouch"
+Repository = "https://github.com/CursorTouch/Windows-MCP"
+Issues = "https://github.com/CursorTouch/Windows-MCP/issues"
+
 [project.scripts]
 windows-mcp = "windows_mcp.__main__:main"
 
@@ -35,7 +54,13 @@ windows-mcp = "windows_mcp.__main__:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
 [tool.ruff.lint.per-file-ignores]
 "src/windows_mcp/uia/*.py" = ["F403", "F405"]
-
-

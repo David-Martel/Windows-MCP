@@ -39,9 +39,7 @@ S_OK = 0
 IsPy38OrHigher = sys.version_info[:2] >= (3, 8)
 IsNT6orHigher = os.sys.getwindowsversion().major >= 6
 CurrentProcessIs64Bit = sys.maxsize > 0xFFFFFFFF
-ProcessTime = (
-    time.perf_counter
-)  # this returns nearly 0 when first call it if python version <= 3.6
+ProcessTime = time.perf_counter  # this returns nearly 0 when first call it if python version <= 3.6
 ProcessTime()  # need to call it once if python version <= 3.6
 TreeNode = Any
 
@@ -121,9 +119,7 @@ def GetPatternIdInterface(patternId: int):
             )
         except Exception:
             if debug:
-                Logger.WriteLine(
-                    "UIAutomationCore does not have DragPattern.", ConsoleColor.Yellow
-                )
+                Logger.WriteLine("UIAutomationCore does not have DragPattern.", ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.DropTargetPattern] = (
                 _AutomationClient.instance().UIAutomationCore.IUIAutomationDropTargetPattern
@@ -317,9 +313,7 @@ class DockPattern:
         """
         return self.pattern.CurrentDockPosition
 
-    def SetDockPosition(
-        self, dockPosition: int, waitTime: float = OPERATION_WAIT_TIME
-    ) -> int:
+    def SetDockPosition(self, dockPosition: int, waitTime: float = OPERATION_WAIT_TIME) -> int:
         """
         Call IUIAutomationDockPattern::SetDockPosition.
         dockPosition: int, a value in class `DockPosition`.
@@ -575,9 +569,7 @@ class ItemContainerPattern:
         """Refer https://docs.microsoft.com/en-us/windows/win32/api/uiautomationclient/nn-uiautomationclient-iuiautomationitemcontainerpattern"""
         self.pattern = pattern
 
-    def FindItemByProperty(
-        self, control: "Control", propertyId: int, propertyValue
-    ) -> "Control":
+    def FindItemByProperty(self, control: "Control", propertyId: int, propertyValue) -> "Control":
         """
         Call IUIAutomationItemContainerPattern::FindItemByProperty.
         control: `Control` or its subclass.
@@ -586,9 +578,7 @@ class ItemContainerPattern:
         Return `Control` subclass, a control within a containing element, based on a specified property value.
         Refer https://docs.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationitemcontainerpattern-finditembyproperty
         """
-        ele = self.pattern.FindItemByProperty(
-            control.Element, propertyId, propertyValue
-        )
+        ele = self.pattern.FindItemByProperty(control.Element, propertyId, propertyValue)
         return Control.CreateControlFromElement(ele)
 
 
@@ -1456,9 +1446,7 @@ class TextRange:
         """
         return self.textRange.CompareEndpoints(srcEndPoint, textRange, targetEndPoint)
 
-    def ExpandToEnclosingUnit(
-        self, unit: int, waitTime: float = OPERATION_WAIT_TIME
-    ) -> bool:
+    def ExpandToEnclosingUnit(self, unit: int, waitTime: float = OPERATION_WAIT_TIME) -> bool:
         """
         Call IUIAutomationTextRange::ExpandToEnclosingUnit.
         Normalize the text range by the specified text unit.
@@ -1473,9 +1461,7 @@ class TextRange:
         time.sleep(waitTime)
         return ret
 
-    def FindAttribute(
-        self, textAttributeId: int, val, backward: bool
-    ) -> "TextRange" | None:
+    def FindAttribute(self, textAttributeId: int, val, backward: bool) -> "TextRange" | None:
         """
         Call IUIAutomationTextRange::FindAttribute.
         textAttributeID: int, a value in class `TextAttributeId`.
@@ -1489,9 +1475,7 @@ class TextRange:
             return TextRange(textRange=textRange)
         return None
 
-    def FindText(
-        self, text: str, backward: bool, ignoreCase: bool
-    ) -> "TextRange" | None:
+    def FindText(self, text: str, backward: bool, ignoreCase: bool) -> "TextRange" | None:
         """
         Call IUIAutomationTextRange::FindText.
         text: str,
@@ -1505,9 +1489,7 @@ class TextRange:
             return TextRange(textRange=textRange)
         return None
 
-    def GetAttributeValue(self, textAttributeId: int) -> ctypes.POINTER(
-        comtypes.IUnknown
-    ):
+    def GetAttributeValue(self, textAttributeId: int) -> ctypes.POINTER(comtypes.IUnknown):
         """
         Call IUIAutomationTextRange::GetAttributeValue.
         textAttributeId: int, a value in class `TextAttributeId`.
@@ -1608,9 +1590,7 @@ class TextRange:
         Refer https://docs.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationtextrange-moveendpointbyrange
         """
         ret = (
-            self.textRange.MoveEndpointByRange(
-                srcEndPoint, textRange.textRange, targetEndPoint
-            )
+            self.textRange.MoveEndpointByRange(srcEndPoint, textRange.textRange, targetEndPoint)
             == S_OK
         )
         time.sleep(waitTime)
@@ -1652,9 +1632,7 @@ class TextRange:
         time.sleep(waitTime)
         return ret
 
-    def ScrollIntoView(
-        self, alignTop: bool = True, waitTime: float = OPERATION_WAIT_TIME
-    ) -> bool:
+    def ScrollIntoView(self, alignTop: bool = True, waitTime: float = OPERATION_WAIT_TIME) -> bool:
         """
         Call IUIAutomationTextRange::ScrollIntoView.
         Cause the text control to scroll until the text range is visible in the viewport.
@@ -1850,9 +1828,7 @@ class TogglePattern:
         time.sleep(waitTime)
         return ret
 
-    def SetToggleState(
-        self, toggleState: int, waitTime: float = OPERATION_WAIT_TIME
-    ) -> bool:
+    def SetToggleState(self, toggleState: int, waitTime: float = OPERATION_WAIT_TIME) -> bool:
         for i in range(6):
             if self.ToggleState == toggleState:
                 return True
@@ -1909,9 +1885,7 @@ class TransformPattern:
         time.sleep(waitTime)
         return ret
 
-    def Resize(
-        self, width: int, height: int, waitTime: float = OPERATION_WAIT_TIME
-    ) -> bool:
+    def Resize(self, width: int, height: int, waitTime: float = OPERATION_WAIT_TIME) -> bool:
         """
         Call IUIAutomationTransformPattern::Resize.
         Resize the UI Automation element.
@@ -2146,9 +2120,7 @@ class WindowPattern:
         """
         return self.pattern.CurrentWindowVisualState
 
-    def SetWindowVisualState(
-        self, state: int, waitTime: float = OPERATION_WAIT_TIME
-    ) -> bool:
+    def SetWindowVisualState(self, state: int, waitTime: float = OPERATION_WAIT_TIME) -> bool:
         """
         Call IUIAutomationWindowPattern::SetWindowVisualState.
         Minimize, maximize, or restore the window.

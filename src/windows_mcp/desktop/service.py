@@ -65,21 +65,13 @@ class Desktop:
         use_vision = use_vision is True or (
             isinstance(use_vision, str) and use_vision.lower() == "true"
         )
-        use_dom = use_dom is True or (
-            isinstance(use_dom, str) and use_dom.lower() == "true"
-        )
-        as_bytes = as_bytes is True or (
-            isinstance(as_bytes, str) and as_bytes.lower() == "true"
-        )
+        use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == "true")
+        as_bytes = as_bytes is True or (isinstance(as_bytes, str) and as_bytes.lower() == "true")
 
         start_time = time()
 
-        controls_handles = (
-            self.get_controls_handles()
-        )  # Taskbar,Program Manager,Apps, Dialogs
-        windows, windows_handles = self.get_windows(
-            controls_handles=controls_handles
-        )  # Apps
+        controls_handles = self.get_controls_handles()  # Taskbar,Program Manager,Apps, Dialogs
+        windows, windows_handles = self.get_windows(controls_handles=controls_handles)  # Apps
         active_window = self.get_active_window(windows=windows)  # Active Window
         active_window_handle = active_window.handle if active_window else None
 
@@ -248,10 +240,7 @@ class Desktop:
     def is_app_running(self, name: str) -> bool:
         windows, _ = self.get_windows()
         windows_dict = {window.name: window for window in windows}
-        return (
-            process.extractOne(name, list(windows_dict.keys()), score_cutoff=60)
-            is not None
-        )
+        return process.extractOne(name, list(windows_dict.keys()), score_cutoff=60) is not None
 
     def app(
         self,
@@ -383,16 +372,10 @@ class Desktop:
                 win32gui.BringWindowToTop(target_handle)
                 return
 
-            foreground_thread, _ = win32process.GetWindowThreadProcessId(
-                foreground_handle
-            )
+            foreground_thread, _ = win32process.GetWindowThreadProcessId(foreground_handle)
             target_thread, _ = win32process.GetWindowThreadProcessId(target_handle)
 
-            if (
-                not foreground_thread
-                or not target_thread
-                or foreground_thread == target_thread
-            ):
+            if not foreground_thread or not target_thread or foreground_thread == target_thread:
                 win32gui.SetForegroundWindow(target_handle)
                 win32gui.BringWindowToTop(target_handle)
                 return
@@ -419,9 +402,7 @@ class Desktop:
 
             finally:
                 if attached:
-                    win32process.AttachThreadInput(
-                        foreground_thread, target_thread, False
-                    )
+                    win32process.AttachThreadInput(foreground_thread, target_thread, False)
 
         except Exception as e:
             logger.exception(f"Failed to bring window to top: {e}")
@@ -467,9 +448,7 @@ class Desktop:
 
         pg.typewrite(text, interval=0.02)
 
-        if press_enter is True or (
-            isinstance(press_enter, str) and press_enter.lower() == "true"
-        ):
+        if press_enter is True or (isinstance(press_enter, str) and press_enter.lower() == "true"):
             pg.press("enter")
 
     def scroll(
@@ -526,9 +505,7 @@ class Desktop:
         else:
             pg.press("".join(shortcut))
 
-    def multi_select(
-        self, press_ctrl: bool | str = False, locs: list[tuple[int, int]] = []
-    ):
+    def multi_select(self, press_ctrl: bool | str = False, locs: list[tuple[int, int]] = []):
         press_ctrl = press_ctrl is True or (
             isinstance(press_ctrl, str) and press_ctrl.lower() == "true"
         )
@@ -607,9 +584,7 @@ class Desktop:
             handles.add(desktop_hwnd)
         if taskbar_hwnd := win32gui.FindWindow("Shell_TrayWnd", None):
             handles.add(taskbar_hwnd)
-        if secondary_taskbar_hwnd := win32gui.FindWindow(
-            "Shell_SecondaryTrayWnd", None
-        ):
+        if secondary_taskbar_hwnd := win32gui.FindWindow("Shell_SecondaryTrayWnd", None):
             handles.add(secondary_taskbar_hwnd)
         return handles
 
@@ -759,9 +734,7 @@ class Desktop:
             control_type, index = match.groups()
             index = int(index) if index else None
             children = element.GetChildren()
-            same_type_children = list(
-                filter(lambda x: x.ControlTypeName == control_type, children)
-            )
+            same_type_children = list(filter(lambda x: x.ControlTypeName == control_type, children))
             if index:
                 element = same_type_children[index - 1]
             else:
@@ -769,9 +742,7 @@ class Desktop:
         return element
 
     def get_windows_version(self) -> str:
-        response, status = self.execute_command(
-            "(Get-CimInstance Win32_OperatingSystem).Caption"
-        )
+        response, status = self.execute_command("(Get-CimInstance Win32_OperatingSystem).Caption")
         if status == 0:
             return response.strip()
         return "Windows"
@@ -922,11 +893,7 @@ class Desktop:
         for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]):
             try:
                 info = p.info
-                mem_mb = (
-                    info["memory_info"].rss / (1024 * 1024)
-                    if info["memory_info"]
-                    else 0
-                )
+                mem_mb = info["memory_info"].rss / (1024 * 1024) if info["memory_info"] else 0
                 procs.append(
                     {
                         "pid": info["pid"],
@@ -940,27 +907,18 @@ class Desktop:
         if name:
             from thefuzz import fuzz
 
-            procs = [
-                p
-                for p in procs
-                if fuzz.partial_ratio(name.lower(), p["name"].lower()) > 60
-            ]
+            procs = [p for p in procs if fuzz.partial_ratio(name.lower(), p["name"].lower()) > 60]
         sort_key = {
             "memory": lambda x: x["mem_mb"],
             "cpu": lambda x: x["cpu"],
             "name": lambda x: x["name"].lower(),
         }
-        procs.sort(
-            key=sort_key.get(sort_by, sort_key["memory"]), reverse=(sort_by != "name")
-        )
+        procs.sort(key=sort_key.get(sort_by, sort_key["memory"]), reverse=(sort_by != "name"))
         procs = procs[:limit]
         if not procs:
             return f"No processes found{f' matching {name}' if name else ''}."
         table = tabulate(
-            [
-                [p["pid"], p["name"], f"{p['cpu']:.1f}%", f"{p['mem_mb']:.1f} MB"]
-                for p in procs
-            ],
+            [[p["pid"], p["name"], f"{p['cpu']:.1f}%", f"{p['mem_mb']:.1f} MB"] for p in procs],
             headers=["PID", "Name", "CPU%", "Memory"],
             tablefmt="simple",
         )
@@ -1024,11 +982,11 @@ class Desktop:
         return dedent(f"""System Information:
   OS: {platform.system()} {platform.release()} ({platform.version()})
   Machine: {platform.machine()}
-  
+
   CPU: {cpu_pct}% ({cpu_count} cores)
   Memory: {mem.percent}% used ({round(mem.used / 1024**3, 1)} / {round(mem.total / 1024**3, 1)} GB)
   Disk C: {disk.percent}% used ({round(disk.used / 1024**3, 1)} / {round(disk.total / 1024**3, 1)} GB)
-  
+
   Network: ↑ {round(net.bytes_sent / 1024**2, 1)} MB sent, ↓ {round(net.bytes_recv / 1024**2, 1)} MB received
   Uptime: {uptime_str} (booted {boot.strftime("%Y-%m-%d %H:%M")})""")
 
