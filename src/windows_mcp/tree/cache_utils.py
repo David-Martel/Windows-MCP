@@ -5,8 +5,8 @@ This module provides utilities for implementing UI Automation caching
 to reduce cross-process COM calls during tree traversal.
 """
 
-from windows_mcp.uia import CacheRequest, PropertyId, PatternId, TreeScope, Control
-from typing import Optional, Any
+from windows_mcp.uia import CacheRequest, PropertyId, TreeScope, Control
+from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)

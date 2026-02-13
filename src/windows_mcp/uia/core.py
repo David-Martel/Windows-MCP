@@ -15,7 +15,6 @@ import os
 import sys
 import time
 import datetime
-import re
 import shlex
 import struct
 import atexit
@@ -25,7 +24,7 @@ import ctypes.wintypes
 import comtypes
 import comtypes.client
 from io import TextIOWrapper
-from typing import (Any, Callable, Dict, Generator, List, Tuple, Optional, Union, Sequence)
+from typing import (Any, Callable, Dict, Generator, List, Tuple, Optional, Union)
 
 
 METRO_WINDOW_CLASS_NAME = 'Windows.UI.Core.CoreWindow'  # for Windows 8 and 8.1
@@ -45,7 +44,6 @@ ProcessTime = time.perf_counter  # this returns nearly 0 when first call it if p
 ProcessTime()  # need to call it once if python version <= 3.6
 TreeNode = Any
 from .enums import *
-import ctypes.wintypes
 
 def WheelDown(wheelTimes: int = 1, interval: float = 0.05, waitTime: float = OPERATION_WAIT_TIME) -> None:
     for _ in range(wheelTimes):
@@ -923,7 +921,7 @@ def IsProcess64Bit(processId: int) -> Optional[bool]:
     """
     try:
         IsWow64Process = ctypes.windll.kernel32.IsWow64Process
-    except Exception as ex:
+    except Exception:
         return False
     hProcess = ctypes.windll.kernel32.OpenProcess(0x1000, 0, processId)  # PROCESS_QUERY_INFORMATION=0x0400,PROCESS_QUERY_LIMITED_INFORMATION=0x1000
     if hProcess:
@@ -1320,7 +1318,7 @@ def SetThreadDpiAwarenessContext(dpiAwarenessContext: int):
         ctypes.windll.user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
         oldContext = ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(dpiAwarenessContext))
         return oldContext
-    except Exception as ex:
+    except Exception:
         pass
 
 
@@ -1334,7 +1332,7 @@ def SetProcessDpiAwareness(dpiAwareness: int):
         # Once SetProcessDpiAwareness is set for an app, any future calls to SetProcessDpiAwareness will fail.
         # Windows 8.1+
         return ctypes.windll.shcore.SetProcessDpiAwareness(dpiAwareness)
-    except Exception as ex:
+    except Exception:
         pass
 
 
@@ -1384,7 +1382,7 @@ def GetProcesses(detailedInfo: bool = True) -> List[ProcessInfo]:
     if detailedInfo:
         try:
             IsWow64Process = ctypes.windll.kernel32.IsWow64Process
-        except Exception as ex:
+        except Exception:
             IsWow64Process = None
     hSnapshot = ctypes.windll.kernel32.CreateToolhelp32Snapshot(15, 0)  # TH32CS_SNAPALL = 15
     processEntry32 = tagPROCESSENTRY32()

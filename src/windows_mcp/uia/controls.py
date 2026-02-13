@@ -16,15 +16,11 @@ import sys
 import time
 import datetime
 import re
-import shlex
-import struct
-import atexit
 import threading
 import ctypes
 import ctypes.wintypes
 import comtypes
-from io import TextIOWrapper
-from typing import (Any, Callable, Dict, Generator, List, Tuple, Optional, Union, Sequence)
+from typing import (Any, Callable, Dict, Generator, List, Tuple, Optional)
 from .enums import *
 from .core import *
 from .core import _AutomationClient
@@ -633,7 +629,7 @@ class Control():
         """
         try:
             handle = self.Element.CurrentNativeWindowHandle
-        except comtypes.COMError as ex:
+        except comtypes.COMError:
             return 0
         return 0 if handle is None else handle
 
@@ -767,7 +763,7 @@ class Control():
                 if control:
                     controls.append(control)
             return controls
-        except comtypes.COMError as ex:
+        except comtypes.COMError:
             return []
     
     def GetCachedParent(self) -> Optional['Control']:
@@ -782,7 +778,7 @@ class Control():
         try:
             element = self.Element.GetCachedParent()
             return Control.CreateControlFromElement(element)
-        except comtypes.COMError as ex:
+        except comtypes.COMError:
             return None
     
     def GetCachedPattern(self, patternId: int):
@@ -799,7 +795,7 @@ class Control():
             pattern = self.Element.GetCachedPattern(patternId)
             if pattern:
                 return CreatePattern(patternId, pattern)
-        except comtypes.COMError as ex:
+        except comtypes.COMError:
             return None
     
     def GetCachedPatternAs(self, patternId: int, riid):
@@ -815,7 +811,7 @@ class Control():
         """
         try:
             return self.Element.GetCachedPatternAs(patternId, riid)
-        except comtypes.COMError as ex:
+        except comtypes.COMError:
             return None
     
     def GetCachedPropertyValue(self, propertyId: int) -> Any:
@@ -830,7 +826,7 @@ class Control():
         """
         try:
             return self.Element.GetCachedPropertyValue(propertyId)
-        except comtypes.COMError as ex:
+        except comtypes.COMError:
             return None
     
     def GetCachedPropertyValueEx(self, propertyId: int, ignoreDefaultValue: int) -> Any:
@@ -846,7 +842,7 @@ class Control():
         """
         try:
             return self.Element.GetCachedPropertyValueEx(propertyId, ignoreDefaultValue)
-        except comtypes.COMError as ex:
+        except comtypes.COMError:
             return None
 
     def GetClickablePoint(self) -> Tuple[int, int, bool]:
@@ -871,7 +867,7 @@ class Control():
                 subPattern = CreatePattern(patternId, pattern)
                 self._supportedPatterns[patternId] = subPattern
                 return subPattern
-        except comtypes.COMError as ex:
+        except comtypes.COMError:
             pass
 
     def GetPatternAs(self, patternId: int, riid):
@@ -921,7 +917,7 @@ class Control():
         """
         try:
             return self.Element.SetFocus() == S_OK
-        except comtypes.COMError as ex:
+        except comtypes.COMError:
             return False
 
     @property
@@ -4521,7 +4517,7 @@ def LogControl(control: Control, depth: int = 0, showAllName: bool = True, showP
             try:
                 Logger.Write('    TextPattern.Text: ')
                 Logger.Write(repr(pt.DocumentRange.GetText(30)), ConsoleColor.DarkGreen)
-            except comtypes.COMError as ex:
+            except comtypes.COMError:
                 pass
     Logger.Write('    SupportedPattern:')
     for pt, name in supportedPatterns:

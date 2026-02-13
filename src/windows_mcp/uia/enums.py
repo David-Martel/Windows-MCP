@@ -14,18 +14,10 @@ This means that the code can be freely copied and distributed, and costs nothing
 import os
 import sys
 import time
-import datetime
-import re
-import shlex
-import struct
-import atexit
-import threading
 import ctypes
 import ctypes.wintypes
-import comtypes
 from enum import IntEnum, IntFlag
-from io import TextIOWrapper
-from typing import (Any, Callable, Dict, Generator, List, Tuple, Optional, Union, Sequence)
+from typing import (Any)
 
 
 METRO_WINDOW_CLASS_NAME = 'Windows.UI.Core.CoreWindow'  # for Windows 8 and 8.1

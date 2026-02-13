@@ -6,9 +6,9 @@ import logging
 import threading
 import sys
 import ctypes
-from ctypes import HRESULT, POINTER, c_void_p, c_uint32, byref
-from ctypes.wintypes import HWND, BOOL, UINT, INT, WCHAR, LPVOID
-from comtypes import GUID, IUnknown, COMMETHOD, STDMETHOD
+from ctypes import HRESULT, c_void_p, byref
+from ctypes.wintypes import UINT
+from comtypes import STDMETHOD
 
 logger = logging.getLogger(__name__)
 

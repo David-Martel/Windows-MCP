@@ -24,7 +24,7 @@ watchdog: Optional[WatchDog] = None
 analytics: Optional[PostHogAnalytics] = None
 screen_size:Optional[Size]=None
 
-instructions=dedent(f'''
+instructions=dedent('''
 Windows MCP server provides tools to interact directly with the Windows desktop, 
 thus enabling to operate the desktop on the user's behalf.
 ''')

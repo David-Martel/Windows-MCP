@@ -1,5 +1,4 @@
 from dataclasses import dataclass,field
-from tabulate import tabulate
 from typing import Optional
 
 @dataclass
