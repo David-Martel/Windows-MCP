@@ -94,67 +94,67 @@ def GetPatternIdInterface(patternId: int):
         # the following patterns doesn't exist on Windows 7 or lower
         try:
             _PatternIdInterfaces[PatternId.AnnotationPattern] = _AutomationClient.instance().UIAutomationCore.IUIAutomationAnnotationPattern
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have AnnotationPattern.', ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.CustomNavigationPattern] = _AutomationClient.instance().UIAutomationCore.IUIAutomationCustomNavigationPattern
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have CustomNavigationPattern.', ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.DragPattern] = _AutomationClient.instance().UIAutomationCore.IUIAutomationDragPattern
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have DragPattern.', ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.DropTargetPattern] = _AutomationClient.instance().UIAutomationCore.IUIAutomationDropTargetPattern
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have DropTargetPattern.', ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.ObjectModelPattern] = _AutomationClient.instance().UIAutomationCore.IUIAutomationObjectModelPattern
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have ObjectModelPattern.', ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.SpreadsheetItemPattern] = _AutomationClient.instance().UIAutomationCore.IUIAutomationSpreadsheetItemPattern
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have SpreadsheetItemPattern.', ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.SpreadsheetPattern] = _AutomationClient.instance().UIAutomationCore.IUIAutomationSpreadsheetPattern
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have SpreadsheetPattern.', ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.StylesPattern] = _AutomationClient.instance().UIAutomationCore.IUIAutomationStylesPattern
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have StylesPattern.', ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.SelectionPattern2] = _AutomationClient.instance().UIAutomationCore.IUIAutomationSelectionPattern2
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have SelectionPattern2.', ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.TextChildPattern] = _AutomationClient.instance().UIAutomationCore.IUIAutomationTextChildPattern
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have TextChildPattern.', ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.TextEditPattern] = _AutomationClient.instance().UIAutomationCore.IUIAutomationTextEditPattern
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have TextEditPattern.', ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.TextPattern2] = _AutomationClient.instance().UIAutomationCore.IUIAutomationTextPattern2
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have TextPattern2.', ConsoleColor.Yellow)
         try:
             _PatternIdInterfaces[PatternId.TransformPattern2] = _AutomationClient.instance().UIAutomationCore.IUIAutomationTransformPattern2
-        except:
+        except Exception:
             if debug:
                 Logger.WriteLine('UIAutomationCore does not have TransformPattern2.', ConsoleColor.Yellow)
     return _PatternIdInterfaces[patternId]
@@ -375,7 +375,7 @@ class ExpandCollapsePattern():
             ret = self.pattern.Collapse() == S_OK
             time.sleep(waitTime)
             return ret
-        except:
+        except Exception:
             pass
         return False
 
@@ -390,7 +390,7 @@ class ExpandCollapsePattern():
             ret = self.pattern.Expand() == S_OK
             time.sleep(waitTime)
             return ret
-        except:
+        except Exception:
             pass
         return False
 

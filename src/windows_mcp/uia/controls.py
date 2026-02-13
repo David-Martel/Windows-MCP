@@ -258,7 +258,7 @@ class Control():
         """Get the cached control type name."""
         try:
             return ControlTypeNames.get(self.CachedControlType, "Unknown")
-        except:
+        except Exception:
             return "Unknown"
 
     @property
@@ -778,23 +778,6 @@ class Control():
         try:
             element = self.Element.GetCachedParent()
             return Control.CreateControlFromElement(element)
-        except comtypes.COMError:
-            return None
-    
-    def GetCachedPattern(self, patternId: int):
-        """
-        Retrieve a cached pattern interface from this UI Automation element.
-        Call IUIAutomationElement::GetCachedPattern.
-        
-        patternId: int, a value in class `PatternId`.
-        Return a pattern object if the pattern was cached, else None.
-        
-        Refer https://docs.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationelement-getcachedpattern
-        """
-        try:
-            pattern = self.Element.GetCachedPattern(patternId)
-            if pattern:
-                return CreatePattern(patternId, pattern)
         except comtypes.COMError:
             return None
     

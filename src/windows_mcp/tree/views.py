@@ -1,5 +1,5 @@
 from dataclasses import dataclass,field
-from typing import Optional
+from typing import Any, Optional
 
 @dataclass
 class TreeState:
@@ -45,7 +45,7 @@ class BoundingBox:
     height:int
 
     @classmethod
-    def from_bounding_rectangle(cls,bounding_rectangle:'BoundingRectangle')->'BoundingBox':
+    def from_bounding_rectangle(cls,bounding_rectangle: Any)->'BoundingBox':
         return cls(
             left=bounding_rectangle.left,
             top=bounding_rectangle.top,

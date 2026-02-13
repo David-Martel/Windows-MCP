@@ -243,8 +243,6 @@ class Tree:
             # Checks to skip the nodes that are not interactive
             is_offscreen = node.CachedIsOffscreen
             control_type_name = node.CachedControlTypeName
-            class_name = node.CachedClassName
-            
             # Scrollable check
             if scrollable_nodes is not None:
                 if (control_type_name not in (INTERACTIVE_CONTROL_TYPE_NAMES|INFORMATIVE_CONTROL_TYPE_NAMES)) and not is_offscreen:
@@ -339,7 +337,8 @@ class Tree:
                                      legacy_pattern = node.GetLegacyIAccessiblePattern()
                                      if legacy_pattern.DefaultAction.title() in DEFAULT_ACTIONS:
                                          is_default_action = True
-                                 except: pass
+                                 except Exception:
+                                     pass
                                  
                                  if is_role_interactive and (is_default_action or is_keyboard_focusable):
                                      is_interactive = True
@@ -514,7 +513,7 @@ class Tree:
         finally:
             comtypes.CoUninitialize()
 
-    def _on_focus_change(self, sender:'ctypes.POINTER(IUIAutomationElement)'):
+    def _on_focus_change(self, sender: Any):
         """Handle focus change events."""
         # Debounce duplicate events
         current_time = time()
@@ -532,7 +531,7 @@ class Tree:
         except Exception:
             pass
 
-    def _on_property_change(self, sender:'ctypes.POINTER(IUIAutomationElement)', propertyId:int, newValue):
+    def _on_property_change(self, sender: Any, propertyId:int, newValue):
         """Handle property change events."""
         try:
             element = Control.CreateControlFromElement(sender)

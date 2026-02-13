@@ -1,5 +1,5 @@
 import comtypes.client
-from comtypes import GUID, IUnknown, COMMETHOD, HRESULT
+from comtypes import GUID, IUnknown, COMMETHOD
 from ctypes import POINTER
 from ctypes.wintypes import HWND, BOOL
 import logging
@@ -267,9 +267,10 @@ class VirtualDesktopManager:
                 unk = desktops_array.GetAt(i, byref(IVirtualDesktop._iid_))
                 desktop = unk.QueryInterface(IVirtualDesktop)
                 guid = getattr(desktop, "GetID", lambda: None)()
-                if not guid: continue
+                if not guid:
+                    continue
                 guid_str = str(guid)
-                
+
                 # Determine Name
                 reg_name = self._get_name_from_registry(guid_str)
                 display_name = reg_name if reg_name else f"Desktop {i+1}"
@@ -440,7 +441,8 @@ class VirtualDesktopManager:
                 unk = desktops_array.GetAt(i, byref(IVirtualDesktop._iid_))
                 desktop = unk.QueryInterface(IVirtualDesktop)
                 guid = getattr(desktop, "GetID", lambda: None)()
-                if not guid: continue
+                if not guid:
+                    continue
 
                 guid_str = str(guid)
                 # simple_id = _get_simple_id(guid_str) 

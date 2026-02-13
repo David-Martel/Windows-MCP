@@ -43,50 +43,7 @@ CurrentProcessIs64Bit = sys.maxsize > 0xFFFFFFFF
 ProcessTime = time.perf_counter  # this returns nearly 0 when first call it if python version <= 3.6
 ProcessTime()  # need to call it once if python version <= 3.6
 TreeNode = Any
-from .enums import *
-
-def WheelDown(wheelTimes: int = 1, interval: float = 0.05, waitTime: float = OPERATION_WAIT_TIME) -> None:
-    for _ in range(wheelTimes):
-        mouse_event(MouseEventFlag.Wheel, 0, 0, -120, 0)
-        time.sleep(interval)
-    time.sleep(waitTime)
-
-def WheelUp(wheelTimes: int = 1, interval: float = 0.05, waitTime: float = OPERATION_WAIT_TIME) -> None:
-    for _ in range(wheelTimes):
-        mouse_event(MouseEventFlag.Wheel, 0, 0, 120, 0)
-        time.sleep(interval)
-    time.sleep(waitTime)
-
-def GetScreenSize() -> Tuple[int, int]:
-    return ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
-
-def GetVirtualScreenRect() -> Tuple[int, int, int, int]:
-    """Returns (left, top, width, height) of the virtual screen."""
-    return (
-        ctypes.windll.user32.GetSystemMetrics(76), # SM_XVIRTUALSCREEN
-        ctypes.windll.user32.GetSystemMetrics(77), # SM_YVIRTUALSCREEN
-        ctypes.windll.user32.GetSystemMetrics(78), # SM_CXVIRTUALSCREEN
-        ctypes.windll.user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
-    )
-
-def IsTopLevelWindow(handle: int) -> bool:
-    return ctypes.windll.user32.GetParent(handle) == 0
-
-def IsIconic(handle: int) -> bool:
-    return bool(ctypes.windll.user32.IsIconic(handle))
-
-def IsZoomed(handle: int) -> bool:
-    return bool(ctypes.windll.user32.IsZoomed(handle))
-
-def IsWindowVisible(handle: int) -> bool:
-    return bool(ctypes.windll.user32.IsWindowVisible(handle))
-
-def ShowWindow(handle: int, cmdShow: int) -> bool:
-    return bool(ctypes.windll.user32.ShowWindow(handle, cmdShow))
-
-def GetForegroundWindow() -> int:
-    return ctypes.windll.user32.GetForegroundWindow()
-
+from .enums import *  # noqa: E402
 
 class _AutomationClient:
     _instance = None
@@ -562,7 +519,7 @@ def GetMonitorsRect() -> List[Rect]:
         rect = Rect(lprcMonitor.contents.left, lprcMonitor.contents.top, lprcMonitor.contents.right, lprcMonitor.contents.bottom)
         rects.append(rect)
         return 1
-    ret = ctypes.windll.user32.EnumDisplayMonitors(ctypes.c_void_p(0), ctypes.c_void_p(0), MonitorEnumProc(MonitorCallback), 0)
+    ctypes.windll.user32.EnumDisplayMonitors(ctypes.c_void_p(0), ctypes.c_void_p(0), MonitorEnumProc(MonitorCallback), 0)
     return rects
 
 
@@ -835,7 +792,7 @@ def DwmIsCompositionEnabled() -> bool:
             return bool(isEnabled.value)
         else:
             return False
-    except:
+    except Exception:
         return False
 
 
@@ -858,7 +815,7 @@ def DwmGetWindowExtendFrameBounds(handle: int) -> Optional[Rect]:
         if hr == S_OK:
             return Rect(rect.left, rect.top, rect.right, rect.bottom)
         return None
-    except:
+    except Exception:
         return None
 
 
@@ -1169,7 +1126,7 @@ def SendKeys(text: str, interval: float = 0.01, waitTime: float = OPERATION_WAIT
                 if hold:
                     if upperKey in SpecialKeyNames:
                         keyValue = SpecialKeyNames[upperKey]
-                        if type(lastKeyValue) == type(keyValue) and lastKeyValue == keyValue:
+                        if type(lastKeyValue) is type(keyValue) and lastKeyValue == keyValue:
                             insertIndex += 1
                         printKeys.insert(insertIndex, (key[0], 'KeyDown | ExtendedKey'))
                         printKeys.insert(insertIndex + 1, (key[0], 'KeyUp | ExtendedKey'))
@@ -1178,7 +1135,7 @@ def SendKeys(text: str, interval: float = 0.01, waitTime: float = OPERATION_WAIT
                         lastKeyValue = keyValue
                     elif key[0] in CharacterCodes:
                         keyValue = CharacterCodes[key[0]]
-                        if type(lastKeyValue) == type(keyValue) and lastKeyValue == keyValue:
+                        if type(lastKeyValue) is type(keyValue) and lastKeyValue == keyValue:
                             insertIndex += 1
                         printKeys.insert(insertIndex, (key[0], 'KeyDown | ExtendedKey'))
                         printKeys.insert(insertIndex + 1, (key[0], 'KeyUp | ExtendedKey'))
@@ -1235,7 +1192,7 @@ def SendKeys(text: str, interval: float = 0.01, waitTime: float = OPERATION_WAIT
             if hold:
                 if text[i] in CharacterCodes:
                     keyValue = CharacterCodes[text[i]]
-                    if include and type(lastKeyValue) == type(keyValue) and lastKeyValue == keyValue:
+                    if include and type(lastKeyValue) is type(keyValue) and lastKeyValue == keyValue:
                         insertIndex += 1
                     printKeys.insert(insertIndex, (text[i], 'KeyDown | ExtendedKey'))
                     printKeys.insert(insertIndex + 1, (text[i], 'KeyUp | ExtendedKey'))
@@ -1448,7 +1405,7 @@ def GetProcesses(detailedInfo: bool = True) -> List[ProcessInfo]:
                         try:
                             #strlen =
                             ctypes.windll.psapi.GetModuleFileNameExW(hProcess, hModule, exePath, len(exePath))
-                        except:
+                        except Exception:
                             #strlen =
                             ctypes.windll.kernel32.GetModuleFileNameExW(hProcess, hModule, exePath, len(exePath))
                         #exePath is nativeSystemPathFormat
@@ -2107,64 +2064,6 @@ class UiaWindowClosedEventArgs(ctypes.Structure):
         ('EventId', ctypes.c_int),
         ('pRuntimeId', ctypes.c_void_p),
         ('cRuntimeIdLen', ctypes.c_int),
-    ]
-
-class ExtendedProperty(ctypes.Structure):
-    _fields_ = [
-        ('PropertyName', ctypes.c_wchar_p),
-        ('PropertyValue', ctypes.c_wchar_p),
-    ]
-
-class UIAutomationEventInfo(ctypes.Structure):
-    _fields_ = [
-        ('guid', ctypes.c_void_p),
-        ('pProgrammaticName', ctypes.wintypes.LPCWSTR),
-    ]
-
-class UIAutomationMethodInfo(ctypes.Structure):
-    _fields_ = [
-        ('pProgrammaticName', ctypes.wintypes.LPCWSTR),
-        ('doSetFocus', ctypes.wintypes.BOOL),
-        ('cInParameters', ctypes.wintypes.UINT),
-        ('cOutParameters', ctypes.wintypes.UINT),
-        ('pParameterTypes', ctypes.c_void_p),
-        ('pParameterNames', ctypes.c_void_p),
-    ]
-
-class UIAutomationParameter(ctypes.Structure):
-    _fields_ = [
-        ('type', ctypes.c_void_p),
-        ('pData', ctypes.c_void_p),
-    ]
-
-class UIAutomationPatternInfo(ctypes.Structure):
-    _fields_ = [
-        ('guid', ctypes.c_void_p),
-        ('pProgrammaticName', ctypes.wintypes.LPCWSTR),
-        ('providerInterfaceId', ctypes.c_void_p),
-        ('clientInterfaceId', ctypes.c_void_p),
-        ('cProperties', ctypes.wintypes.UINT),
-        ('UIAutomationPropertyInfo', ctypes.c_void_p),
-        ('cMethods', ctypes.wintypes.UINT),
-        ('UIAutomationMethodInfo', ctypes.c_void_p),
-        ('cEvents', ctypes.wintypes.UINT),
-        ('UIAutomationEventInfo', ctypes.c_void_p),
-        ('pPatternHandler', ctypes.c_void_p),
-    ]
-
-class UIAutomationPropertyInfo(ctypes.Structure):
-    _fields_ = [
-        ('guid', ctypes.c_void_p),
-        ('pProgrammaticName', ctypes.wintypes.LPCWSTR),
-        ('type', ctypes.c_void_p),
-    ]
-
-class UiaAndOrCondition(ctypes.Structure):
-    _fields_ = [
-        ('ConditionType', ctypes.c_void_p),
-        ('ppConditions', ctypes.c_void_p),
-        ('UiaCondition', ctypes.c_void_p),
-        ('cConditions', ctypes.c_int),
     ]
 
 class CacheRequest:
