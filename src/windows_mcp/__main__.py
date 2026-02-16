@@ -1,19 +1,32 @@
 from windows_mcp.analytics import PostHogAnalytics, with_analytics
 from windows_mcp.desktop.service import Desktop,Size
 from windows_mcp.watchdog.service import WatchDog
+from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp.server.proxy import ProxyClient
 from contextlib import asynccontextmanager
 from fastmcp.utilities.types import Image
+from dataclasses import dataclass, field
+from windows_mcp.auth import AuthClient
 from mcp.types import ToolAnnotations
 from typing import Literal, Optional
 from fastmcp import FastMCP, Context
+from windows_mcp import filesystem
 from dotenv import load_dotenv
 from textwrap import dedent
 import pyautogui as pg
+from enum import Enum
 import asyncio
 import click
 import os
+import io
 
 load_dotenv()
+
+@dataclass
+class Config:
+    mode: str
+    sandbox_id: str = field(default='')
+    api_key: str = field(default='')
 
 MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT = 1920, 1080
 pg.FAILSAFE=False
@@ -33,7 +46,7 @@ thus enabling to operate the desktop on the user's behalf.
 async def lifespan(app: FastMCP):
     """Runs initialization code before the server starts and cleanup code after it shuts down."""
     global desktop, watchdog, analytics,screen_size
-    
+
     # Initialize components here instead of at module level
     if os.getenv("ANONYMIZED_TELEMETRY", "true").lower() != "false":
         analytics = PostHogAnalytics()
@@ -66,7 +79,7 @@ mcp=FastMCP(name='windows-mcp',instructions=instructions,lifespan=lifespan)
     )
     )
 @with_analytics(analytics, "App-Tool")
-def app_tool(mode:Literal['launch','resize','switch'],name:str|None=None,window_loc:list[int]|None=None,window_size:list[int]|None=None, ctx: Context = None):
+def app_tool(mode:Literal['launch','resize','switch']='launch',name:str|None=None,window_loc:list[int]|None=None,window_size:list[int]|None=None, ctx: Context = None):
     return desktop.app(mode,name,window_loc,window_size)
     
 @mcp.tool(
@@ -89,8 +102,71 @@ def powershell_tool(command: str,timeout:int=30, ctx: Context = None) -> str:
         return f'Error executing command: {str(e)}\nStatus Code: 1'
 
 @mcp.tool(
+    name='File',
+    description="Manages file system operations with eight modes: 'read' (read text file contents with optional line offset/limit), 'write' (create or overwrite a file, set append=True to append), 'copy' (copy file or directory to destination), 'move' (move or rename file/directory), 'delete' (delete file or directory, set recursive=True for non-empty dirs), 'list' (list directory contents with optional pattern filter), 'search' (find files matching a glob pattern), 'info' (get file/directory metadata like size, dates, type).",
+    annotations=ToolAnnotations(
+        title="File",
+        readOnlyHint=False,
+        destructiveHint=True,
+        idempotentHint=False,
+        openWorldHint=False
+    )
+    )
+@with_analytics(analytics, "File-Tool")
+def file_tool(
+    mode: Literal['read', 'write', 'copy', 'move', 'delete', 'list', 'search', 'info'],
+    path: str,
+    destination: str | None = None,
+    content: str | None = None,
+    pattern: str | None = None,
+    recursive: bool | str = False,
+    append: bool | str = False,
+    overwrite: bool | str = False,
+    offset: int | None = None,
+    limit: int | None = None,
+    encoding: str = 'utf-8',
+    show_hidden: bool | str = False,
+    ctx: Context = None
+) -> str:
+    try:
+        recursive = recursive is True or (isinstance(recursive, str) and recursive.lower() == 'true')
+        append = append is True or (isinstance(append, str) and append.lower() == 'true')
+        overwrite = overwrite is True or (isinstance(overwrite, str) and overwrite.lower() == 'true')
+        show_hidden = show_hidden is True or (isinstance(show_hidden, str) and show_hidden.lower() == 'true')
+
+        match mode:
+            case 'read':
+                return filesystem.read_file(path, offset=offset, limit=limit, encoding=encoding)
+            case 'write':
+                if content is None:
+                    return 'Error: content parameter is required for write mode.'
+                return filesystem.write_file(path, content, append=append, encoding=encoding)
+            case 'copy':
+                if destination is None:
+                    return 'Error: destination parameter is required for copy mode.'
+                return filesystem.copy_path(path, destination, overwrite=overwrite)
+            case 'move':
+                if destination is None:
+                    return 'Error: destination parameter is required for move mode.'
+                return filesystem.move_path(path, destination, overwrite=overwrite)
+            case 'delete':
+                return filesystem.delete_path(path, recursive=recursive)
+            case 'list':
+                return filesystem.list_directory(path, pattern=pattern, recursive=recursive, show_hidden=show_hidden)
+            case 'search':
+                if pattern is None:
+                    return 'Error: pattern parameter is required for search mode.'
+                return filesystem.search_files(path, pattern, recursive=recursive)
+            case 'info':
+                return filesystem.get_file_info(path)
+            case _:
+                return f'Error: Unknown mode "{mode}". Use: read, write, copy, move, delete, list, search, info.'
+    except Exception as e:
+        return f'Error in File tool: {str(e)}'
+
+@mcp.tool(
     name='Snapshot',
-    description='Captures complete desktop state including: system language, focused/opened windows, interactive elements (buttons, text fields, links, menus with coordinates), and scrollable areas. Set use_vision=True to include screenshot. Set use_dom=True for browser content to get web page elements instead of browser UI. Always call this first to understand the current desktop state before taking actions.',
+    description='Captures complete desktop state including: system language, focused/opened windows, interactive elements (buttons, text fields, links, menus with coordinates), and scrollable areas. Set use_vision=True to include screenshot. Set use_dom=True for browser content to get web page elements instead of browser UI. Set use_ocr=True to extract visible text from the screen using Tesseract OCR (useful when accessibility tree misses text, e.g. images, remote desktop, custom-rendered UIs). Always call this first to understand the current desktop state before taking actions.',
     annotations=ToolAnnotations(
         title="Snapshot",
         readOnlyHint=True,
@@ -100,25 +176,48 @@ def powershell_tool(command: str,timeout:int=30, ctx: Context = None) -> str:
     )
     )
 @with_analytics(analytics, "State-Tool")
-def state_tool(use_vision:bool|str=False,use_dom:bool|str=False, ctx: Context = None):
+def state_tool(use_vision:bool|str=False,use_dom:bool|str=False,use_ocr:bool|str=False, ctx: Context = None):
     try:
         use_vision = use_vision is True or (isinstance(use_vision, str) and use_vision.lower() == 'true')
         use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == 'true')
+        use_ocr = use_ocr is True or (isinstance(use_ocr, str) and use_ocr.lower() == 'true')
         
         # Calculate scale factor to cap resolution at 1080p (1920x1080)
         scale_width = MAX_IMAGE_WIDTH / screen_size.width if screen_size.width > MAX_IMAGE_WIDTH else 1.0
         scale_height = MAX_IMAGE_HEIGHT / screen_size.height if screen_size.height > MAX_IMAGE_HEIGHT else 1.0
         scale = min(scale_width, scale_height)  # Use the smaller scale to ensure both dimensions fit
         
-        desktop_state=desktop.get_state(use_vision=use_vision,use_dom=use_dom,as_bytes=True,scale=scale)
+        # If OCR is requested but vision is not, we still need a screenshot for OCR
+        use_annotation = use_ocr is False
+        desktop_state=desktop.get_state(use_vision=use_vision or use_ocr,use_annotation=use_annotation,use_dom=use_dom,as_bytes=False,scale=scale)
+        
         interactive_elements=desktop_state.tree_state.interactive_elements_to_string()
         scrollable_elements=desktop_state.tree_state.scrollable_elements_to_string()
         windows=desktop_state.windows_to_string()
         active_window=desktop_state.active_window_to_string()
         active_desktop=desktop_state.active_desktop_to_string()
         all_desktops=desktop_state.desktops_to_string()
+        
+        # Run OCR on the screenshot if requested
+        ocr_text = None
+        if use_ocr and desktop_state.screenshot is not None:
+            ocr_text = desktop.get_ocr_text(screenshot=desktop_state.screenshot)
+        
+        # Convert screenshot to bytes for vision response
+        screenshot_bytes = None
+        if use_vision and desktop_state.screenshot is not None:
+            buffered = io.BytesIO()
+            desktop_state.screenshot.save(buffered, format="PNG")
+            screenshot_bytes = buffered.getvalue()
+            buffered.close()
     except Exception as e:
         return [f'Error capturing desktop state: {str(e)}. Please try again.']
+    
+    ocr_section = f"""
+    OCR Extracted Text:
+    {ocr_text}
+    """ if use_ocr and ocr_text else ""
+    
     return [dedent(f'''
     Active Desktop:
     {active_desktop}
@@ -137,7 +236,7 @@ def state_tool(use_vision:bool|str=False,use_dom:bool|str=False, ctx: Context = 
 
     List of Scrollable Elements:
     {scrollable_elements or 'No scrollable elements found.'}
-    ''')]+([Image(data=desktop_state.screenshot,format='png')] if use_vision else [])
+    {ocr_section}''')]+([Image(data=screenshot_bytes,format='png')] if use_vision and screenshot_bytes else [])
 
 @mcp.tool(
     name='Click',
@@ -437,11 +536,57 @@ def lock_screen_tool(ctx: Context = None) -> str:
         return f'Error locking screen: {str(e)}'
 
 
+@mcp.tool(
+    name='Registry',
+    description='Accesses the Windows Registry. Use mode="get" to read a value, mode="set" to create/update a value, mode="delete" to remove a value or key, mode="list" to list values and sub-keys under a path. Paths use PowerShell format (e.g. "HKCU:\\Software\\MyApp", "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion").',
+    annotations=ToolAnnotations(
+        title="Registry",
+        readOnlyHint=False,
+        destructiveHint=True,
+        idempotentHint=False,
+        openWorldHint=False
+    )
+)
+@with_analytics(analytics, "Registry-Tool")
+def registry_tool(mode: Literal['get', 'set', 'delete', 'list'], path: str, name: str | None = None, value: str | None = None, type: Literal['String', 'DWord', 'QWord', 'Binary', 'MultiString', 'ExpandString'] = 'String', ctx: Context = None) -> str:
+    try:
+        if mode == 'get':
+            if name is None:
+                return 'Error: name parameter is required for get mode.'
+            return desktop.registry_get(path=path, name=name)
+        elif mode == 'set':
+            if name is None:
+                return 'Error: name parameter is required for set mode.'
+            if value is None:
+                return 'Error: value parameter is required for set mode.'
+            return desktop.registry_set(path=path, name=name, value=value, reg_type=type)
+        elif mode == 'delete':
+            return desktop.registry_delete(path=path, name=name)
+        elif mode == 'list':
+            return desktop.registry_list(path=path)
+        else:
+            return 'Error: mode must be "get", "set", "delete", or "list".'
+    except Exception as e:
+        return f'Error accessing registry: {str(e)}'
+
+class Transport(Enum):
+    STDIO = "stdio"
+    SSE = "sse"
+    STREAMABLE_HTTP = "streamable-http"
+    def __str__(self):
+        return self.value
+
+class Mode(Enum):
+    LOCAL = "local"
+    REMOTE = "remote"
+    def __str__(self):
+        return self.value
+
 @click.command()
 @click.option(
     "--transport",
     help="The transport layer used by the MCP server.",
-    type=click.Choice(['stdio','sse','streamable-http']),
+    type=click.Choice([Transport.STDIO.value,Transport.SSE.value,Transport.STREAMABLE_HTTP.value]),
     default='stdio'
 )
 @click.option(
@@ -458,14 +603,40 @@ def lock_screen_tool(ctx: Context = None) -> str:
     type=int,
     show_default=True
 )
+
 def main(transport, host, port):
-    match transport:
-        case 'stdio':
-            mcp.run(transport=transport,show_banner=False)
-        case 'sse'|'streamable-http':
-            mcp.run(transport=transport,host=host,port=port,show_banner=False)
+    config=Config(
+        mode=os.getenv("MODE",Mode.LOCAL.value).lower(),
+        sandbox_id=os.getenv("SANDBOX_ID",''),
+        api_key=os.getenv("API_KEY",'')
+    )
+    match config.mode:
+        case Mode.LOCAL.value:
+            match transport:
+                case Transport.STDIO.value:
+                    mcp.run(transport=Transport.STDIO.value,show_banner=False)
+                case Transport.SSE.value|Transport.STREAMABLE_HTTP.value:
+                    mcp.run(transport=transport,host=host,port=port,show_banner=False)
+                case _:
+                    raise ValueError(f"Invalid transport: {transport}")
+        case Mode.REMOTE.value:
+            if not config.sandbox_id:
+                raise ValueError("SANDBOX_ID is required for MODE: remote")
+            if not config.api_key:
+                raise ValueError("API_KEY is required for MODE: remote")
+            client=AuthClient(api_key=config.api_key,sandbox_id=config.sandbox_id)
+            client.authenticate()
+            backend=StreamableHttpTransport(url=client.proxy_url,headers=client.proxy_headers)
+            proxy_mcp=FastMCP.as_proxy(ProxyClient(backend),name="windows-mcp")
+            match transport:
+                case Transport.STDIO.value:
+                    proxy_mcp.run(transport=Transport.STDIO.value,show_banner=False)
+                case Transport.SSE.value|Transport.STREAMABLE_HTTP.value:
+                    proxy_mcp.run(transport=transport,host=host,port=port,show_banner=False)
+                case _:
+                    raise ValueError(f"Invalid transport: {transport}")
         case _:
-            raise ValueError(f"Invalid transport: {transport}")
+            raise ValueError(f"Invalid mode: {config.mode}")
 
 if __name__ == "__main__":
     main()

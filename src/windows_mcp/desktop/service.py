@@ -126,23 +126,43 @@ class Desktop:
         return uia.ControlFromCursor()
     
     def get_apps_from_start_menu(self)->dict[str,str]:
+        # Try Get-StartApps first (available on Windows 10 1903+ and Windows 11)
         command='Get-StartApps | ConvertTo-Csv -NoTypeInformation'
         apps_info, status = self.execute_command(command)
         
-        if status != 0 or not apps_info:
-            logger.error(f"Failed to get apps from start menu: {apps_info}")
-            return {}
+        if status == 0 and apps_info and apps_info.strip():
+            try:
+                reader = csv.DictReader(io.StringIO(apps_info.strip()))
+                apps = {
+                    row.get('Name', '').lower(): row.get('AppID', '')
+                    for row in reader
+                    if row.get('Name') and row.get('AppID')
+                }
+                if apps:
+                    return apps
+            except Exception as e:
+                logger.warning(f"Error parsing Get-StartApps output: {e}")
 
-        try:
-            reader = csv.DictReader(io.StringIO(apps_info.strip()))
-            return {
-                row.get('Name', '').lower(): row.get('AppID', '')
-                for row in reader
-                if row.get('Name') and row.get('AppID')
-            }
-        except Exception as e:
-            logger.error(f"Error parsing start menu apps: {e}")
-            return {}
+        # Fallback: scan Start Menu shortcut folders (works on all Windows versions)
+        logger.info("Get-StartApps unavailable, falling back to Start Menu folder scan")
+        return self._get_apps_from_shortcuts()
+
+    def _get_apps_from_shortcuts(self)->dict[str,str]:
+        """Scan Start Menu folders for .lnk shortcuts as a fallback for Get-StartApps."""
+        import glob
+        apps = {}
+        start_menu_paths = [
+            os.path.join(os.environ.get('PROGRAMDATA', r'C:\ProgramData'), r'Microsoft\Windows\Start Menu\Programs'),
+            os.path.join(os.environ.get('APPDATA', ''), r'Microsoft\Windows\Start Menu\Programs'),
+        ]
+        for base_path in start_menu_paths:
+            if not os.path.isdir(base_path):
+                continue
+            for lnk_path in glob.glob(os.path.join(base_path, '**', '*.lnk'), recursive=True):
+                name = os.path.splitext(os.path.basename(lnk_path))[0].lower()
+                if name and name not in apps:
+                    apps[name] = lnk_path
+        return apps
     
     def execute_command(self, command: str,timeout:int=10) -> tuple[str, int]:
         try:
@@ -666,6 +686,20 @@ class Desktop:
         width, height = uia.GetVirtualScreenSize()
         return Size(width=width,height=height)
 
+    def get_ocr_text(self, screenshot: Image.Image = None) -> str:
+        """Extracts text from a screenshot using Tesseract OCR."""
+        try:
+            import pytesseract
+        except ImportError:
+            return "Error: pytesseract is not installed. Install it with: pip install pytesseract"
+        try:
+            if screenshot is None:
+                screenshot = self.get_screenshot()
+            text = pytesseract.image_to_string(screenshot)
+            return text.strip() if text.strip() else "No text detected by OCR."
+        except Exception as e:
+            return f"Error performing OCR: {str(e)}"
+
     def get_screenshot(self)->Image.Image:
         try:
             return ImageGrab.grab(all_screens=True)
@@ -859,6 +893,62 @@ class Desktop:
   
   Network: ↑ {round(net.bytes_sent/1024**2,1)} MB sent, ↓ {round(net.bytes_recv/1024**2,1)} MB received
   Uptime: {uptime_str} (booted {boot.strftime("%Y-%m-%d %H:%M")})''')
+
+    def registry_get(self, path: str, name: str) -> str:
+        safe_path = path.replace("'", "''")
+        safe_name = name.replace("'", "''")
+        command = f"Get-ItemProperty -Path '{safe_path}' -Name '{safe_name}' | Select-Object -ExpandProperty '{safe_name}'"
+        response, status = self.execute_command(command)
+        if status != 0:
+            return f'Error reading registry: {response.strip()}'
+        return f'Registry value [{path}] "{name}" = {response.strip()}'
+
+    def registry_set(self, path: str, name: str, value: str, reg_type: str = 'String') -> str:
+        safe_path = path.replace("'", "''")
+        safe_name = name.replace("'", "''")
+        safe_value = value.replace("'", "''")
+        # Ensure the key exists first, then set the property
+        command = (
+            f"if (-not (Test-Path '{safe_path}')) {{ New-Item -Path '{safe_path}' -Force | Out-Null }}; "
+            f"Set-ItemProperty -Path '{safe_path}' -Name '{safe_name}' -Value '{safe_value}' -Type {reg_type} -Force"
+        )
+        response, status = self.execute_command(command)
+        if status != 0:
+            return f'Error writing registry: {response.strip()}'
+        return f'Registry value [{path}] "{name}" set to "{value}" (type: {reg_type}).'
+
+    def registry_delete(self, path: str, name: str | None = None) -> str:
+        safe_path = path.replace("'", "''")
+        if name:
+            safe_name = name.replace("'", "''")
+            command = f"Remove-ItemProperty -Path '{safe_path}' -Name '{safe_name}' -Force"
+            response, status = self.execute_command(command)
+            if status != 0:
+                return f'Error deleting registry value: {response.strip()}'
+            return f'Registry value [{path}] "{name}" deleted.'
+        else:
+            command = f"Remove-Item -Path '{safe_path}' -Recurse -Force"
+            response, status = self.execute_command(command)
+            if status != 0:
+                return f'Error deleting registry key: {response.strip()}'
+            return f'Registry key [{path}] deleted.'
+
+    def registry_list(self, path: str) -> str:
+        safe_path = path.replace("'", "''")
+        # Get values and sub-keys
+        command = (
+            f"$values = (Get-ItemProperty -Path '{safe_path}' -ErrorAction Stop | "
+            f"Select-Object * -ExcludeProperty PS* | Format-List | Out-String).Trim(); "
+            f"$subkeys = (Get-ChildItem -Path '{safe_path}' -ErrorAction SilentlyContinue | "
+            f"Select-Object -ExpandProperty PSChildName) -join \"`n\"; "
+            f"if ($values) {{ Write-Output \"Values:`n$values\" }}; "
+            f"if ($subkeys) {{ Write-Output \"`nSub-Keys:`n$subkeys\" }}; "
+            f"if (-not $values -and -not $subkeys) {{ Write-Output 'No values or sub-keys found.' }}"
+        )
+        response, status = self.execute_command(command)
+        if status != 0:
+            return f'Error listing registry: {response.strip()}'
+        return f'Registry key [{path}]:\n{response.strip()}'
 
     @contextmanager
     def auto_minimize(self):
