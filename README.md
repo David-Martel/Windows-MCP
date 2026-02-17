@@ -76,7 +76,11 @@ mcp-name: io.github.CursorTouch/Windows-MCP
 
 - Python 3.13+
 - UV (Package Manager) from Astra, install with `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- `English` as the default language in Windows highly preferred or disable the `App-Tool` in the MCP Server for Windows with other languages.
+- `English` as the default language in Windows preferred else disable the `App-Tool` in the MCP Server for Windows with other languages.
+- **(Optional) OCR Support** — To use the `use_ocr=True` option in the Snapshot tool, install Tesseract OCR:
+  ```powershell
+  winget install UB-Mannheim.TesseractOCR
+  ```
 
 <details>
   <summary>Install in Claude Desktop</summary>
@@ -364,7 +368,7 @@ MCP Client can access the following tools to interact with Windows:
 - `Move`: Move mouse pointer or drag (set drag=True) to coordinates.
 - `Shortcut`: Press keyboard shortcuts (`Ctrl+c`, `Alt+Tab`, etc).
 - `Wait`: Pause for a defined duration.
-- `Snapshot`: Combined snapshot of default language, browser, active apps and interactive, textual and scrollable elements along with screenshot of the desktop. Supports `use_dom=True` for browser content extraction (web page elements only) and `use_vision=True` for including screenshots.
+- `Snapshot`: Combined snapshot of default language, browser, active apps and interactive, textual and scrollable elements along with screenshot of the desktop. Supports `use_dom=True` for browser content extraction (web page elements only), `use_vision=True` for including screenshots, and `use_ocr=True` for extracting visible text via Tesseract OCR (requires `winget install UB-Mannheim.TesseractOCR`).
 - `App`: To launch an application from the start menu, resize or move the window and switch between apps.
 - `Shell`: To execute PowerShell commands.
 - `Scrape`: To scrape the entire webpage for information.
