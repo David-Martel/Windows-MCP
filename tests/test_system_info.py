@@ -45,7 +45,10 @@ class TestGetSystemInfo:
                 return mock_platform
             return _real_import(name, *args, **kwargs)
 
-        with patch("builtins.__import__", side_effect=patched_import):
+        with (
+            patch("builtins.__import__", side_effect=patched_import),
+            patch("windows_mcp.native.native_system_info", return_value=None),
+        ):
             result = desktop.get_system_info()
 
         assert "Windows" in result

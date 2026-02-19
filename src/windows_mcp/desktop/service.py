@@ -928,26 +928,61 @@ class Desktop:
     def get_system_info(self) -> str:
         import platform
         from datetime import datetime, timedelta
+        from textwrap import dedent
 
         import psutil
 
-        cpu_pct = psutil.cpu_percent(interval=1)
-        cpu_count = psutil.cpu_count()
-        mem = psutil.virtual_memory()
-        disk = psutil.disk_usage("C:\\")
+        from windows_mcp.native import native_system_info
+
+        # Try Rust fast-path for CPU/memory/disk (avoids 1s blocking cpu_percent)
+        native_info = native_system_info()
+
+        if native_info is not None:
+            os_str = f"{platform.system()} {platform.release()} ({platform.version()})"
+            cpu_count = native_info["cpu_count"]
+            cpu_usages = native_info["cpu_usage_percent"]
+            cpu_pct = round(sum(cpu_usages) / len(cpu_usages), 1) if cpu_usages else 0.0
+            mem_total = native_info["total_memory_bytes"]
+            mem_used = native_info["used_memory_bytes"]
+            mem_pct = round(mem_used / mem_total * 100, 1) if mem_total else 0.0
+
+            # Find C: disk from Rust data
+            disk_pct = disk_used_gb = disk_total_gb = 0.0
+            for d in native_info.get("disks", []):
+                if d["mount_point"].upper().startswith("C:"):
+                    disk_total_gb = round(d["total_bytes"] / 1024**3, 1)
+                    disk_used = d["total_bytes"] - d["available_bytes"]
+                    disk_used_gb = round(disk_used / 1024**3, 1)
+                    disk_pct = (
+                        round(disk_used / d["total_bytes"] * 100, 1) if d["total_bytes"] else 0.0
+                    )
+                    break
+        else:
+            os_str = f"{platform.system()} {platform.release()} ({platform.version()})"
+            cpu_pct = psutil.cpu_percent(interval=1)
+            cpu_count = psutil.cpu_count()
+            mem = psutil.virtual_memory()
+            mem_pct = mem.percent
+            mem_used = mem.used
+            mem_total = mem.total
+            disk = psutil.disk_usage("C:\\")
+            disk_pct = disk.percent
+            disk_used_gb = round(disk.used / 1024**3, 1)
+            disk_total_gb = round(disk.total / 1024**3, 1)
+
+        # Network and uptime always from psutil (Rust doesn't have these yet)
         boot = datetime.fromtimestamp(psutil.boot_time())
         uptime = datetime.now() - boot
         uptime_str = str(timedelta(seconds=int(uptime.total_seconds())))
         net = psutil.net_io_counters()
-        from textwrap import dedent
 
         return dedent(f"""System Information:
-  OS: {platform.system()} {platform.release()} ({platform.version()})
+  OS: {os_str}
   Machine: {platform.machine()}
 
   CPU: {cpu_pct}% ({cpu_count} cores)
-  Memory: {mem.percent}% used ({round(mem.used / 1024**3, 1)} / {round(mem.total / 1024**3, 1)} GB)
-  Disk C: {disk.percent}% used ({round(disk.used / 1024**3, 1)} / {round(disk.total / 1024**3, 1)} GB)
+  Memory: {mem_pct}% used ({round(mem_used / 1024**3, 1)} / {round(mem_total / 1024**3, 1)} GB)
+  Disk C: {disk_pct}% used ({disk_used_gb} / {disk_total_gb} GB)
 
   Network: ↑ {round(net.bytes_sent / 1024**2, 1)} MB sent, ↓ {round(net.bytes_recv / 1024**2, 1)} MB received
   Uptime: {uptime_str} (booted {boot.strftime("%Y-%m-%d %H:%M")})""")

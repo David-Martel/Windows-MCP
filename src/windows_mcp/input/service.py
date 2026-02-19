@@ -1,15 +1,23 @@
 """Mouse and keyboard input simulation.
 
 Stateless service wrapping pyautogui and Windows UIA wheel events.
-No Desktop state is required -- all methods operate purely on coordinates
-and key names supplied by the caller.
+Uses Rust native extension (Win32 SendInput) as fast-path when available,
+falling back to pyautogui for all operations.
 """
 
+import logging
 from typing import Literal
 
 import pyautogui as pg  # noqa: E402
 
 import windows_mcp.uia as uia  # noqa: E402
+from windows_mcp.native import (
+    native_send_click,
+    native_send_mouse_move,
+    native_send_text,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class InputService:
@@ -24,6 +32,11 @@ class InputService:
             clicks: Number of clicks (1 for single, 2 for double).
         """
         x, y = loc
+        if clicks == 1:
+            result = native_send_click(x, y, button)
+            if result is not None:
+                return
+        # Fall back to pyautogui for double-click and when native is unavailable
         pg.click(x, y, button=button, clicks=clicks, duration=0.1)
 
     def type(
@@ -58,7 +71,11 @@ class InputService:
             pg.hotkey("ctrl", "a")
             pg.press("backspace")
 
-        pg.typewrite(text, interval=0.02)
+        # Rust fast-path: SendInput KEYEVENTF_UNICODE -- supports full Unicode,
+        # sends all chars atomically in <1ms vs pyautogui's 20ms/char
+        result = native_send_text(text)
+        if result is None:
+            pg.typewrite(text, interval=0.02)
 
         if press_enter is True or (isinstance(press_enter, str) and press_enter.lower() == "true"):
             pg.press("enter")
@@ -129,7 +146,9 @@ class InputService:
             loc: (x, y) destination coordinates.
         """
         x, y = loc
-        pg.moveTo(x, y, duration=0.1)
+        result = native_send_mouse_move(x, y)
+        if result is None:
+            pg.moveTo(x, y, duration=0.1)
 
     def shortcut(self, shortcut: str):
         """Send a keyboard shortcut or single key press.
