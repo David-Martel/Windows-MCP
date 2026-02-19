@@ -17,6 +17,7 @@ from psutil import Process
 
 import windows_mcp.uia as uia
 from windows_mcp.desktop.views import BoundingBox, Browser, Status, Window
+from windows_mcp.native import native_list_windows
 from windows_mcp.vdm.core import is_window_on_current_desktop
 
 logger = logging.getLogger(__name__)
@@ -149,10 +150,115 @@ class WindowService:
             logger.error("Error in get_active_window: %s", ex)
         return None
 
+    def _get_windows_native(
+        self, controls_handles: set[int] | None = None
+    ) -> tuple[list[Window], set[int]] | None:
+        """Fast-path: enumerate windows via Rust (no COM/UIA calls).
+
+        Returns None if Rust native extension is unavailable, signalling
+        the caller to fall back to the UIA-based path.
+        """
+        raw = native_list_windows()
+        if raw is None:
+            return None
+
+        windows: list[Window] = []
+        window_handles: set[int] = set()
+        # Filter to VDM-visible handles if controls_handles provided
+        allowed = controls_handles
+
+        for idx, info in enumerate(raw):
+            hwnd = info.get("hwnd", 0)
+            # Skip windows not on current virtual desktop when filter provided
+            if allowed is not None and hwnd not in allowed:
+                try:
+                    if not is_window_on_current_desktop(hwnd):
+                        continue
+                except Exception:
+                    continue
+
+            title = info.get("title", "")
+            if not title or "Overlay" in title:
+                continue
+
+            rect = info.get("rect", {})
+            left = rect.get("left", 0)
+            top = rect.get("top", 0)
+            right = rect.get("right", 0)
+            bottom = rect.get("bottom", 0)
+
+            is_min = info.get("is_minimized", False)
+            is_max = info.get("is_maximized", False)
+
+            # Skip zero-size non-minimized windows
+            if left == right and top == bottom and not is_min:
+                continue
+
+            if is_min:
+                status = Status.MINIMIZED
+            elif is_max:
+                status = Status.MAXIMIZED
+            elif info.get("is_visible", True):
+                status = Status.NORMAL
+            else:
+                status = Status.HIDDEN
+
+            pid = info.get("pid", 0)
+            is_browser = self._is_browser_pid(pid)
+
+            windows.append(
+                Window(
+                    name=title,
+                    depth=idx,
+                    status=status,
+                    bounding_box=BoundingBox(
+                        left=left,
+                        top=top,
+                        right=right,
+                        bottom=bottom,
+                        width=right - left,
+                        height=bottom - top,
+                    ),
+                    handle=hwnd,
+                    process_id=pid,
+                    is_browser=is_browser,
+                )
+            )
+            window_handles.add(hwnd)
+
+        return windows, window_handles
+
+    def _is_browser_pid(self, pid: int) -> bool:
+        """Check if a PID belongs to a browser process (cached)."""
+        if pid <= 0:
+            return False
+        try:
+            with self._process_cache_lock:
+                proc_name = self._process_name_cache.get(pid)
+            if proc_name is None:
+                proc_name = Process(pid).name()
+                with self._process_cache_lock:
+                    if len(self._process_name_cache) >= _PROCESS_CACHE_MAX:
+                        self._process_name_cache.clear()
+                    self._process_name_cache[pid] = proc_name
+            return Browser.has_process(proc_name)
+        except Exception:
+            return False
+
     def get_windows(
         self, controls_handles: set[int] | None = None
     ) -> tuple[list[Window], set[int]]:
-        """Enumerate all visible, non-overlay windows on the current desktop."""
+        """Enumerate all visible, non-overlay windows on the current desktop.
+
+        Tries Rust fast-path first (no COM/UIA), falls back to UIA-based
+        enumeration if the native extension is unavailable.
+        """
+        # Rust fast-path: ~1-5ms, zero COM calls
+        result = self._get_windows_native(controls_handles)
+        if result is not None:
+            return result
+
+        # UIA fallback: ~50-200ms with COM calls per window
         try:
             windows: list[Window] = []
             window_handles: set[int] = set()

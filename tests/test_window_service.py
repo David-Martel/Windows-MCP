@@ -27,6 +27,7 @@ _WIN32CON = "windows_mcp.window.service.win32con"
 _CTYPES = "windows_mcp.window.service.ctypes"
 _PSUTIL_PROCESS = "windows_mcp.window.service.Process"
 _IS_WINDOW_ON_CURRENT_DESKTOP = "windows_mcp.window.service.is_window_on_current_desktop"
+_NATIVE_LIST_WINDOWS = "windows_mcp.window.service.native_list_windows"
 
 
 # ---------------------------------------------------------------------------
@@ -708,7 +709,13 @@ class TestGetActiveWindow:
 
 
 class TestGetWindows:
-    """Tests for WindowService.get_windows()."""
+    """Tests for WindowService.get_windows() -- UIA fallback path."""
+
+    @pytest.fixture(autouse=True)
+    def _no_native(self):
+        """Disable Rust fast-path so tests exercise the UIA fallback."""
+        with patch(_NATIVE_LIST_WINDOWS, return_value=None):
+            yield
 
     def _make_window_control_child(
         self,
@@ -1276,3 +1283,235 @@ class TestBrowserHasProcess:
 
     def test_empty_string_not_recognised(self):
         assert Browser.has_process("") is False
+
+
+# ===========================================================================
+# _get_windows_native (Rust fast-path)
+# ===========================================================================
+
+
+class TestGetWindowsNative:
+    """Tests for WindowService._get_windows_native() and the Rust fast-path in get_windows()."""
+
+    def _make_native_window(
+        self,
+        hwnd=1000,
+        title="Test App",
+        class_name="TestClass",
+        pid=1234,
+        left=0,
+        top=0,
+        right=800,
+        bottom=600,
+        is_minimized=False,
+        is_maximized=False,
+        is_visible=True,
+    ):
+        return {
+            "hwnd": hwnd,
+            "title": title,
+            "class_name": class_name,
+            "pid": pid,
+            "rect": {"left": left, "top": top, "right": right, "bottom": bottom},
+            "is_minimized": is_minimized,
+            "is_maximized": is_maximized,
+            "is_visible": is_visible,
+        }
+
+    def test_returns_none_when_native_unavailable(self, svc):
+        with patch(_NATIVE_LIST_WINDOWS, return_value=None):
+            result = svc._get_windows_native()
+        assert result is None
+
+    def test_returns_windows_from_native(self, svc):
+        windows_data = [self._make_native_window(hwnd=100, title="App A")]
+        with (
+            patch(_NATIVE_LIST_WINDOWS, return_value=windows_data),
+            patch(_PSUTIL_PROCESS) as MockProcess,
+        ):
+            MockProcess.return_value.name.return_value = "notepad.exe"
+            result = svc._get_windows_native()
+        assert result is not None
+        windows, handles = result
+        assert len(windows) == 1
+        assert windows[0].handle == 100
+        assert windows[0].name == "App A"
+        assert 100 in handles
+
+    def test_overlay_title_filtered_out(self, svc):
+        windows_data = [self._make_native_window(title="NVIDIA Overlay")]
+        with patch(_NATIVE_LIST_WINDOWS, return_value=windows_data):
+            windows, handles = svc._get_windows_native()
+        assert len(windows) == 0
+
+    def test_empty_title_filtered_out(self, svc):
+        windows_data = [self._make_native_window(title="")]
+        with patch(_NATIVE_LIST_WINDOWS, return_value=windows_data):
+            windows, handles = svc._get_windows_native()
+        assert len(windows) == 0
+
+    def test_minimized_window_included(self, svc):
+        windows_data = [
+            self._make_native_window(
+                hwnd=200,
+                title="Minimized App",
+                is_minimized=True,
+                left=0,
+                top=0,
+                right=0,
+                bottom=0,
+            )
+        ]
+        with (
+            patch(_NATIVE_LIST_WINDOWS, return_value=windows_data),
+            patch(_PSUTIL_PROCESS) as MockProcess,
+        ):
+            MockProcess.return_value.name.return_value = "notepad.exe"
+            windows, handles = svc._get_windows_native()
+        assert len(windows) == 1
+        assert windows[0].status == Status.MINIMIZED
+
+    def test_maximized_window_status(self, svc):
+        windows_data = [self._make_native_window(hwnd=300, is_maximized=True)]
+        with (
+            patch(_NATIVE_LIST_WINDOWS, return_value=windows_data),
+            patch(_PSUTIL_PROCESS) as MockProcess,
+        ):
+            MockProcess.return_value.name.return_value = "notepad.exe"
+            windows, handles = svc._get_windows_native()
+        assert len(windows) == 1
+        assert windows[0].status == Status.MAXIMIZED
+
+    def test_normal_window_status(self, svc):
+        windows_data = [self._make_native_window(hwnd=400)]
+        with (
+            patch(_NATIVE_LIST_WINDOWS, return_value=windows_data),
+            patch(_PSUTIL_PROCESS) as MockProcess,
+        ):
+            MockProcess.return_value.name.return_value = "notepad.exe"
+            windows, handles = svc._get_windows_native()
+        assert len(windows) == 1
+        assert windows[0].status == Status.NORMAL
+
+    def test_zero_size_non_minimized_filtered(self, svc):
+        """Zero-size windows that aren't minimized should be filtered out."""
+        windows_data = [
+            self._make_native_window(left=0, top=0, right=0, bottom=0, is_minimized=False)
+        ]
+        with patch(_NATIVE_LIST_WINDOWS, return_value=windows_data):
+            windows, handles = svc._get_windows_native()
+        assert len(windows) == 0
+
+    def test_browser_detection_via_pid(self, svc):
+        windows_data = [self._make_native_window(hwnd=500, pid=9999)]
+        with (
+            patch(_NATIVE_LIST_WINDOWS, return_value=windows_data),
+            patch(_PSUTIL_PROCESS) as MockProcess,
+        ):
+            MockProcess.return_value.name.return_value = "chrome.exe"
+            windows, handles = svc._get_windows_native()
+        assert len(windows) == 1
+        assert windows[0].is_browser is True
+
+    def test_bounding_box_computed_correctly(self, svc):
+        windows_data = [self._make_native_window(left=10, top=20, right=810, bottom=620)]
+        with (
+            patch(_NATIVE_LIST_WINDOWS, return_value=windows_data),
+            patch(_PSUTIL_PROCESS) as MockProcess,
+        ):
+            MockProcess.return_value.name.return_value = "notepad.exe"
+            windows, _ = svc._get_windows_native()
+        bb = windows[0].bounding_box
+        assert bb.left == 10
+        assert bb.top == 20
+        assert bb.right == 810
+        assert bb.bottom == 620
+        assert bb.width == 800
+        assert bb.height == 600
+
+    def test_vdm_filter_excludes_other_desktop(self, svc):
+        """When controls_handles provided, windows not in set are VDM-filtered."""
+        windows_data = [self._make_native_window(hwnd=600)]
+        with (
+            patch(_NATIVE_LIST_WINDOWS, return_value=windows_data),
+            patch(_IS_WINDOW_ON_CURRENT_DESKTOP, return_value=False),
+        ):
+            windows, handles = svc._get_windows_native(controls_handles={999})
+        assert len(windows) == 0
+
+    def test_vdm_filter_includes_current_desktop(self, svc):
+        windows_data = [self._make_native_window(hwnd=700)]
+        with (
+            patch(_NATIVE_LIST_WINDOWS, return_value=windows_data),
+            patch(_IS_WINDOW_ON_CURRENT_DESKTOP, return_value=True),
+            patch(_PSUTIL_PROCESS) as MockProcess,
+        ):
+            MockProcess.return_value.name.return_value = "notepad.exe"
+            windows, handles = svc._get_windows_native(controls_handles={999})
+        assert len(windows) == 1
+
+    def test_get_windows_prefers_native_over_uia(self, svc):
+        """get_windows() should use native path when available."""
+        windows_data = [self._make_native_window(hwnd=800, title="Native App")]
+        with (
+            patch(_NATIVE_LIST_WINDOWS, return_value=windows_data),
+            patch(_PSUTIL_PROCESS) as MockProcess,
+            patch(_UIA) as mock_uia,
+        ):
+            MockProcess.return_value.name.return_value = "notepad.exe"
+            windows, handles = svc.get_windows(controls_handles={800})
+        # UIA ControlFromHandle should NOT be called (native path was used)
+        mock_uia.ControlFromHandle.assert_not_called()
+        assert len(windows) == 1
+        assert windows[0].name == "Native App"
+
+    def test_multiple_native_windows(self, svc):
+        windows_data = [
+            self._make_native_window(hwnd=901, title="App A", pid=1001),
+            self._make_native_window(hwnd=902, title="App B", pid=1002),
+            self._make_native_window(hwnd=903, title="App C", pid=1003),
+        ]
+        with (
+            patch(_NATIVE_LIST_WINDOWS, return_value=windows_data),
+            patch(_PSUTIL_PROCESS) as MockProcess,
+        ):
+            MockProcess.return_value.name.return_value = "notepad.exe"
+            windows, handles = svc._get_windows_native()
+        assert len(windows) == 3
+        assert handles == {901, 902, 903}
+
+
+# ===========================================================================
+# _is_browser_pid
+# ===========================================================================
+
+
+class TestIsBrowserPid:
+    """Tests for WindowService._is_browser_pid()."""
+
+    def test_chrome_pid(self, svc):
+        with patch(_PSUTIL_PROCESS) as MockProcess:
+            MockProcess.return_value.name.return_value = "chrome.exe"
+            assert svc._is_browser_pid(100) is True
+
+    def test_non_browser_pid(self, svc):
+        with patch(_PSUTIL_PROCESS) as MockProcess:
+            MockProcess.return_value.name.return_value = "notepad.exe"
+            assert svc._is_browser_pid(200) is False
+
+    def test_zero_pid_returns_false(self, svc):
+        assert svc._is_browser_pid(0) is False
+
+    def test_negative_pid_returns_false(self, svc):
+        assert svc._is_browser_pid(-1) is False
+
+    def test_exception_returns_false(self, svc):
+        with patch(_PSUTIL_PROCESS, side_effect=Exception("no process")):
+            assert svc._is_browser_pid(999) is False
+
+    def test_uses_cache(self, svc):
+        svc._process_name_cache[500] = "chrome.exe"
+        with patch(_PSUTIL_PROCESS) as MockProcess:
+            result = svc._is_browser_pid(500)
+        MockProcess.assert_not_called()
+        assert result is True

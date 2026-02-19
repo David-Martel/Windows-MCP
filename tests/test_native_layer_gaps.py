@@ -1655,3 +1655,506 @@ class TestNativeWorkerStopCancelsStderrTask:
 
         await w.stop()
         assert w._stderr_task is None
+
+
+# ===========================================================================
+# native.py -- window and screenshot wrapper functions (lines 183-291)
+# ===========================================================================
+
+
+class TestNativeSendDrag:
+    """native_send_drag() -- HAS_NATIVE guard, success, and exception paths."""
+
+    def test_returns_none_when_has_native_false(self):
+        import windows_mcp.native as native
+
+        with patch.object(native, "HAS_NATIVE", False):
+            result = native.native_send_drag(100, 200)
+        assert result is None
+
+    def test_returns_value_when_native_call_succeeds(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.send_drag.return_value = 6
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            result = native.native_send_drag(100, 200)
+        assert result == 6
+        mock_core.send_drag.assert_called_once_with(100, 200, 10)
+
+    def test_returns_none_and_logs_warning_when_native_call_raises(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.send_drag.side_effect = RuntimeError("drag failed")
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+            patch.object(native.logger, "warning") as mock_warn,
+        ):
+            result = native.native_send_drag(100, 200)
+        assert result is None
+        mock_warn.assert_called_once()
+
+    def test_forwards_steps_kwarg_to_core(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.send_drag.return_value = 12
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            result = native.native_send_drag(300, 400, steps=5)
+        assert result == 12
+        mock_core.send_drag.assert_called_once_with(300, 400, 5)
+
+
+class TestNativeEnumerateWindows:
+    """native_enumerate_windows() -- HAS_NATIVE guard, success, and exception paths."""
+
+    def test_returns_none_when_has_native_false(self):
+        import windows_mcp.native as native
+
+        with patch.object(native, "HAS_NATIVE", False):
+            result = native.native_enumerate_windows()
+        assert result is None
+
+    def test_returns_list_of_handles_on_success(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.enumerate_windows.return_value = [131072, 262144, 393216]
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            result = native.native_enumerate_windows()
+        assert result == [131072, 262144, 393216]
+        mock_core.enumerate_windows.assert_called_once_with()
+
+    def test_returns_none_and_logs_warning_when_native_call_raises(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.enumerate_windows.side_effect = OSError("COM error")
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+            patch.object(native.logger, "warning") as mock_warn,
+        ):
+            result = native.native_enumerate_windows()
+        assert result is None
+        mock_warn.assert_called_once()
+
+    def test_returns_empty_list_when_no_windows_visible(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.enumerate_windows.return_value = []
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            result = native.native_enumerate_windows()
+        assert result == []
+
+
+class TestNativeGetWindowInfo:
+    """native_get_window_info() -- HAS_NATIVE guard, success, and exception paths."""
+
+    _SAMPLE_INFO = {
+        "hwnd": 131072,
+        "title": "Notepad",
+        "class_name": "Notepad",
+        "pid": 1234,
+        "rect": {"left": 0, "top": 0, "right": 800, "bottom": 600},
+        "is_minimized": False,
+        "is_maximized": False,
+        "is_visible": True,
+    }
+
+    def test_returns_none_when_has_native_false(self):
+        import windows_mcp.native as native
+
+        with patch.object(native, "HAS_NATIVE", False):
+            result = native.native_get_window_info(131072)
+        assert result is None
+
+    def test_returns_dict_on_success(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.get_window_info.return_value = self._SAMPLE_INFO
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            result = native.native_get_window_info(131072)
+        assert result == self._SAMPLE_INFO
+        mock_core.get_window_info.assert_called_once_with(131072)
+
+    def test_returns_none_and_logs_warning_when_native_call_raises(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.get_window_info.side_effect = ValueError("invalid hwnd")
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+            patch.object(native.logger, "warning") as mock_warn,
+        ):
+            result = native.native_get_window_info(0)
+        assert result is None
+        mock_warn.assert_called_once()
+
+    def test_forwards_hwnd_to_core(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.get_window_info.return_value = {"hwnd": 999}
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            native.native_get_window_info(999)
+        mock_core.get_window_info.assert_called_once_with(999)
+
+
+class TestNativeGetForegroundWindow:
+    """native_get_foreground_window() -- HAS_NATIVE guard, success, and exception paths."""
+
+    def test_returns_none_when_has_native_false(self):
+        import windows_mcp.native as native
+
+        with patch.object(native, "HAS_NATIVE", False):
+            result = native.native_get_foreground_window()
+        assert result is None
+
+    def test_returns_hwnd_int_on_success(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.get_foreground_window.return_value = 524288
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            result = native.native_get_foreground_window()
+        assert result == 524288
+        mock_core.get_foreground_window.assert_called_once_with()
+
+    def test_returns_none_and_logs_warning_when_native_call_raises(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.get_foreground_window.side_effect = RuntimeError("Win32 error")
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+            patch.object(native.logger, "warning") as mock_warn,
+        ):
+            result = native.native_get_foreground_window()
+        assert result is None
+        mock_warn.assert_called_once()
+
+    def test_returns_zero_hwnd_when_no_foreground_window(self):
+        """A zero HWND is a valid return value meaning no foreground window."""
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.get_foreground_window.return_value = 0
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            result = native.native_get_foreground_window()
+        assert result == 0
+
+
+class TestNativeListWindows:
+    """native_list_windows() -- HAS_NATIVE guard, success, and exception paths."""
+
+    _SAMPLE_WINDOWS = [
+        {"hwnd": 131072, "title": "Notepad", "is_visible": True},
+        {"hwnd": 262144, "title": "Calculator", "is_visible": True},
+    ]
+
+    def test_returns_none_when_has_native_false(self):
+        import windows_mcp.native as native
+
+        with patch.object(native, "HAS_NATIVE", False):
+            result = native.native_list_windows()
+        assert result is None
+
+    def test_returns_list_of_window_dicts_on_success(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.list_windows.return_value = self._SAMPLE_WINDOWS
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            result = native.native_list_windows()
+        assert result == self._SAMPLE_WINDOWS
+        mock_core.list_windows.assert_called_once_with()
+
+    def test_returns_none_and_logs_warning_when_native_call_raises(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.list_windows.side_effect = MemoryError("OOM")
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+            patch.object(native.logger, "warning") as mock_warn,
+        ):
+            result = native.native_list_windows()
+        assert result is None
+        mock_warn.assert_called_once()
+
+    def test_returns_empty_list_when_no_visible_windows(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.list_windows.return_value = []
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            result = native.native_list_windows()
+        assert result == []
+
+
+class TestNativeCaptureScreenshotPng:
+    """native_capture_screenshot_png() -- HAS_NATIVE guard, success, and exception paths."""
+
+    # Minimal 1x1 PNG (89 bytes) for realistic byte payload
+    _PNG_BYTES = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+        b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00"
+        b"\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18"
+        b"\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    def test_returns_none_when_has_native_false(self):
+        import windows_mcp.native as native
+
+        with patch.object(native, "HAS_NATIVE", False):
+            result = native.native_capture_screenshot_png()
+        assert result is None
+
+    def test_returns_png_bytes_on_success(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.capture_screenshot_png.return_value = self._PNG_BYTES
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            result = native.native_capture_screenshot_png()
+        assert result == self._PNG_BYTES
+        assert isinstance(result, bytes)
+        mock_core.capture_screenshot_png.assert_called_once_with(0)
+
+    def test_returns_none_and_logs_warning_when_native_call_raises(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.capture_screenshot_png.side_effect = RuntimeError("DXGI error")
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+            patch.object(native.logger, "warning") as mock_warn,
+        ):
+            result = native.native_capture_screenshot_png()
+        assert result is None
+        mock_warn.assert_called_once()
+
+    def test_forwards_monitor_index_to_core(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.capture_screenshot_png.return_value = b"PNG"
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            native.native_capture_screenshot_png(monitor_index=2)
+        mock_core.capture_screenshot_png.assert_called_once_with(2)
+
+    def test_default_monitor_index_is_zero(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.capture_screenshot_png.return_value = b"PNG"
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            native.native_capture_screenshot_png()
+        # Default monitor_index=0 must be passed positionally
+        args, _ = mock_core.capture_screenshot_png.call_args
+        assert args[0] == 0
+
+
+class TestNativeCaptureScreenshotRaw:
+    """native_capture_screenshot_raw() -- HAS_NATIVE guard, success, and exception paths."""
+
+    _SAMPLE_RAW = {
+        "width": 1920,
+        "height": 1080,
+        "data": b"\x00\xff\x00\xff" * (1920 * 1080),  # BGRA pixel data
+    }
+
+    def test_returns_none_when_has_native_false(self):
+        import windows_mcp.native as native
+
+        with patch.object(native, "HAS_NATIVE", False):
+            result = native.native_capture_screenshot_raw()
+        assert result is None
+
+    def test_returns_dict_with_width_height_data_on_success(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        sample = {"width": 1920, "height": 1080, "data": b"\x00" * 10}
+        mock_core.capture_screenshot_raw.return_value = sample
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            result = native.native_capture_screenshot_raw()
+        assert result == sample
+        assert "width" in result
+        assert "height" in result
+        assert "data" in result
+        mock_core.capture_screenshot_raw.assert_called_once_with(0)
+
+    def test_returns_none_and_logs_warning_when_native_call_raises(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.capture_screenshot_raw.side_effect = RuntimeError("GDI error")
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+            patch.object(native.logger, "warning") as mock_warn,
+        ):
+            result = native.native_capture_screenshot_raw()
+        assert result is None
+        mock_warn.assert_called_once()
+
+    def test_forwards_monitor_index_to_core(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.capture_screenshot_raw.return_value = {"width": 800, "height": 600, "data": b""}
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            native.native_capture_screenshot_raw(monitor_index=1)
+        mock_core.capture_screenshot_raw.assert_called_once_with(1)
+
+    def test_default_monitor_index_is_zero(self):
+        import windows_mcp.native as native
+
+        mock_core = MagicMock()
+        mock_core.capture_screenshot_raw.return_value = {"width": 0, "height": 0, "data": b""}
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", mock_core),
+        ):
+            native.native_capture_screenshot_raw()
+        args, _ = mock_core.capture_screenshot_raw.call_args
+        assert args[0] == 0
+
+
+class TestNativeWindowWrapperExceptionSuppression:
+    """All window + screenshot wrappers swallow exceptions and return None.
+
+    Exercises the 'HAS_NATIVE=True but underlying call raises' branch for the
+    five new wrappers added in lines 183-291 of native.py, complementing the
+    existing TestNativeWrapperExceptionSuppression class above.
+    """
+
+    def _core_raising(self) -> MagicMock:
+        exc = RuntimeError("injected failure")
+        m = MagicMock()
+        m.send_drag.side_effect = exc
+        m.enumerate_windows.side_effect = exc
+        m.get_window_info.side_effect = exc
+        m.get_foreground_window.side_effect = exc
+        m.list_windows.side_effect = exc
+        m.capture_screenshot_png.side_effect = exc
+        m.capture_screenshot_raw.side_effect = exc
+        return m
+
+    def test_send_drag_swallows_exception(self):
+        import windows_mcp.native as native
+
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", self._core_raising()),
+        ):
+            assert native.native_send_drag(0, 0) is None
+
+    def test_enumerate_windows_swallows_exception(self):
+        import windows_mcp.native as native
+
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", self._core_raising()),
+        ):
+            assert native.native_enumerate_windows() is None
+
+    def test_get_window_info_swallows_exception(self):
+        import windows_mcp.native as native
+
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", self._core_raising()),
+        ):
+            assert native.native_get_window_info(12345) is None
+
+    def test_get_foreground_window_swallows_exception(self):
+        import windows_mcp.native as native
+
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", self._core_raising()),
+        ):
+            assert native.native_get_foreground_window() is None
+
+    def test_list_windows_swallows_exception(self):
+        import windows_mcp.native as native
+
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", self._core_raising()),
+        ):
+            assert native.native_list_windows() is None
+
+    def test_capture_screenshot_png_swallows_exception(self):
+        import windows_mcp.native as native
+
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", self._core_raising()),
+        ):
+            assert native.native_capture_screenshot_png() is None
+
+    def test_capture_screenshot_raw_swallows_exception(self):
+        import windows_mcp.native as native
+
+        with (
+            patch.object(native, "HAS_NATIVE", True),
+            patch.object(native, "windows_mcp_core", self._core_raising()),
+        ):
+            assert native.native_capture_screenshot_raw() is None
