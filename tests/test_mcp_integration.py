@@ -27,6 +27,7 @@ import pytest
 
 import windows_mcp.__main__ as main_module
 from windows_mcp.desktop.views import DesktopState, Size, Status, Window
+from windows_mcp.tools import _state as _state_module
 from windows_mcp.tree.views import (
     BoundingBox,
     Center,
@@ -140,8 +141,8 @@ def mock_desktop() -> MagicMock:
 @pytest.fixture
 def patched_desktop(mock_desktop):
     """Patch the module-level desktop and screen_size globals and yield the mock."""
-    with patch.object(main_module, "desktop", mock_desktop):
-        with patch.object(main_module, "screen_size", SCREEN_SIZE):
+    with patch.object(_state_module, "desktop", mock_desktop):
+        with patch.object(_state_module, "screen_size", SCREEN_SIZE):
             yield mock_desktop
 
 
@@ -1330,14 +1331,14 @@ class TestInputValidationGuards:
 
     async def test_wait_negative_duration_clamped_to_zero(self, patched_desktop):
         tools = await _get_tools()
-        with patch("windows_mcp.__main__.pg") as mock_pg:
+        with patch("windows_mcp.tools.input_tools.pg") as mock_pg:
             result = await tools["Wait"].fn(duration=-5)
         mock_pg.sleep.assert_called_once_with(0)
         assert "Waited for 0 seconds" in result
 
     async def test_wait_zero_duration_is_valid(self, patched_desktop):
         tools = await _get_tools()
-        with patch("windows_mcp.__main__.pg") as mock_pg:
+        with patch("windows_mcp.tools.input_tools.pg") as mock_pg:
             result = await tools["Wait"].fn(duration=0)
         mock_pg.sleep.assert_called_once_with(0)
         assert "Waited for 0 seconds" in result
@@ -1408,7 +1409,7 @@ class TestLifespanContextManager:
                 with patch.dict("os.environ", {"ANONYMIZED_TELEMETRY": "false"}):
                     with patch("asyncio.sleep", AsyncMock()):
                         async with main_module.lifespan(mock_app):
-                            assert main_module.desktop is mock_desktop_inst
+                            assert _state_module.desktop is mock_desktop_inst
 
     async def test_lifespan_initialises_screen_size(self):
         mock_app = MagicMock()
@@ -1427,7 +1428,7 @@ class TestLifespanContextManager:
                 with patch.dict("os.environ", {"ANONYMIZED_TELEMETRY": "false"}):
                     with patch("asyncio.sleep", AsyncMock()):
                         async with main_module.lifespan(mock_app):
-                            assert main_module.screen_size == Size(2560, 1440)
+                            assert _state_module.screen_size == Size(2560, 1440)
 
     async def test_lifespan_starts_watchdog(self):
         mock_app = MagicMock()
@@ -1475,7 +1476,7 @@ class TestLifespanContextManager:
                     with patch.dict("os.environ", {"ANONYMIZED_TELEMETRY": "true"}):
                         with patch("asyncio.sleep", AsyncMock()):
                             async with main_module.lifespan(mock_app):
-                                assert main_module.analytics is mock_analytics_inst
+                                assert _state_module.analytics is mock_analytics_inst
 
     async def test_lifespan_closes_analytics_on_exit(self):
         mock_app = MagicMock()

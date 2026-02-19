@@ -14,7 +14,7 @@ Organised by the cluster of source branches each group targets:
   Cluster 9  - scrape_tool DOM mode with null tree_state
 
 Design follows the patterns established in test_mcp_integration.py:
-  - patch.object(main_module, "desktop", mock) + "screen_size" as required
+  - patch.object(_state_module, "desktop", mock) + "screen_size" as required
   - tools retrieved via await main_module.mcp._tool_manager.get_tools()
   - tool.fn(...) called directly to bypass FastMCP context injection
   - asyncio_mode = "auto" in pyproject.toml so bare async def test_* works
@@ -27,6 +27,7 @@ import pytest
 
 import windows_mcp.__main__ as main_module
 from windows_mcp.desktop.views import DesktopState, Size, Status, Window
+from windows_mcp.tools import _state as _state_module
 from windows_mcp.tree.views import (
     BoundingBox,
     Center,
@@ -234,8 +235,8 @@ def mock_desktop() -> MagicMock:
 
 @pytest.fixture
 def patched_desktop(mock_desktop):
-    with patch.object(main_module, "desktop", mock_desktop):
-        with patch.object(main_module, "screen_size", SCREEN_SIZE):
+    with patch.object(_state_module, "desktop", mock_desktop):
+        with patch.object(_state_module, "screen_size", SCREEN_SIZE):
             yield mock_desktop
 
 
@@ -293,8 +294,8 @@ class TestSnapshotNullScreenSize:
     async def test_snapshot_uses_scale_1_when_screen_size_none(self, mock_desktop):
         """When screen_size is None the scale factor must default to 1.0."""
         mock_desktop.get_state.return_value = _make_desktop_state()
-        with patch.object(main_module, "desktop", mock_desktop):
-            with patch.object(main_module, "screen_size", None):
+        with patch.object(_state_module, "desktop", mock_desktop):
+            with patch.object(_state_module, "screen_size", None):
                 tools = await _get_tools()
                 result = await tools["Snapshot"].fn(use_vision=False, use_dom=False)
 
@@ -306,8 +307,8 @@ class TestSnapshotNullScreenSize:
     async def test_snapshot_error_returns_error_list(self, mock_desktop):
         """An exception from desktop.get_state returns a single-element list with the error."""
         mock_desktop.get_state.side_effect = RuntimeError("UIA crash")
-        with patch.object(main_module, "desktop", mock_desktop):
-            with patch.object(main_module, "screen_size", SCREEN_SIZE):
+        with patch.object(_state_module, "desktop", mock_desktop):
+            with patch.object(_state_module, "screen_size", SCREEN_SIZE):
                 tools = await _get_tools()
                 result = await tools["Snapshot"].fn(use_vision=False, use_dom=False)
 
@@ -433,8 +434,8 @@ class TestWaitForNullTreeState:
     async def test_waitfor_element_null_tree_state_times_out(self, mock_desktop):
         """When tree_state is None the element branch never matches and WaitFor times out."""
         mock_desktop.get_state.return_value = _make_desktop_state_no_tree()
-        with patch.object(main_module, "desktop", mock_desktop):
-            with patch.object(main_module, "screen_size", SCREEN_SIZE):
+        with patch.object(_state_module, "desktop", mock_desktop):
+            with patch.object(_state_module, "screen_size", SCREEN_SIZE):
                 tools = await _get_tools()
                 result = await tools["WaitFor"].fn(mode="element", name="SomeButton", timeout=1)
         assert "Timeout" in result
@@ -453,8 +454,8 @@ class TestWaitForNullTreeState:
             return ds_no_tree if call_count[0] == 1 else ds_with_tree
 
         mock_desktop.get_state.side_effect = _side_effect
-        with patch.object(main_module, "desktop", mock_desktop):
-            with patch.object(main_module, "screen_size", SCREEN_SIZE):
+        with patch.object(_state_module, "desktop", mock_desktop):
+            with patch.object(_state_module, "screen_size", SCREEN_SIZE):
                 tools = await _get_tools()
                 result = await tools["WaitFor"].fn(mode="element", name="Submit", timeout=5)
         assert "Element found" in result
