@@ -1,6 +1,7 @@
 import csv
 import ctypes
 import io
+import locale
 import logging
 import os
 import random
@@ -57,6 +58,12 @@ class Desktop:
         self.tree = Tree(self)
         self.desktop_state = None
         self._state_lock = threading.Lock()
+        # Cache for start menu app list (avoids repeated PowerShell subprocess)
+        self._app_cache: dict[str, str] | None = None
+        self._app_cache_time: float = 0.0
+        self._APP_CACHE_TTL: float = 3600.0  # 1 hour
+        # Cache for process name lookups (avoids psutil.Process() per window)
+        self._process_name_cache: dict[int, str] = {}
 
     @staticmethod
     def _ps_quote(value: str) -> str:
@@ -171,7 +178,11 @@ class Desktop:
         return uia.ControlFromCursor()
 
     def get_apps_from_start_menu(self) -> dict[str, str]:
-        """Get installed apps. Tries Get-StartApps first, falls back to shortcut scanning."""
+        """Get installed apps with caching. Tries Get-StartApps first, falls back to shortcut scanning."""
+        now = time()
+        if self._app_cache is not None and (now - self._app_cache_time) < self._APP_CACHE_TTL:
+            return self._app_cache
+
         command = "Get-StartApps | ConvertTo-Csv -NoTypeInformation"
         apps_info, status = self.execute_command(command)
 
@@ -184,13 +195,18 @@ class Desktop:
                     if row.get("Name") and row.get("AppID")
                 }
                 if apps:
+                    self._app_cache = apps
+                    self._app_cache_time = now
                     return apps
             except Exception as e:
                 logger.warning(f"Error parsing Get-StartApps output: {e}")
 
         # Fallback: scan Start Menu shortcut folders (works on all Windows versions)
         logger.info("Get-StartApps unavailable, falling back to Start Menu folder scan")
-        return self._get_apps_from_shortcuts()
+        apps = self._get_apps_from_shortcuts()
+        self._app_cache = apps
+        self._app_cache_time = now
+        return apps
 
     def _get_apps_from_shortcuts(self) -> dict[str, str]:
         """Scan Start Menu folders for .lnk shortcuts as a fallback for Get-StartApps."""
@@ -230,14 +246,16 @@ class Desktop:
     def is_window_browser(self, node: uia.Control):
         """Give any node of the app and it will return True if the app is a browser, False otherwise."""
         try:
-            process = Process(node.ProcessId)
-            return Browser.has_process(process.name())
+            pid = node.ProcessId
+            proc_name = self._process_name_cache.get(pid)
+            if proc_name is None:
+                proc_name = Process(pid).name()
+                self._process_name_cache[pid] = proc_name
+            return Browser.has_process(proc_name)
         except Exception:
             return False
 
     def get_default_language(self) -> str:
-        import locale
-
         try:
             # Returns e.g. ('en_US', 'UTF-8') or ('English_United States', '1252')
             lang, _ = locale.getlocale()
