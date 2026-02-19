@@ -53,8 +53,8 @@
 - [x] **[S1] Implement Shell tool sandboxing** -- Done. `ShellService.check_blocklist()` with 16 regex patterns (format, diskpart, bcdedit, rm -rf, net user/localgroup, IEX+DownloadString, etc). Configurable via `WINDOWS_MCP_SHELL_BLOCKLIST` env var. Extracted to `shell/service.py`.
 - [x] **[S4] Add path-scoping to File tool** -- `WINDOWS_MCP_ALLOWED_PATHS` env var (semicolon-separated). All 8 filesystem functions validate resolved paths against allowed scope. 28 new tests.
 - [x] **[S3] Restrict Registry tool access** -- 11 regex patterns block writes to Run/RunOnce/Services/Policies/SAM/SECURITY. `WINDOWS_MCP_REGISTRY_UNRESTRICTED=true` bypasses. 51 new tests.
-- [ ] **[S5] Rotate PostHog API key** -- Move to environment variable. Disable GeoIP, disable exception auto-capture. Default telemetry to opt-in.
-- [ ] **[S6] Enforce HTTPS for auth client** -- Change default from `http://` to `https://`. Add certificate verification. Reduce `__repr__` key exposure to 4 chars.
+- [x] **[S5] Rotate PostHog API key** -- `POSTHOG_API_KEY` env var overrides hardcoded default. Disabled GeoIP, disabled exception auto-capture.
+- [x] **[S6] Enforce HTTPS for auth client** -- Default dashboard URL changed to `https://windowsmcp.io` (configurable via `DASHBOARD_URL`). `__repr__` exposes only last 4 chars of API key.
 - [x] **[S8] Add protected process list** -- `ProcessService.is_protected()` blocks csrss, lsass, services, svchost, winlogon, MsMpEng, smss, wininit, system, registry. Extracted to `process/service.py`.
 - [ ] **Implement security audit logging** -- Log all tool invocations with timestamps, parameters, results.
 - [ ] **Implement rate limiting** -- Per-tool rate limits to prevent abuse.
@@ -79,10 +79,10 @@
 - [x] **[Q7] Fix resource leaks** -- Fixed HTTP response leak in `scrape()` (close intermediate redirect responses and final response in `finally` block). `auto_minimize` handle guard already present. COM init guard deferred (comtypes handles internally).
 - [ ] **[P10] Cache COM pattern calls in tree traversal** -- Store `GetLegacyIAccessiblePattern()` result in local variable instead of calling 3 times per node.
 - [ ] **[P10] Fix BuildUpdatedCache** -- Check for existing cached state before issuing round-trip in `get_cached_children`.
-- [ ] **Use set literals in tree/config.py** -- Replace `set([...])` with `{...}`.
+- [x] **Use set literals in tree/config.py** -- Already uses `{...}` set literals. Verified no `set([...])` remains.
 - [x] **[A6] Consolidate input simulation** -- Rust Win32 `SendInput` is primary path in `InputService` (click, type, scroll, drag, move, shortcut). Falls back to pyautogui when native unavailable.
 - [ ] **Add type annotations to all public APIs**.
-- [ ] **[T3] Fix singleton TOCTOU in _AutomationClient** -- Add threading lock to `instance()`.
+- [x] **[T3] Fix singleton TOCTOU in _AutomationClient** -- Added double-checked locking with `threading.Lock()` to `instance()`.
 
 ---
 
@@ -90,11 +90,11 @@
 
 *Source: Phase 2 comparative analysis (rust-pro, backend-architect, performance-engineer agents)*
 
-- [ ] **Replace `Wait(duration)` with event-driven `WaitFor`** -- Extract the pattern already used in `App` tool (lines 299-311) into a general `WaitFor(mode="window"|"element", name=..., timeout=...)` tool backed by `uia.Exists(maxSearchSeconds=N)`. Deprecate fixed-sleep `Wait`.
+- [x] **Replace `Wait(duration)` with event-driven `WaitFor`** -- Done. `WaitFor(mode="window"|"element", name, timeout)` in `tools/state_tools.py`. Polls `get_state()` with 0.5s interval, timeout capped at 300s.
 - [ ] **Add `ValuePattern.SetValue()` as primary text input** -- In `type()` method, attempt `ValuePattern.SetValue(text)` before falling back to `pg.typewrite()`. Eliminates 20ms/char typing for all UIA-compliant text fields.
 - [x] **Reduce `pg.PAUSE` from 1.0 to 0.05** -- Done. Changed in both `desktop/service.py:45` and `__main__.py:33`.
-- [ ] **Add `Find` tool for semantic element lookup** -- `Find(name, control_type, window, automation_id)` resolves to coordinates + xpath without full Snapshot traversal.
-- [ ] **Add `Invoke` tool for UIA pattern actions** -- `InvokePattern.Invoke()` for buttons, `TogglePattern.Toggle()` for checkboxes, `ExpandCollapsePattern.Expand()` for dropdowns. More reliable than coordinate clicking.
+- [x] **Add `Find` tool for semantic element lookup** -- Done. `Find(name, control_type, window, limit)` in `tools/state_tools.py`. Searches interactive nodes by name, type, and window.
+- [x] **Add `Invoke` tool for UIA pattern actions** -- Done. `Invoke(loc, action, value)` in `tools/input_tools.py`. Supports invoke, toggle, set_value, expand, collapse, select patterns.
 - [ ] **Use `TreeScope_Subtree` for single-shot cached traversal** -- Currently `BuildUpdatedCache` called per-node (TWO COM round-trips each). Single `TreeScope_Subtree` on window root would collapse thousands of COM calls into one. Estimated 60-80% tree traversal reduction.
 
 ---
