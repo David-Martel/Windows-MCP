@@ -1,6 +1,10 @@
 """
 File system service for the Windows MCP server.
 Provides structured, safe file operations as an alternative to raw Shell commands.
+
+Path scoping: When WINDOWS_MCP_ALLOWED_PATHS is set (semicolon-separated list
+of directories), all operations are restricted to those directories and their
+subdirectories.  Paths are resolved to absolute form before checking.
 """
 
 import fnmatch
@@ -21,11 +25,41 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+def _get_allowed_paths() -> list[Path] | None:
+    """Return resolved allowed paths from env var, or None if unrestricted."""
+    raw = os.environ.get("WINDOWS_MCP_ALLOWED_PATHS", "").strip()
+    if not raw:
+        return None
+    paths = []
+    for part in raw.split(";"):
+        part = part.strip()
+        if part:
+            paths.append(Path(part).resolve())
+    return paths or None
+
+
+def _check_path_scope(resolved: Path) -> None:
+    """Raise PermissionError if resolved path is outside allowed scope."""
+    allowed = _get_allowed_paths()
+    if allowed is None:
+        return  # No restriction
+    for allowed_dir in allowed:
+        try:
+            resolved.relative_to(allowed_dir)
+            return  # Path is under an allowed directory
+        except ValueError:
+            continue
+    raise PermissionError(
+        f"Path '{resolved}' is outside allowed scope. Allowed: {'; '.join(str(p) for p in allowed)}"
+    )
+
+
 def read_file(
     path: str, offset: int | None = None, limit: int | None = None, encoding: str = "utf-8"
 ) -> str:
     """Read the contents of a text file."""
     file_path = Path(path).resolve()
+    _check_path_scope(file_path)
 
     if not file_path.exists():
         return f"Error: File not found: {file_path}"
@@ -67,6 +101,7 @@ def write_file(
 ) -> str:
     """Write or append text content to a file."""
     file_path = Path(path).resolve()
+    _check_path_scope(file_path)
 
     try:
         if create_parents:
@@ -89,6 +124,8 @@ def copy_path(source: str, destination: str, overwrite: bool = False) -> str:
     """Copy a file or directory to a new location."""
     src = Path(source).resolve()
     dst = Path(destination).resolve()
+    _check_path_scope(src)
+    _check_path_scope(dst)
 
     if not src.exists():
         return f"Error: Source not found: {src}"
@@ -118,6 +155,8 @@ def move_path(source: str, destination: str, overwrite: bool = False) -> str:
     """Move or rename a file or directory."""
     src = Path(source).resolve()
     dst = Path(destination).resolve()
+    _check_path_scope(src)
+    _check_path_scope(dst)
 
     if not src.exists():
         return f"Error: Source not found: {src}"
@@ -143,6 +182,7 @@ def move_path(source: str, destination: str, overwrite: bool = False) -> str:
 def delete_path(path: str, recursive: bool = False) -> str:
     """Delete a file or directory."""
     target = Path(path).resolve()
+    _check_path_scope(target)
 
     if not target.exists():
         return f"Error: Path not found: {target}"
@@ -173,6 +213,7 @@ def list_directory(
 ) -> str:
     """List contents of a directory."""
     dir_path = Path(path).resolve()
+    _check_path_scope(dir_path)
 
     if not dir_path.exists():
         return f"Error: Directory not found: {dir_path}"
@@ -225,6 +266,7 @@ def list_directory(
 def search_files(path: str, pattern: str, recursive: bool = True) -> str:
     """Search for files matching a glob pattern."""
     search_root = Path(path).resolve()
+    _check_path_scope(search_root)
 
     if not search_root.exists():
         return f"Error: Search path not found: {search_root}"
@@ -271,6 +313,7 @@ def search_files(path: str, pattern: str, recursive: bool = True) -> str:
 def get_file_info(path: str) -> str:
     """Get detailed metadata about a file or directory."""
     target = Path(path).resolve()
+    _check_path_scope(target)
 
     if not target.exists():
         return f"Error: Path not found: {target}"

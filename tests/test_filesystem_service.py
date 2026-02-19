@@ -1,4 +1,8 @@
+import pytest
+
 from windows_mcp.filesystem.service import (
+    _check_path_scope,
+    _get_allowed_paths,
     copy_path,
     delete_path,
     get_file_info,
@@ -241,3 +245,256 @@ class TestGetFileInfo:
     def test_not_found(self, tmp_path):
         result = get_file_info(str(tmp_path / "nope"))
         assert "Error: Path not found" in result
+
+
+# ---------------------------------------------------------------------------
+# Path scoping security tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetAllowedPaths:
+    def test_returns_none_when_env_var_unset(self, monkeypatch):
+        monkeypatch.delenv("WINDOWS_MCP_ALLOWED_PATHS", raising=False)
+        assert _get_allowed_paths() is None
+
+    def test_returns_none_when_env_var_empty(self, monkeypatch):
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", "")
+        assert _get_allowed_paths() is None
+
+    def test_returns_none_when_env_var_only_whitespace(self, monkeypatch):
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", "   ")
+        assert _get_allowed_paths() is None
+
+    def test_parses_single_path(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(tmp_path))
+        result = _get_allowed_paths()
+        assert result is not None
+        assert len(result) == 1
+        assert result[0] == tmp_path.resolve()
+
+    def test_parses_semicolon_separated_paths(self, monkeypatch, tmp_path):
+        dir_a = tmp_path / "a"
+        dir_b = tmp_path / "b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", f"{dir_a};{dir_b}")
+        result = _get_allowed_paths()
+        assert result is not None
+        assert len(result) == 2
+        assert dir_a.resolve() in result
+        assert dir_b.resolve() in result
+
+    def test_strips_whitespace_around_paths(self, monkeypatch, tmp_path):
+        dir_a = tmp_path / "a"
+        dir_b = tmp_path / "b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", f"  {dir_a}  ;  {dir_b}  ")
+        result = _get_allowed_paths()
+        assert result is not None
+        assert len(result) == 2
+        assert dir_a.resolve() in result
+        assert dir_b.resolve() in result
+
+    def test_ignores_empty_segments_from_trailing_semicolon(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", f"{tmp_path};")
+        result = _get_allowed_paths()
+        assert result is not None
+        assert len(result) == 1
+
+    def test_returns_resolved_absolute_paths(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(tmp_path))
+        result = _get_allowed_paths()
+        assert result is not None
+        assert result[0].is_absolute()
+
+
+class TestCheckPathScope:
+    def test_allows_all_paths_when_env_var_unset(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("WINDOWS_MCP_ALLOWED_PATHS", raising=False)
+        # Should not raise for any path when unrestricted
+        _check_path_scope(tmp_path / "some" / "deep" / "path")
+
+    def test_allows_path_inside_allowed_directory(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        # A file inside the allowed dir must not raise
+        _check_path_scope((allowed / "file.txt").resolve())
+
+    def test_allows_path_equal_to_allowed_directory(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        _check_path_scope(allowed.resolve())
+
+    def test_allows_nested_path_inside_allowed_directory(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        (allowed / "sub" / "deep").mkdir(parents=True)
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        _check_path_scope((allowed / "sub" / "deep" / "file.txt").resolve())
+
+    def test_blocks_path_outside_allowed_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError, match="outside allowed scope"):
+            _check_path_scope(outside.resolve())
+
+    def test_blocks_parent_directory_escape(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError):
+            _check_path_scope(tmp_path.resolve())
+
+    def test_allows_path_under_any_of_multiple_allowed_dirs(self, monkeypatch, tmp_path):
+        dir_a = tmp_path / "a"
+        dir_b = tmp_path / "b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", f"{dir_a};{dir_b}")
+        # A path under dir_b should be allowed even though dir_a is listed first
+        _check_path_scope((dir_b / "file.txt").resolve())
+
+    def test_error_message_includes_allowed_paths(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError) as exc_info:
+            _check_path_scope(outside.resolve())
+        assert str(allowed.resolve()) in str(exc_info.value)
+
+
+class TestFilesystemScopeEnforcement:
+    """Verify each public filesystem function raises PermissionError for out-of-scope paths.
+
+    _check_path_scope is called before the try/except in each function, so a
+    PermissionError from path-scope violations propagates uncaught to the caller
+    (FastMCP converts it to a tool error at the protocol boundary).
+    """
+
+    def test_read_file_raises_outside_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        target = outside / "secret.txt"
+        target.write_text("secret", encoding="utf-8")
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError, match="outside allowed scope"):
+            read_file(str(target))
+
+    def test_write_file_raises_outside_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError, match="outside allowed scope"):
+            write_file(str(outside / "new.txt"), "content")
+
+    def test_copy_source_raises_outside_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        src = outside / "src.txt"
+        src.write_text("data", encoding="utf-8")
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError, match="outside allowed scope"):
+            copy_path(str(src), str(allowed / "dst.txt"))
+
+    def test_copy_destination_raises_outside_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        src = allowed / "src.txt"
+        src.write_text("data", encoding="utf-8")
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError, match="outside allowed scope"):
+            copy_path(str(src), str(outside / "dst.txt"))
+
+    def test_move_source_raises_outside_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        src = outside / "src.txt"
+        src.write_text("data", encoding="utf-8")
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError, match="outside allowed scope"):
+            move_path(str(src), str(allowed / "dst.txt"))
+
+    def test_move_destination_raises_outside_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        src = allowed / "src.txt"
+        src.write_text("data", encoding="utf-8")
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError, match="outside allowed scope"):
+            move_path(str(src), str(outside / "dst.txt"))
+
+    def test_delete_path_raises_outside_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        target = outside / "file.txt"
+        target.write_text("data", encoding="utf-8")
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError, match="outside allowed scope"):
+            delete_path(str(target))
+
+    def test_list_directory_raises_outside_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError, match="outside allowed scope"):
+            list_directory(str(outside))
+
+    def test_search_files_raises_outside_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError, match="outside allowed scope"):
+            search_files(str(outside), "*.txt")
+
+    def test_get_file_info_raises_outside_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        target = outside / "file.txt"
+        target.write_text("data", encoding="utf-8")
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        with pytest.raises(PermissionError, match="outside allowed scope"):
+            get_file_info(str(target))
+
+    def test_read_file_succeeds_inside_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        target = allowed / "ok.txt"
+        target.write_text("hello", encoding="utf-8")
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        result = read_file(str(target))
+        assert "hello" in result
+        assert "Error" not in result
+
+    def test_write_file_succeeds_inside_scope(self, monkeypatch, tmp_path):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        monkeypatch.setenv("WINDOWS_MCP_ALLOWED_PATHS", str(allowed))
+        result = write_file(str(allowed / "new.txt"), "content")
+        assert "Written to" in result
