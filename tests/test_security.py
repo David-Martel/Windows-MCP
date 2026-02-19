@@ -170,14 +170,9 @@ class TestShellBlocklist:
         assert result is not None, "Expected IEX+DownloadString cradle to be blocked"
 
     def test_net_user_add_blocked(self):
-        # NOTE: the pattern r'\bnet\s+user\b.*\b/add\b' requires a word character
-        # to immediately precede the '/' (because \b matches a word boundary and
-        # '/' is not a word character).  The canonical Windows syntax uses a space
-        # before /add ("net user bob P@ss /add"), which the pattern does NOT catch.
-        # We test with the form that the regex actually matches so the test stays
-        # honest about the current implementation behaviour.
-        result = Desktop._check_shell_blocklist("net user hacker P@ss/add")
-        assert result is not None, "Expected 'net user .../add' (no space) to be blocked"
+        # Canonical Windows syntax: space before /add
+        result = Desktop._check_shell_blocklist("net user hacker P@ss /add")
+        assert result is not None, "Expected 'net user ... /add' to be blocked"
 
     def test_safe_command_allowed(self):
         result = Desktop._check_shell_blocklist("Get-Process")
@@ -215,10 +210,8 @@ class TestShellBlocklist:
         assert result is not None, "Expected 'reg delete HK...' to be blocked"
 
     def test_privilege_escalation_blocked(self):
-        # Same \b/add boundary issue as test_net_user_add_blocked: the pattern only
-        # triggers when a word character directly precedes '/'.  We use the no-space
-        # variant so the test accurately reflects the real regex behaviour.
-        result = Desktop._check_shell_blocklist("net localgroup administrators attacker/add")
+        # Canonical Windows syntax: space before /add
+        result = Desktop._check_shell_blocklist("net localgroup administrators attacker /add")
         assert result is not None, "Expected local admin group escalation to be blocked"
 
     def test_iex_webclient_variant_blocked(self):

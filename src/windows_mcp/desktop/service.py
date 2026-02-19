@@ -68,8 +68,8 @@ _DEFAULT_SHELL_BLOCKLIST = [
     r"\bbcdedit\b",  # bcdedit (boot config)
     r"\bsfc\s+/scannow\b",  # sfc /scannow (system file checker)
     r"\breg\s+delete\s+HK",  # reg delete HKLM\...
-    r"\bnet\s+user\b.*\b/add\b",  # net user <x> /add
-    r"\bnet\s+localgroup\s+administrators\b.*\b/add\b",  # privilege escalation
+    r"\bnet\s+user\b.*/add\b",  # net user <x> /add
+    r"\bnet\s+localgroup\s+administrators\b.*/add\b",  # privilege escalation
     r"\bInvoke-Expression\b.*\bDownloadString\b",  # IEX(downloadstring) cradle
     r"\biex\b.*\bNet\.WebClient\b",  # IEX cradle variant
 ]
@@ -701,8 +701,9 @@ class Desktop:
             redirects = 0
             while response.is_redirect and redirects < 5:
                 redirect_url = response.headers.get("Location", "")
-                if redirect_url:
-                    self._validate_url(redirect_url)
+                if not redirect_url:
+                    break
+                self._validate_url(redirect_url)
                 response = requests.get(redirect_url, timeout=10, allow_redirects=False)
                 redirects += 1
             response.raise_for_status()
