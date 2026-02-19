@@ -161,9 +161,9 @@ class TestServerStructure:
     def test_mcp_instance_name(self):
         assert main_module.mcp.name == "windows-mcp"
 
-    async def test_all_22_tools_registered(self):
+    async def test_all_23_tools_registered(self):
         tools = await _get_tools()
-        assert len(tools) == 22
+        assert len(tools) == 23
 
     async def test_expected_tool_names_present(self):
         tools = await _get_tools()
@@ -190,6 +190,7 @@ class TestServerStructure:
             "WaitFor",
             "Find",
             "Invoke",
+            "VisionAnalyze",
         }
         assert set(tools.keys()) == expected
 
@@ -214,13 +215,21 @@ class TestServerStructure:
         """Six tools are read-only: Find, Scrape, Snapshot, SystemInfo, Wait, WaitFor."""
         tools = await _get_tools()
         readonly = {name for name, t in tools.items() if t.annotations.readOnlyHint}
-        assert readonly == {"Find", "Scrape", "Snapshot", "SystemInfo", "Wait", "WaitFor"}
+        assert readonly == {
+            "Find",
+            "Scrape",
+            "Snapshot",
+            "SystemInfo",
+            "VisionAnalyze",
+            "Wait",
+            "WaitFor",
+        }
 
     async def test_open_world_tools_flagged_correctly(self):
         """Only Shell and Scrape reach outside the local machine."""
         tools = await _get_tools()
         open_world = {name for name, t in tools.items() if t.annotations.openWorldHint}
-        assert open_world == {"Shell", "Scrape"}
+        assert open_world == {"Shell", "Scrape", "VisionAnalyze"}
 
     async def test_destructive_tools_include_shell(self):
         tools = await _get_tools()
@@ -939,6 +948,44 @@ class TestInvokeToolDispatch:
                 tools = await _get_tools()
                 result = await tools["Invoke"].fn(loc=[100, 200], action="invoke")
         assert "does not support InvokePattern" in result
+
+
+class TestVisionAnalyzeToolDispatch:
+    async def test_vision_not_configured_returns_error(self, patched_desktop):
+        """VisionAnalyze returns helpful error when VISION_API_URL is not set."""
+        with patch.dict("os.environ", {}, clear=False):
+            # Ensure VISION_API_URL is absent
+            import os
+
+            os.environ.pop("VISION_API_URL", None)
+            tools = await _get_tools()
+            result = await tools["VisionAnalyze"].fn()
+        assert "not configured" in result
+
+    async def test_vision_describe_mode(self, patched_desktop):
+        """VisionAnalyze describe mode captures screenshot and calls vision API."""
+        mock_img = MagicMock()
+        mock_img.save = MagicMock(side_effect=lambda buf, format: buf.write(b"\x89PNG"))
+        patched_desktop.get_screenshot.return_value = mock_img
+
+        with patch("windows_mcp.vision.service.requests.post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {
+                "choices": [{"message": {"content": "Notepad is open."}}]
+            }
+            mock_post.return_value = mock_resp
+            with patch.dict("os.environ", {"VISION_API_URL": "http://test:8080/v1"}):
+                tools = await _get_tools()
+                result = await tools["VisionAnalyze"].fn(mode="describe")
+        assert "Notepad" in result
+
+    async def test_vision_query_mode_requires_query(self, patched_desktop):
+        """VisionAnalyze query mode requires a query parameter."""
+        with patch.dict("os.environ", {"VISION_API_URL": "http://test:8080/v1"}):
+            tools = await _get_tools()
+            result = await tools["VisionAnalyze"].fn(mode="query", query="")
+        assert "Error" in result
 
 
 # ---------------------------------------------------------------------------

@@ -884,6 +884,67 @@ def invoke_tool(
         return f"Error invoking {action} on '{element_name}': {str(e)}"
 
 
+@mcp.tool(
+    name="VisionAnalyze",
+    description=(
+        "Analyze the current screen using a vision-capable LLM. "
+        "Takes a screenshot and sends it to the configured vision API for analysis. "
+        "Modes: 'describe' returns a natural-language description, "
+        "'elements' returns a JSON list of detected UI elements with coordinates, "
+        "'query' answers a specific question about what's on screen. "
+        "Requires VISION_API_URL and VISION_API_KEY environment variables. "
+        "Useful when the accessibility tree is sparse or for custom-rendered UIs."
+    ),
+    annotations=ToolAnnotations(
+        title="VisionAnalyze",
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    ),
+)
+@with_analytics(analytics, "VisionAnalyze-Tool")
+def vision_analyze(
+    mode: Literal["describe", "elements", "query"] = "describe",
+    query: str = "",
+    target: str = "",
+    ctx: Context = None,
+) -> str:
+    """Capture a screenshot and analyze it with a vision LLM."""
+    from windows_mcp.vision import VisionService
+
+    vision = VisionService()
+    if not vision.is_configured:
+        return (
+            "Error: Vision API not configured. "
+            "Set VISION_API_URL and VISION_API_KEY environment variables. "
+            "Supports any OpenAI-compatible endpoint (GPT-4o, Claude via proxy, "
+            "Ollama, llama.cpp server, or PC-AI pcai-inference)."
+        )
+
+    # Capture screenshot
+    screenshot = desktop.get_screenshot()
+    img_buffer = io.BytesIO()
+    screenshot.save(img_buffer, format="PNG")
+    image_bytes = img_buffer.getvalue()
+
+    if mode == "describe":
+        return vision.describe_screen(image_bytes, context=query)
+    elif mode == "elements":
+        import json
+
+        elements = vision.identify_elements(image_bytes, target=target)
+        if not elements:
+            return "No UI elements detected by vision analysis."
+        return json.dumps(elements, indent=2)
+    elif mode == "query":
+        if not query:
+            return "Error: query parameter required for mode='query'."
+        return vision.analyze(image_bytes, prompt=query)
+    else:
+        return f"Error: unknown mode '{mode}'. Use 'describe', 'elements', or 'query'."
+
+
 class Transport(Enum):
     STDIO = "stdio"
     SSE = "sse"
