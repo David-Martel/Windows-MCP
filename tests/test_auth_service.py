@@ -41,12 +41,12 @@ class TestAuthClientProperties:
     def test_repr_masks_key(self):
         client = AuthClient(api_key="sk-wmcp-abcdefghijklmnopqrst", sandbox_id="sb-1")
         r = repr(client)
-        assert "sk-wmcp-abcd" in r
-        assert "qrst" in r
-        assert "abcdefghijklmnopqrst" not in r
+        # Only last 4 chars visible
+        assert "...qrst" in r
+        assert "abcdefghijklmnop" not in r
 
     def test_repr_short_key(self):
-        client = AuthClient(api_key="short", sandbox_id="sb-1")
+        client = AuthClient(api_key="abc", sandbox_id="sb-1")
         r = repr(client)
         assert "***" in r
 

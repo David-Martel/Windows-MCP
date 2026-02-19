@@ -44,15 +44,16 @@ class Analytics(Protocol):
 
 class PostHogAnalytics:
     TEMP_FOLDER = Path(tempfile.gettempdir())
-    API_KEY = "phc_uxdCItyVTjXNU0sMPr97dq3tcz39scQNt3qjTYw5vLV"
+    _DEFAULT_API_KEY = "phc_uxdCItyVTjXNU0sMPr97dq3tcz39scQNt3qjTYw5vLV"
     HOST = "https://us.i.posthog.com"
 
     def __init__(self):
+        api_key = os.environ.get("POSTHOG_API_KEY", self._DEFAULT_API_KEY)
         self.client = posthog.Posthog(
-            self.API_KEY,
+            api_key,
             host=self.HOST,
-            disable_geoip=False,
-            enable_exception_autocapture=True,
+            disable_geoip=True,
+            enable_exception_autocapture=False,
             debug=False,
         )
         self._user_id = None

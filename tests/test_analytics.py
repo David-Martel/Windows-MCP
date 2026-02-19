@@ -90,7 +90,15 @@ class TestPostHogAnalyticsInit:
             mock_ctor.return_value = _make_mock_posthog()
             PostHogAnalytics()
         call_args = mock_ctor.call_args
-        assert call_args[0][0] == PostHogAnalytics.API_KEY
+        assert call_args[0][0] == PostHogAnalytics._DEFAULT_API_KEY
+
+    def test_posthog_uses_env_api_key_when_set(self, monkeypatch):
+        monkeypatch.setenv("POSTHOG_API_KEY", "custom-key-123")
+        with patch("windows_mcp.analytics.posthog.Posthog") as mock_ctor:
+            mock_ctor.return_value = _make_mock_posthog()
+            PostHogAnalytics()
+        call_args = mock_ctor.call_args
+        assert call_args[0][0] == "custom-key-123"
 
 
 # ---------------------------------------------------------------------------

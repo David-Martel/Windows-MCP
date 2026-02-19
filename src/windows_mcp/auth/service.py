@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 
 import requests
@@ -31,7 +32,7 @@ class AuthClient:
     """
 
     def __init__(self, api_key: str, sandbox_id: str):
-        self.dashboard_url = "http://localhost:3000"
+        self.dashboard_url = os.environ.get("DASHBOARD_URL", "https://windowsmcp.io")
         self.api_key = api_key
         self.sandbox_id = sandbox_id
         self._session_token: str | None = None
@@ -132,9 +133,7 @@ class AuthClient:
             time.sleep(delay)
 
     def __repr__(self) -> str:
-        masked_key = (
-            f"{self.api_key[:12]}...{self.api_key[-4:]}" if len(self.api_key) > 16 else "***"
-        )
+        masked_key = f"...{self.api_key[-4:]}" if len(self.api_key) > 4 else "***"
         return (
             f"AuthClient(dashboard={self.dashboard_url!r}, "
             f"sandbox={self.sandbox_id!r}, key={masked_key})"
