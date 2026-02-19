@@ -2,9 +2,52 @@
 
 Accepts PowerShell-style paths (HKCU:\\, HKLM:\\) and long-form paths
 (HKEY_CURRENT_USER\\...). Stateless service -- no constructor dependencies.
+
+Security: Write/delete operations to sensitive registry paths (Run, RunOnce,
+Services, Policies, SAM, Security) are blocked by default.  Set
+WINDOWS_MCP_REGISTRY_UNRESTRICTED=true to bypass.
 """
 
+import os
+import re
 import winreg
+
+# Regex patterns for security-sensitive registry subkeys
+# Matched case-insensitively against the normalized subkey portion
+_SENSITIVE_KEY_PATTERNS = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"^Software\\Microsoft\\Windows\\CurrentVersion\\Run\b",
+        r"^Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce\b",
+        r"^Software\\Microsoft\\Windows\\CurrentVersion\\RunServices\b",
+        r"^Software\\Microsoft\\Windows\\CurrentVersion\\Policies\b",
+        r"^Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders\b",
+        r"^Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders\b",
+        r"^SYSTEM\\CurrentControlSet\\Services\b",
+        r"^SYSTEM\\CurrentControlSet\\Control\\Session Manager\b",
+        r"^SAM\b",
+        r"^SECURITY\b",
+        r"^SOFTWARE\\Policies\b",
+    ]
+]
+
+
+def _is_sensitive_key(subkey: str) -> bool:
+    """Return True if the subkey matches a sensitive registry path."""
+    normalized = subkey.replace("/", "\\").strip("\\")
+    return any(pat.search(normalized) for pat in _SENSITIVE_KEY_PATTERNS)
+
+
+def _check_registry_write(subkey: str) -> None:
+    """Raise PermissionError if writing to a sensitive key without override."""
+    unrestricted = os.environ.get("WINDOWS_MCP_REGISTRY_UNRESTRICTED", "").lower() == "true"
+    if unrestricted:
+        return
+    if _is_sensitive_key(subkey):
+        raise PermissionError(
+            f"Write/delete to sensitive registry path '{subkey}' is blocked. "
+            "Set WINDOWS_MCP_REGISTRY_UNRESTRICTED=true to bypass."
+        )
 
 
 class RegistryService:
@@ -83,6 +126,7 @@ class RegistryService:
                 typed_value = value
 
             hive, subkey = self._parse_reg_path(path)
+            _check_registry_write(subkey)
             winreg.CreateKey(hive, subkey)
             with winreg.OpenKey(hive, subkey, 0, winreg.KEY_SET_VALUE) as key:
                 winreg.SetValueEx(key, name, 0, reg_type_const, typed_value)
@@ -95,6 +139,7 @@ class RegistryService:
     def registry_delete(self, path: str, name: str | None = None) -> str:
         try:
             hive, subkey = self._parse_reg_path(path)
+            _check_registry_write(subkey)
             if name:
                 with winreg.OpenKey(hive, subkey, 0, winreg.KEY_SET_VALUE) as key:
                     winreg.DeleteValue(key, name)
