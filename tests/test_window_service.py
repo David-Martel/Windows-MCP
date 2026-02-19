@@ -1505,8 +1505,16 @@ class TestIsBrowserPid:
     def test_negative_pid_returns_false(self, svc):
         assert svc._is_browser_pid(-1) is False
 
-    def test_exception_returns_false(self, svc):
-        with patch(_PSUTIL_PROCESS, side_effect=Exception("no process")):
+    def test_no_such_process_returns_false(self, svc):
+        from psutil import NoSuchProcess
+
+        with patch(_PSUTIL_PROCESS, side_effect=NoSuchProcess(999)):
+            assert svc._is_browser_pid(999) is False
+
+    def test_access_denied_returns_false(self, svc):
+        from psutil import AccessDenied
+
+        with patch(_PSUTIL_PROCESS, side_effect=AccessDenied(999)):
             assert svc._is_browser_pid(999) is False
 
     def test_uses_cache(self, svc):

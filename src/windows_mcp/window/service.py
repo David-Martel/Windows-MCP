@@ -14,7 +14,7 @@ from contextlib import contextmanager
 import win32con
 import win32gui
 import win32process
-from psutil import Process
+from psutil import AccessDenied, NoSuchProcess, Process
 
 import windows_mcp.uia as uia
 from windows_mcp.desktop.views import BoundingBox, Browser, Status, Window
@@ -243,7 +243,7 @@ class WindowService:
                         self._process_name_cache.clear()
                     self._process_name_cache[pid] = proc_name
             return Browser.has_process(proc_name)
-        except Exception:
+        except (NoSuchProcess, AccessDenied):
             return False
 
     def get_windows(

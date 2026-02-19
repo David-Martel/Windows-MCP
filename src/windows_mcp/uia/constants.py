@@ -20,7 +20,6 @@ DEBUG_SEARCH_TIME = False
 DEBUG_EXIST_DISAPPEAR = False
 S_OK = 0
 
-IsPy38OrHigher = sys.version_info[:2] >= (3, 8)
 IsNT6orHigher = os.sys.getwindowsversion().major >= 6
 CurrentProcessIs64Bit = sys.maxsize > 0xFFFFFFFF
 ProcessTime = time.perf_counter  # this returns nearly 0 when first call it if python version <= 3.6

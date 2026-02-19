@@ -746,9 +746,6 @@ class Desktop:
 
     # --- Registry facade (delegates to RegistryService) ---
 
-    def _parse_reg_path(self, path: str) -> tuple:
-        return self._registry._parse_reg_path(path)
-
     def registry_get(self, path: str, name: str) -> str:
         return self._registry.registry_get(path, name)
 
