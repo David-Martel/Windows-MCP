@@ -739,95 +739,80 @@ class TestGetStateVisionPaths:
 # ===========================================================================
 
 
-class TestGetStateBoolCoercion:
-    """Parameters accept both real booleans and string literals 'true'/'false'."""
+class TestGetStateBoolParams:
+    """Parameters accept proper booleans (tool layer coerces strings beforehand)."""
 
-    def test_use_vision_string_true(self):
+    def test_use_vision_true(self):
         d = make_bare_desktop()
         vdm = _setup_desktop_for_get_state(d)
         fake_img = Image.new("RGB", (50, 50))
         d._screen.get_screenshot.return_value = fake_img
 
-        state = _run_get_state(d, vdm, use_vision="true", use_annotation="false")
+        state = _run_get_state(d, vdm, use_vision=True, use_annotation=False)
 
         d._screen.get_screenshot.assert_called_once()
         assert state.screenshot is fake_img
 
-    def test_use_vision_string_false(self):
+    def test_use_vision_false(self):
         d = make_bare_desktop()
         vdm = _setup_desktop_for_get_state(d)
 
-        state = _run_get_state(d, vdm, use_vision="false")
+        state = _run_get_state(d, vdm, use_vision=False)
 
         d._screen.get_screenshot.assert_not_called()
         assert state.screenshot is None
 
-    def test_use_annotation_string_true(self):
+    def test_use_annotation_true(self):
         d = make_bare_desktop()
         ts = _make_tree_state(1)
         vdm = _setup_desktop_for_get_state(d, tree_state=ts)
         fake_img = Image.new("RGB", (50, 50))
         d._screen.get_annotated_screenshot.return_value = fake_img
 
-        _run_get_state(d, vdm, use_vision="true", use_annotation="true")
+        _run_get_state(d, vdm, use_vision=True, use_annotation=True)
 
         d._screen.get_annotated_screenshot.assert_called_once()
 
-    def test_use_dom_string_true_passed_to_tree(self):
+    def test_use_dom_true_passed_to_tree(self):
         d = make_bare_desktop()
         win = make_window(handle=42)
         vdm = _setup_desktop_for_get_state(d, active_window=win, windows=[win])
 
-        _run_get_state(d, vdm, use_vision=False, use_dom="true")
+        _run_get_state(d, vdm, use_vision=False, use_dom=True)
 
         call_kwargs = d.tree.get_state.call_args[1]
         assert call_kwargs.get("use_dom") is True
 
-    def test_use_dom_string_false_passed_to_tree(self):
+    def test_use_dom_false_passed_to_tree(self):
         d = make_bare_desktop()
         win = make_window(handle=43)
         vdm = _setup_desktop_for_get_state(d, active_window=win, windows=[win])
 
-        _run_get_state(d, vdm, use_vision=False, use_dom="false")
+        _run_get_state(d, vdm, use_vision=False, use_dom=False)
 
         call_kwargs = d.tree.get_state.call_args[1]
         assert call_kwargs.get("use_dom") is False
 
-    def test_as_bytes_string_true_produces_bytes(self):
+    def test_as_bytes_true_produces_bytes(self):
         d = make_bare_desktop()
         vdm = _setup_desktop_for_get_state(d)
         fake_img = Image.new("RGB", (30, 30))
         d._screen.get_screenshot.return_value = fake_img
 
         state = _run_get_state(
-            d, vdm, use_vision=True, use_annotation=False, as_bytes="true"
+            d, vdm, use_vision=True, use_annotation=False, as_bytes=True
         )
 
         assert isinstance(state.screenshot, bytes)
 
-    def test_as_bytes_string_false_produces_image(self):
+    def test_as_bytes_false_produces_image(self):
         d = make_bare_desktop()
         vdm = _setup_desktop_for_get_state(d)
         fake_img = Image.new("RGB", (30, 30))
         d._screen.get_screenshot.return_value = fake_img
 
         state = _run_get_state(
-            d, vdm, use_vision=True, use_annotation=False, as_bytes="false"
+            d, vdm, use_vision=True, use_annotation=False, as_bytes=False
         )
 
         assert isinstance(state.screenshot, Image.Image)
-
-    def test_use_vision_false_string_uppercase_does_not_activate(self):
-        """Only 'true' (lowercase) activates the boolean from a string."""
-        d = make_bare_desktop()
-        vdm = _setup_desktop_for_get_state(d)
-
-        # "True" (capital T) is not matched by the coercion rule
-        # (.lower() == "true" catches it -- so "True".lower() == "true" IS caught)
-        # Verify the behaviour is consistent with the implementation.
-        fake_img = Image.new("RGB", (50, 50))
-        d._screen.get_screenshot.return_value = fake_img
-
-        state = _run_get_state(d, vdm, use_vision="True", use_annotation="false")
-        # "True".lower() == "true" so this DOES activate vision
-        assert state.screenshot is not None

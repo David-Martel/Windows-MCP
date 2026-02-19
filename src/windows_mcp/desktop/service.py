@@ -105,20 +105,12 @@ class Desktop:
 
     def get_state(
         self,
-        use_annotation: bool | str = True,
-        use_vision: bool | str = False,
-        use_dom: bool | str = False,
-        as_bytes: bool | str = False,
+        use_annotation: bool = True,
+        use_vision: bool = False,
+        use_dom: bool = False,
+        as_bytes: bool = False,
         scale: float = 1.0,
     ) -> DesktopState:
-        use_annotation = use_annotation is True or (
-            isinstance(use_annotation, str) and use_annotation.lower() == "true"
-        )
-        use_vision = use_vision is True or (
-            isinstance(use_vision, str) and use_vision.lower() == "true"
-        )
-        use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == "true")
-        as_bytes = as_bytes is True or (isinstance(as_bytes, str) and as_bytes.lower() == "true")
 
         if not (0.1 <= scale <= 4.0):
             raise ValueError(f"scale must be between 0.1 and 4.0, got {scale}")
