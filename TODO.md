@@ -1,7 +1,7 @@
 # Windows-MCP TODO
 
 **Generated:** 2026-02-18 from REVIEW.md findings
-**Last updated:** 2026-02-19 -- 2038 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete
+**Last updated:** 2026-02-19 -- 2099 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete
 **Reference:** See [REVIEW.md](REVIEW.md) for full context on each item.
 
 ---
@@ -65,7 +65,7 @@
 
 - [x] **[A7] Add MCP tool handler integration tests** -- Done. 145 headless integration tests in `test_mcp_integration.py` covering all 23 tools via `tool.fn()`. 4 tiers: server structure, tool dispatch, error handling, transport+auth.
 - [ ] **Add WatchDog service tests** -- Test threading, COM event handling, callback dispatch.
-- [ ] **Add Desktop.get_state orchestration tests** -- Test the composition of windows, tree state, screenshots, VDM.
+- [x] **Add Desktop.get_state orchestration tests** -- 60 tests across 9 classes covering structure, no-windows, screenshot/tree failure, VDM info, thread safety, multi-window, vision paths, bool coercion.
 - [x] **Add tree_traversal unit tests** -- 54 tests covering tree_traversal (28), focus debounce (6), DOM correction (14), plus mock infrastructure. `test_tree_service.py` up from 4 to 58 tests.
 - [ ] **Achieve 85% overall test coverage** -- Currently at 64% overall (1671 tests). Testable modules at 82-100%. COM/UIA modules at 14-42% (require live desktop).
 
