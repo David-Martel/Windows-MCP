@@ -856,107 +856,84 @@ class TestRemoveDesktop:
         with pytest.raises(RuntimeError, match="Internal VDM not initialized"):
             vdm.remove_desktop("Desktop 2")
 
-    def test_does_nothing_when_target_guid_not_resolved(self):
+    def test_does_nothing_when_name_not_found(self):
+        """No matching desktop in enumeration -- RemoveDesktop not called."""
         internal = MagicMock()
         vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
 
-        with patch.object(vdm, "_resolve_to_guid", return_value=None):
+        with patch.object(vdm, "_enumerate_desktops", return_value=[]):
             vdm.remove_desktop("Nonexistent")
-
-        internal.RemoveDesktop.assert_not_called()
-
-    def test_does_nothing_when_find_desktop_raises(self):
-        guid_str = "{TARGET-GUID}"
-        internal = MagicMock()
-        internal.FindDesktop.side_effect = OSError("Not found")
-
-        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
-
-        with patch.object(vdm, "_resolve_to_guid", return_value=guid_str):
-            with patch("windows_mcp.vdm.core.GUID"):
-                vdm.remove_desktop("Desktop 2")
 
         internal.RemoveDesktop.assert_not_called()
 
     def test_does_nothing_when_no_fallback_desktop_available(self):
         """Cannot remove the only desktop -- no fallback means no removal."""
-        guid_str = "{ONLY-GUID}"
-        guid_mock = _make_guid_str_mock(guid_str)
-        desktop = MagicMock()
-        desktop.GetID.return_value = guid_mock
-
-        array = MagicMock()
-        array.GetCount.return_value = 1
-
-        def _get_at(i, *args):
-            unk = MagicMock()
-            unk.QueryInterface.return_value = desktop
-            return unk
-
-        array.GetAt.side_effect = _get_at
-
+        only_desktop = MagicMock()
+        entries = [
+            {"index": 0, "guid_str": "{ONLY-GUID}", "name": "Desktop 1", "desktop": only_desktop}
+        ]
         internal = MagicMock()
-        internal.FindDesktop.return_value = MagicMock()
-        internal.GetDesktops.return_value = array
-
-        # GUID mock must stringify to the same value as the desktop's GetID
-        target_guid_mock = _make_guid_str_mock(guid_str)
-
         vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
 
-        with patch.object(vdm, "_resolve_to_guid", return_value=guid_str):
-            with patch("windows_mcp.vdm.core.GUID", return_value=target_guid_mock):
-                with patch("windows_mcp.vdm.core.byref"):
-                    vdm.remove_desktop("Only Desktop")
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            vdm.remove_desktop("Desktop 1")
 
         internal.RemoveDesktop.assert_not_called()
 
     def test_calls_remove_desktop_with_target_and_fallback(self):
         """When a fallback exists, RemoveDesktop is called with both desktops."""
-        target_guid_str = "{TARGET-GUID}"
-        fallback_guid_str = "{FALLBACK-GUID}"
-
-        target_guid_mock = _make_guid_str_mock(target_guid_str)
-        fallback_guid_mock = _make_guid_str_mock(fallback_guid_str)
-
         target_desktop = MagicMock()
-        target_desktop.GetID.return_value = target_guid_mock
-
         fallback_desktop = MagicMock()
-        fallback_desktop.GetID.return_value = fallback_guid_mock
-
-        array = MagicMock()
-        array.GetCount.return_value = 2
-
-        desktops_by_index = [target_desktop, fallback_desktop]
-
-        def _get_at(i, *args):
-            unk = MagicMock()
-            unk.QueryInterface.return_value = desktops_by_index[i]
-            return unk
-
-        array.GetAt.side_effect = _get_at
-
-        target_com_desktop = MagicMock()
+        entries = [
+            {
+                "index": 0,
+                "guid_str": "{TARGET-GUID}",
+                "name": "Desktop 1",
+                "desktop": target_desktop,
+            },
+            {
+                "index": 1,
+                "guid_str": "{FALLBACK-GUID}",
+                "name": "Desktop 2",
+                "desktop": fallback_desktop,
+            },
+        ]
         internal = MagicMock()
-        internal.FindDesktop.return_value = target_com_desktop
-        internal.GetDesktops.return_value = array
-
-        # GUID mock must stringify to match target so the loop skips it
-        # and picks fallback_desktop as the fallback
-        guid_constructed = _make_guid_str_mock(target_guid_str)
-
         vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
 
-        with patch.object(vdm, "_resolve_to_guid", return_value=target_guid_str):
-            with patch("windows_mcp.vdm.core.GUID", return_value=guid_constructed):
-                with patch("windows_mcp.vdm.core.byref"):
-                    vdm.remove_desktop("Desktop 1")
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            vdm.remove_desktop("Desktop 1")
 
         internal.RemoveDesktop.assert_called_once()
         call_args = internal.RemoveDesktop.call_args[0]
-        assert call_args[0] is target_com_desktop
+        assert call_args[0] is target_desktop
         assert call_args[1] is fallback_desktop
+
+    def test_resolves_by_guid_string(self):
+        """remove_desktop also matches when the name is a GUID string."""
+        target_desktop = MagicMock()
+        fallback_desktop = MagicMock()
+        entries = [
+            {
+                "index": 0,
+                "guid_str": "{AAA}",
+                "name": "Desktop 1",
+                "desktop": target_desktop,
+            },
+            {
+                "index": 1,
+                "guid_str": "{BBB}",
+                "name": "Desktop 2",
+                "desktop": fallback_desktop,
+            },
+        ]
+        internal = MagicMock()
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            vdm.remove_desktop("{AAA}")
+
+        internal.RemoveDesktop.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

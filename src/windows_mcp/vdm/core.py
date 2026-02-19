@@ -441,43 +441,58 @@ class VirtualDesktopManager:
         except Exception:
             return None
 
-    def _resolve_to_guid(self, name: str) -> str:
-        """
-        Resolves a desktop Name to a GUID string.
-        Also supports passing the GUID string directly if needed, but prioritizes Name.
-        """
-        # 1. Get current state (Names and GUIDs)
-        # We need to map Names to GUIDs.
-        desktops_map = {}  # Name -> GUID
+    def _enumerate_desktops(self) -> list[dict]:
+        """Enumerate all virtual desktops in a single COM round-trip.
 
+        Returns a list of dicts with keys: index, guid_str, name, desktop.
+        Used internally by _resolve_to_guid, get_all_desktops, get_current_desktop,
+        and remove_desktop to avoid redundant GetDesktops() calls.
+        """
+        if not self._internal_manager:
+            return []
+
+        result = []
         try:
             desktops_array = self._internal_manager.GetDesktops()
             count = desktops_array.GetCount()
 
             for i in range(count):
-                unk = desktops_array.GetAt(i, byref(IVirtualDesktop._iid_))
-                desktop = unk.QueryInterface(IVirtualDesktop)
-                guid = getattr(desktop, "GetID", lambda: None)()
-                if not guid:
+                try:
+                    unk = desktops_array.GetAt(i, byref(IVirtualDesktop._iid_))
+                    desktop = unk.QueryInterface(IVirtualDesktop)
+                    guid = getattr(desktop, "GetID", lambda: None)()
+                    if not guid:
+                        continue
+                    guid_str = str(guid)
+                    reg_name = self._get_name_from_registry(guid_str)
+                    name = reg_name if reg_name else f"Desktop {i + 1}"
+                    result.append(
+                        {
+                            "index": i,
+                            "guid_str": guid_str,
+                            "name": name,
+                            "desktop": desktop,
+                        }
+                    )
+                except Exception as e:
+                    logger.error("Error retrieving desktop at index %d: %s", i, e)
                     continue
-                guid_str = str(guid)
-
-                # Determine Name
-                reg_name = self._get_name_from_registry(guid_str)
-                display_name = reg_name if reg_name else f"Desktop {i + 1}"
-
-                desktops_map[display_name.lower()] = guid_str
-                # Also verify if the input IS the GUID (fallback support)
-                if name.lower() == guid_str.lower():
-                    return guid_str
-
         except Exception as e:
-            logger.error("Error scanning desktops for resolution: %s", e)
-            return None
+            logger.error("Error enumerating desktops: %s", e)
 
-        if name.lower() in desktops_map:
-            return desktops_map[name.lower()]
+        return result
 
+    def _resolve_to_guid(self, name: str) -> str:
+        """
+        Resolves a desktop Name to a GUID string.
+        Also supports passing the GUID string directly if needed, but prioritizes Name.
+        """
+        name_lower = name.lower()
+        for entry in self._enumerate_desktops():
+            if name_lower == entry["guid_str"].lower():
+                return entry["guid_str"]
+            if name_lower == entry["name"].lower():
+                return entry["guid_str"]
         return None
 
     def move_window_to_desktop(self, hwnd: int, desktop_name: str):
@@ -523,41 +538,36 @@ class VirtualDesktopManager:
     def remove_desktop(self, desktop_name: str):
         """
         Removes a virtual desktop by Name.
+        Uses a single desktop enumeration to find both target and fallback.
         """
         if not self._internal_manager:
             raise RuntimeError("Internal VDM not initialized")
 
-        target_guid_str = self._resolve_to_guid(desktop_name)
-        if not target_guid_str:
+        entries = self._enumerate_desktops()
+        name_lower = desktop_name.lower()
+
+        target_entry = None
+        for entry in entries:
+            if name_lower == entry["name"].lower() or name_lower == entry["guid_str"].lower():
+                target_entry = entry
+                break
+
+        if not target_entry:
             logger.error("Desktop '%s' not found.", desktop_name)
             return
 
-        target_guid = GUID(target_guid_str)
-
-        try:
-            target_desktop = self._internal_manager.FindDesktop(target_guid)
-        except Exception:
-            logger.error("Could not find desktop with GUID %s", target_guid_str)
-            return
-
-        # Find a fallback desktop
-        desktops_array = self._internal_manager.GetDesktops()
-        count = desktops_array.GetCount()
+        # Find a fallback desktop (any desktop that isn't the target)
         fallback_desktop = None
-
-        for i in range(count):
-            unk = desktops_array.GetAt(i, byref(IVirtualDesktop._iid_))
-            candidate = unk.QueryInterface(IVirtualDesktop)
-            candidate_id = candidate.GetID()
-            if str(candidate_id) != str(target_guid):
-                fallback_desktop = candidate
+        for entry in entries:
+            if entry["guid_str"] != target_entry["guid_str"]:
+                fallback_desktop = entry["desktop"]
                 break
 
         if not fallback_desktop:
             logger.error("No fallback desktop found (cannot delete the only desktop)")
             return
 
-        self._internal_manager.RemoveDesktop(target_desktop, fallback_desktop)
+        self._internal_manager.RemoveDesktop(target_entry["desktop"], fallback_desktop)
 
     def rename_desktop(self, desktop_name: str, new_name: str):
         """
@@ -628,34 +638,8 @@ class VirtualDesktopManager:
                 }
             ]
 
-        desktops_array = self._internal_manager.GetDesktops()
-        count = desktops_array.GetCount()
-
-        result = []
-        for i in range(count):
-            try:
-                unk = desktops_array.GetAt(i, byref(IVirtualDesktop._iid_))
-                desktop = unk.QueryInterface(IVirtualDesktop)
-                guid = getattr(desktop, "GetID", lambda: None)()
-                if not guid:
-                    continue
-
-                guid_str = str(guid)
-                # simple_id = _get_simple_id(guid_str)
-
-                # Get Name from Registry or Fallback
-                reg_name = self._get_name_from_registry(guid_str)
-                if reg_name:
-                    name = reg_name
-                else:
-                    name = f"Desktop {i + 1}"
-
-                result.append({"id": guid_str, "name": name})
-            except Exception as e:
-                logger.error("Error retrieving desktop at index %d: %s", i, e)
-                continue
-
-        return result
+        entries = self._enumerate_desktops()
+        return [{"id": e["guid_str"], "name": e["name"]} for e in entries]
 
     def get_current_desktop(self) -> dict:
         """
@@ -678,21 +662,10 @@ class VirtualDesktopManager:
         if reg_name:
             return {"id": guid_str, "name": reg_name}
 
-        # Slow path: need index for "Desktop N" fallback name
-        try:
-            desktops_array = self._internal_manager.GetDesktops()
-            count = desktops_array.GetCount()
-            for i in range(count):
-                try:
-                    unk = desktops_array.GetAt(i, byref(IVirtualDesktop._iid_))
-                    desktop = unk.QueryInterface(IVirtualDesktop)
-                    desktop_guid = getattr(desktop, "GetID", lambda: None)()
-                    if desktop_guid and str(desktop_guid) == guid_str:
-                        return {"id": guid_str, "name": f"Desktop {i + 1}"}
-                except Exception:
-                    continue
-        except Exception:
-            pass
+        # Slow path: use shared enumeration to find the index for "Desktop N" name
+        for entry in self._enumerate_desktops():
+            if entry["guid_str"] == guid_str:
+                return {"id": guid_str, "name": entry["name"]}
 
         return {"id": guid_str, "name": "Unknown"}
 
