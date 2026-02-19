@@ -194,49 +194,6 @@ def native_send_drag(to_x: int, to_y: int, steps: int = 10) -> int | None:
 # ---------------------------------------------------------------------------
 
 
-def native_enumerate_windows() -> list[int] | None:
-    """Enumerate all visible top-level windows via Win32 EnumWindows.
-
-    Returns a list of window handles (HWNDs), or None if unavailable.
-    """
-    if not HAS_NATIVE:
-        return None
-    try:
-        return windows_mcp_core.enumerate_windows()
-    except Exception:
-        logger.warning("native_enumerate_windows failed, falling back", exc_info=True)
-        return None
-
-
-def native_get_window_info(hwnd: int) -> dict | None:
-    """Get detailed info about a window (title, class, pid, rect, state).
-
-    Returns a dict with keys: hwnd, title, class_name, pid, rect,
-    is_minimized, is_maximized, is_visible.  None if unavailable.
-    """
-    if not HAS_NATIVE:
-        return None
-    try:
-        return windows_mcp_core.get_window_info(hwnd)
-    except Exception:
-        logger.warning("native_get_window_info failed", exc_info=True)
-        return None
-
-
-def native_get_foreground_window() -> int | None:
-    """Get the foreground (active) window handle via Win32.
-
-    Returns the HWND as int, or None if unavailable.
-    """
-    if not HAS_NATIVE:
-        return None
-    try:
-        return windows_mcp_core.get_foreground_window()
-    except Exception:
-        logger.warning("native_get_foreground_window failed", exc_info=True)
-        return None
-
-
 def native_list_windows() -> list[dict] | None:
     """List all visible windows with full info.
 

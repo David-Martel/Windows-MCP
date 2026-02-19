@@ -14,12 +14,45 @@ import windows_mcp.uia as uia  # noqa: E402
 from windows_mcp.native import (
     native_send_click,
     native_send_drag,
+    native_send_hotkey,
+    native_send_key,
     native_send_mouse_move,
     native_send_scroll,
     native_send_text,
 )
 
 logger = logging.getLogger(__name__)
+
+# pyautogui key name -> Win32 virtual-key code mapping.
+# Covers common modifiers, navigation, function keys, and printable ASCII.
+_VK_MAP: dict[str, int] = {
+    # Modifiers
+    "ctrl": 0x11, "control": 0x11, "lctrl": 0xA2, "rctrl": 0xA3,
+    "alt": 0x12, "lalt": 0xA4, "ralt": 0xA5,
+    "shift": 0x10, "lshift": 0xA0, "rshift": 0xA1,
+    "win": 0x5B, "winleft": 0x5B, "winright": 0x5C,
+    # Navigation
+    "enter": 0x0D, "return": 0x0D, "tab": 0x09, "space": 0x20,
+    "backspace": 0x08, "delete": 0x2E, "del": 0x2E,
+    "escape": 0x1B, "esc": 0x1B,
+    "home": 0x24, "end": 0x23, "pageup": 0x21, "pagedown": 0x22,
+    "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+    "insert": 0x2D,
+    # Function keys
+    **{f"f{i}": 0x6F + i for i in range(1, 13)},
+    # Printable ASCII (0-9, a-z)
+    **{str(i): 0x30 + i for i in range(10)},
+    **{chr(c): c - 32 for c in range(ord("a"), ord("z") + 1)},
+    # Symbols
+    "plus": 0xBB, "minus": 0xBD, "comma": 0xBC, "period": 0xBE,
+    "semicolon": 0xBA, "slash": 0xBF, "backslash": 0xDC,
+    "bracketleft": 0xDB, "bracketright": 0xDD, "quote": 0xDE,
+    "equal": 0xBB, "hyphen": 0xBD, "tilde": 0xC0, "grave": 0xC0,
+    # Misc
+    "capslock": 0x14, "numlock": 0x90, "scrolllock": 0x91,
+    "printscreen": 0x2C, "prtsc": 0x2C, "pause": 0x13,
+    "apps": 0x5D, "menu": 0x5D,
+}
 
 
 class InputService:
@@ -222,10 +255,25 @@ class InputService:
     def shortcut(self, shortcut: str) -> None:
         """Send a keyboard shortcut or single key press.
 
+        Uses Rust Win32 SendInput as fast-path (<1ms), falls back to
+        pyautogui when the native extension is unavailable or a key name
+        cannot be mapped to a virtual-key code.
+
         Args:
             shortcut: Key name or ``+``-separated combination, e.g. ``"ctrl+c"`` or ``"enter"``.
         """
         keys = shortcut.split("+")
+        vk_codes = [_VK_MAP.get(k.strip().lower()) for k in keys]
+
+        if all(vk_codes):
+            if len(vk_codes) == 1:
+                result = native_send_key(vk_codes[0])
+            else:
+                result = native_send_hotkey(vk_codes)
+            if result is not None:
+                return
+
+        # Fallback to pyautogui
         if len(keys) > 1:
             pg.hotkey(*keys)
         else:

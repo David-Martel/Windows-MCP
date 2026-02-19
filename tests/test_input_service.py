@@ -20,6 +20,8 @@ _NATIVE_TEXT = "windows_mcp.input.service.native_send_text"
 _NATIVE_MOVE = "windows_mcp.input.service.native_send_mouse_move"
 _NATIVE_SCROLL = "windows_mcp.input.service.native_send_scroll"
 _NATIVE_DRAG = "windows_mcp.input.service.native_send_drag"
+_NATIVE_KEY = "windows_mcp.input.service.native_send_key"
+_NATIVE_HOTKEY = "windows_mcp.input.service.native_send_hotkey"
 _UIA = "windows_mcp.input.service.uia"
 
 
@@ -38,7 +40,10 @@ def svc():
 # ---------------------------------------------------------------------------
 
 
-def _all_mocks(pg_kw=None, click_rv=1, text_rv=1, move_rv=1, scroll_rv=2, drag_rv=3):
+def _all_mocks(
+    pg_kw=None, click_rv=1, text_rv=1, move_rv=1, scroll_rv=2, drag_rv=3,
+    key_rv=1, hotkey_rv=2,
+):
     """Return a nested patch context that replaces all external symbols."""
     pg_defaults = dict(
         leftClick=MagicMock(),
@@ -62,6 +67,8 @@ def _all_mocks(pg_kw=None, click_rv=1, text_rv=1, move_rv=1, scroll_rv=2, drag_r
         patch(_NATIVE_MOVE, return_value=move_rv),
         patch(_NATIVE_SCROLL, return_value=scroll_rv),
         patch(_NATIVE_DRAG, return_value=drag_rv),
+        patch(_NATIVE_KEY, return_value=key_rv),
+        patch(_NATIVE_HOTKEY, return_value=hotkey_rv),
         patch(_UIA),
     )
 
@@ -546,50 +553,62 @@ class TestMove:
 class TestShortcut:
     """Tests for InputService.shortcut()."""
 
-    def test_single_key_calls_press(self, svc):
-        with patch(_PG) as mock_pg:
+    def test_single_key_uses_native_fast_path(self, svc):
+        """A known single key uses native_send_key and skips pyautogui."""
+        with patch(_NATIVE_KEY, return_value=1) as mock_key, patch(_PG) as mock_pg:
             svc.shortcut("enter")
-            mock_pg.press.assert_called_once_with("enter")
-            mock_pg.hotkey.assert_not_called()
-
-    def test_multi_key_calls_hotkey(self, svc):
-        with patch(_PG) as mock_pg:
-            svc.shortcut("ctrl+c")
-            mock_pg.hotkey.assert_called_once_with("ctrl", "c")
+            mock_key.assert_called_once_with(0x0D)
             mock_pg.press.assert_not_called()
 
-    def test_three_key_combination(self, svc):
-        with patch(_PG) as mock_pg:
-            svc.shortcut("ctrl+shift+s")
-            mock_pg.hotkey.assert_called_once_with("ctrl", "shift", "s")
-
-    def test_four_key_combination(self, svc):
-        with patch(_PG) as mock_pg:
-            svc.shortcut("ctrl+alt+shift+f4")
-            mock_pg.hotkey.assert_called_once_with("ctrl", "alt", "shift", "f4")
-
-    def test_empty_string_calls_press_with_empty(self, svc):
-        """An empty shortcut string passes an empty string to pg.press."""
-        with patch(_PG) as mock_pg:
-            svc.shortcut("")
-            mock_pg.press.assert_called_once_with("")
+    def test_multi_key_uses_native_fast_path(self, svc):
+        """A known key combo uses native_send_hotkey and skips pyautogui."""
+        with patch(_NATIVE_HOTKEY, return_value=4) as mock_hk, patch(_PG) as mock_pg:
+            svc.shortcut("ctrl+c")
+            mock_hk.assert_called_once_with([0x11, 0x43])
             mock_pg.hotkey.assert_not_called()
 
-    def test_single_key_uppercase(self, svc):
-        """Case is preserved -- pg is responsible for normalisation."""
-        with patch(_PG) as mock_pg:
-            svc.shortcut("F5")
-            mock_pg.press.assert_called_once_with("F5")
+    def test_three_key_combination_native(self, svc):
+        with patch(_NATIVE_HOTKEY, return_value=6) as mock_hk, patch(_PG):
+            svc.shortcut("ctrl+shift+s")
+            mock_hk.assert_called_once_with([0x11, 0x10, 0x53])
 
-    def test_plus_only_string_produces_empty_hotkey_parts(self, svc):
-        """A lone '+' splits into two empty strings, routed to hotkey."""
-        with patch(_PG) as mock_pg:
+    def test_four_key_combination_native(self, svc):
+        with patch(_NATIVE_HOTKEY, return_value=8) as mock_hk, patch(_PG):
+            svc.shortcut("ctrl+alt+shift+f4")
+            mock_hk.assert_called_once_with([0x11, 0x12, 0x10, 0x73])
+
+    def test_single_key_falls_back_when_native_none(self, svc):
+        """When native returns None, pyautogui is used as fallback."""
+        with patch(_NATIVE_KEY, return_value=None), patch(_PG) as mock_pg:
+            svc.shortcut("enter")
+            mock_pg.press.assert_called_once_with("enter")
+
+    def test_multi_key_falls_back_when_native_none(self, svc):
+        with patch(_NATIVE_HOTKEY, return_value=None), patch(_PG) as mock_pg:
+            svc.shortcut("ctrl+c")
+            mock_pg.hotkey.assert_called_once_with("ctrl", "c")
+
+    def test_empty_string_falls_back_to_press(self, svc):
+        """An empty shortcut string has no VK mapping, falls back to pg.press."""
+        with patch(_NATIVE_KEY, return_value=None), patch(_PG) as mock_pg:
+            svc.shortcut("")
+            mock_pg.press.assert_called_once_with("")
+
+    def test_unknown_key_falls_back_to_pyautogui(self, svc):
+        """Unknown key names (no VK mapping) fall back to pyautogui."""
+        with patch(_NATIVE_KEY, return_value=None), patch(_PG) as mock_pg:
+            svc.shortcut("xyzunknown")
+            mock_pg.press.assert_called_once_with("xyzunknown")
+
+    def test_plus_only_string_falls_back(self, svc):
+        """A lone '+' splits into empty strings with no VK mapping."""
+        with patch(_NATIVE_HOTKEY, return_value=None), patch(_PG) as mock_pg:
             svc.shortcut("+")
             mock_pg.hotkey.assert_called_once_with("", "")
 
-    def test_trailing_plus_passes_through(self, svc):
-        """ctrl+ splits into ['ctrl', ''] -- still routed to hotkey."""
-        with patch(_PG) as mock_pg:
+    def test_trailing_plus_falls_back(self, svc):
+        """ctrl+ has an empty second key with no VK mapping."""
+        with patch(_NATIVE_HOTKEY, return_value=None), patch(_PG) as mock_pg:
             svc.shortcut("ctrl+")
             mock_pg.hotkey.assert_called_once_with("ctrl", "")
 
