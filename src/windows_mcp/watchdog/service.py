@@ -10,7 +10,7 @@ import comtypes
 import comtypes.client
 
 from windows_mcp.uia.core import _AutomationClient
-from windows_mcp.uia.enums import TreeScope
+from windows_mcp.uia.enums import PropertyId, TreeScope
 
 from .event_handlers import (
     FocusChangedEventHandler,
@@ -177,11 +177,15 @@ class WatchDog:
                         scope = TreeScope.TreeScope_Subtree
 
                         # Monitor common properties if none specified
-                        # 30005: Name, 30045: Value, 30093: LegacyIAccessibleVal, 30128: ToggleState
                         p_ids = (
                             self._property_ids
                             if self._property_ids
-                            else [30005, 30045, 30093, 30128]
+                            else [
+                                PropertyId.NameProperty,
+                                PropertyId.ValueValueProperty,
+                                PropertyId.LegacyIAccessibleValueProperty,
+                                PropertyId.ToggleToggleStateProperty,
+                            ]
                         )
 
                         self._property_handler = PropertyChangedEventHandler(self)

@@ -56,6 +56,11 @@ def _make_uia_stub() -> tuple[ModuleType, ModuleType]:
     enums_stub = ModuleType("windows_mcp.uia.enums")
     enums_stub.TreeScope = MagicMock()
     enums_stub.TreeScope.TreeScope_Subtree = 4
+    enums_stub.PropertyId = MagicMock()
+    enums_stub.PropertyId.NameProperty = 30005
+    enums_stub.PropertyId.ValueValueProperty = 30045
+    enums_stub.PropertyId.LegacyIAccessibleValueProperty = 30093
+    enums_stub.PropertyId.ToggleToggleStateProperty = 30086
 
     return core_stub, enums_stub, fake_uia_client
 
@@ -659,10 +664,10 @@ class TestWatchDogRunLoop:
         add_call = fake_uia_client.IUIAutomation.AddPropertyChangedEventHandler.call_args
         assert add_call is not None
         prop_ids_arg = add_call[0][-1]  # last positional arg is property IDs list
-        assert 30005 in prop_ids_arg
-        assert 30045 in prop_ids_arg
-        assert 30093 in prop_ids_arg
-        assert 30128 in prop_ids_arg
+        assert 30005 in prop_ids_arg   # NameProperty
+        assert 30045 in prop_ids_arg   # ValueValueProperty
+        assert 30093 in prop_ids_arg   # LegacyIAccessibleValueProperty
+        assert 30086 in prop_ids_arg   # ToggleToggleStateProperty
 
     def test_run_deregisters_structure_handler_on_config_change(self):
         """Changing the structure element triggers deregister of the old handler."""

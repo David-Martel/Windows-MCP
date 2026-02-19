@@ -16,6 +16,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes
 import datetime
+import logging
 import re
 import threading
 import time
@@ -115,6 +116,8 @@ from .patterns import (  # noqa: F401, F403
     ValuePattern,
     WindowPattern,
 )
+
+_uia_logger = logging.getLogger(__name__)
 
 
 class Control:
@@ -5316,10 +5319,10 @@ class UIAutomationInitializerInThread:
         self.inited = True
         if self.debug:
             th = threading.currentThread()
-            print(
-                "\ncall InitializeUIAutomationInCurrentThread in {}, inited {}".format(
-                    th, self.inited
-                )
+            _uia_logger.debug(
+                "call InitializeUIAutomationInCurrentThread in %s, inited %s",
+                th,
+                self.inited,
             )
 
     def __del__(self):
@@ -5337,7 +5340,9 @@ class UIAutomationInitializerInThread:
             self.inited = False
             if self.debug:
                 th = threading.currentThread()
-                print("\ncall UninitializeUIAutomationInCurrentThread in {}".format(th))
+                _uia_logger.debug(
+                    "call UninitializeUIAutomationInCurrentThread in %s", th
+                )
 
 
 def InitializeUIAutomationInCurrentThread() -> None:
@@ -5856,7 +5861,7 @@ def RunByHotKey(
                 ),
                 writeToFile=False,
             )
-            print(traceback.format_exc())
+            _uia_logger.error(traceback.format_exc())
         finally:
             releaseAllKeys()  # need to release keys if some keys were pressed
             Logger.ColorfullyWrite(
