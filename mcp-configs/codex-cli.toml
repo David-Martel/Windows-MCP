@@ -1,0 +1,18 @@
+# Windows-MCP configuration for Codex CLI
+# Copy to: %USERPROFILE%/.codex/config.toml
+
+# Option A: PyPI install (recommended)
+[mcp_servers.windows-mcp]
+command = "uvx"
+args = ["windows-mcp"]
+
+# Option B: Source install (uncomment and replace path)
+# [mcp_servers.windows-mcp]
+# command = "uv"
+# args = ["--directory", "C:\\path\\to\\Windows-MCP", "run", "windows-mcp"]
+
+# Remote mode (uncomment and set values)
+# [mcp_servers.windows-mcp.env]
+# MODE = "remote"
+# SANDBOX_ID = "<your-sandbox-id>"
+# API_KEY = "<your-api-key>"

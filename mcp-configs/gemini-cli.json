@@ -1,0 +1,32 @@
+{
+  "mcpServers": {
+    "windows-mcp": {
+      "_comment": "Option A: PyPI install (recommended). Option B: source install (see below).",
+      "command": "uvx",
+      "args": ["windows-mcp"]
+    }
+  },
+
+  "_source_install_example": {
+    "mcpServers": {
+      "windows-mcp": {
+        "command": "uv",
+        "args": ["--directory", "C:\\path\\to\\Windows-MCP", "run", "windows-mcp"]
+      }
+    }
+  },
+
+  "_remote_mode_example": {
+    "mcpServers": {
+      "windows-mcp": {
+        "command": "uvx",
+        "args": ["windows-mcp"],
+        "env": {
+          "MODE": "remote",
+          "SANDBOX_ID": "<your-sandbox-id>",
+          "API_KEY": "<your-api-key>"
+        }
+      }
+    }
+  }
+}
