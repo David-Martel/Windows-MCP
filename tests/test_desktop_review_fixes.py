@@ -1,4 +1,4 @@
-"""Unit tests for 9 specific bug fixes in desktop/service.py.
+"""Unit tests for bug fixes in desktop/service.py.
 
 Each test class maps to one fix. All UIA / COM / win32 interactions are mocked
 so the suite runs headless with no live desktop.
@@ -6,13 +6,12 @@ so the suite runs headless with no live desktop.
 Bug fixes covered:
   1. app() with name=None returns error string instead of raising AttributeError
   2. switch_app None-dereference guard after windows.get()
-  3. is_window_visible uses is_not_minimized (not is_minimized)
-  4. is_overlay_window handles element.Name=None without AttributeError
-  5. get_element_from_xpath raises ValueError for index=0 (1-based indexing)
-  6. get_annotated_screenshot padding: width/height += 2*padding (not 1.5*padding)
-  7. get_state raises ValueError for out-of-range scale values
-  8. list_processes clamps negative limit to 1 via max(1, limit)
-  9. auto_minimize skips ShowWindow when GetForegroundWindow returns 0
+  3. is_overlay_window handles element.Name=None without AttributeError
+  4. get_element_from_xpath raises ValueError for index=0 (1-based indexing)
+  5. get_annotated_screenshot padding: width/height += 2*padding (not 1.5*padding)
+  6. get_state raises ValueError for out-of-range scale values
+  7. list_processes clamps negative limit to 1 via max(1, limit)
+  8. auto_minimize skips ShowWindow when GetForegroundWindow returns 0
 """
 
 import sys
@@ -224,103 +223,7 @@ class TestSwitchAppNoneDereference:
 
 
 # ===========================================================================
-# Fix 3 -- is_window_visible uses is_not_minimized
-# ===========================================================================
-
-
-class TestIsWindowVisible:
-    """is_window_visible should return False for minimized windows
-    and True for normal, non-overlay windows with area > 10."""
-
-    def _make_uia_control(self, status: Status, width: int = 800, height: int = 600):
-        ctrl = MagicMock()
-        rect = MagicMock()
-        rect.width.return_value = width
-        rect.height.return_value = height
-        ctrl.BoundingRectangle = rect
-        # GetChildren() returns a list with one item (not an overlay)
-        ctrl.GetChildren.return_value = [MagicMock()]
-        ctrl.Name = "Normal Window"
-        return ctrl, status
-
-    def test_minimized_window_returns_false(self):
-        d = _make_bare_desktop()
-        ctrl, status = self._make_uia_control(Status.MINIMIZED)
-        d.get_window_status = MagicMock(return_value=Status.MINIMIZED)
-        d.is_overlay_window = MagicMock(return_value=False)
-        result = d.is_window_visible(ctrl)
-        assert result is False
-
-    def test_normal_window_large_area_returns_true(self):
-        d = _make_bare_desktop()
-        ctrl, _ = self._make_uia_control(Status.NORMAL, width=800, height=600)
-        d.get_window_status = MagicMock(return_value=Status.NORMAL)
-        d.is_overlay_window = MagicMock(return_value=False)
-        result = d.is_window_visible(ctrl)
-        assert result is True
-
-    def test_maximized_window_returns_true(self):
-        d = _make_bare_desktop()
-        ctrl, _ = self._make_uia_control(Status.MAXIMIZED, width=1920, height=1080)
-        d.get_window_status = MagicMock(return_value=Status.MAXIMIZED)
-        d.is_overlay_window = MagicMock(return_value=False)
-        result = d.is_window_visible(ctrl)
-        assert result is True
-
-    def test_non_minimized_overlay_returns_false(self):
-        """Overlay windows should not be visible even if not minimized."""
-        d = _make_bare_desktop()
-        ctrl, _ = self._make_uia_control(Status.NORMAL, width=800, height=600)
-        d.get_window_status = MagicMock(return_value=Status.NORMAL)
-        d.is_overlay_window = MagicMock(return_value=True)
-        result = d.is_window_visible(ctrl)
-        assert result is False
-
-    def test_tiny_area_returns_false(self):
-        """Windows with area <= 10 pixels should not be visible."""
-        d = _make_bare_desktop()
-        ctrl, _ = self._make_uia_control(Status.NORMAL, width=2, height=3)
-        d.get_window_status = MagicMock(return_value=Status.NORMAL)
-        d.is_overlay_window = MagicMock(return_value=False)
-        result = d.is_window_visible(ctrl)
-        # 2*3=6 <= 10, should be False
-        assert result is False
-
-    def test_area_exactly_11_returns_true(self):
-        d = _make_bare_desktop()
-        ctrl = MagicMock()
-        rect = MagicMock()
-        rect.width.return_value = 11
-        rect.height.return_value = 1
-        ctrl.BoundingRectangle = rect
-        d.get_window_status = MagicMock(return_value=Status.NORMAL)
-        d.is_overlay_window = MagicMock(return_value=False)
-        result = d.is_window_visible(ctrl)
-        assert result is True
-
-    def test_is_not_minimized_variable_semantics(self):
-        """
-        Before the fix the variable was named is_minimized and the logic was:
-          return not is_overlay and not is_minimized and area > 10
-        which equals the fixed version, BUT if someone accidentally dropped the
-        'not' it would invert results. This test guards the correct polarity:
-        NORMAL status must yield visible=True (not False).
-        """
-        d = _make_bare_desktop()
-        ctrl = MagicMock()
-        rect = MagicMock()
-        rect.width.return_value = 100
-        rect.height.return_value = 100
-        ctrl.BoundingRectangle = rect
-        d.get_window_status = MagicMock(return_value=Status.NORMAL)
-        d.is_overlay_window = MagicMock(return_value=False)
-        assert d.is_window_visible(ctrl) is True, (
-            "NORMAL non-overlay window with area>10 must be visible"
-        )
-
-
-# ===========================================================================
-# Fix 4 -- is_overlay_window handles element.Name=None
+# Fix 3 -- is_overlay_window handles element.Name=None
 # ===========================================================================
 
 

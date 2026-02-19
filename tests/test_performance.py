@@ -124,28 +124,6 @@ class TestRegistryUsesWinreg:
         assert "execute_command" not in source
 
 
-class TestGetWindowsVersionNoSubprocess:
-    """Verify get_windows_version uses winreg (not PowerShell)."""
-
-    def test_no_execute_command(self):
-        import inspect
-
-        source = inspect.getsource(Desktop.get_windows_version)
-        assert "execute_command" not in source
-        assert "winreg" in source
-
-
-class TestGetDefaultLanguageNoSubprocess:
-    """Verify get_default_language uses locale (not PowerShell)."""
-
-    def test_no_execute_command(self):
-        import inspect
-
-        source = inspect.getsource(Desktop.get_default_language)
-        assert "execute_command" not in source
-        assert "locale" in source
-
-
 class TestKnownBottlenecks:
     """Document known remaining performance bottlenecks for future optimization.
 

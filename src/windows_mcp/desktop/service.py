@@ -1,12 +1,10 @@
 import csv
 import ctypes
 import io
-import locale
 import logging
 import os
 import re
 import threading
-import winreg
 from contextlib import contextmanager
 from locale import getpreferredencoding
 from time import time
@@ -180,12 +178,6 @@ class Desktop:
         else:
             return Status.HIDDEN
 
-    def get_cursor_location(self) -> tuple[int, int]:
-        return self._screen.get_cursor_location()
-
-    def get_element_under_cursor(self) -> uia.Control:
-        return self._screen.get_element_under_cursor()
-
     def get_apps_from_start_menu(self) -> dict[str, str]:
         """Get installed apps with caching. Tries Get-StartApps first, falls back to shortcut scanning."""
         now = time()
@@ -277,16 +269,6 @@ class Desktop:
             return Browser.has_process(proc_name)
         except Exception:
             return False
-
-    def get_default_language(self) -> str:
-        try:
-            # Returns e.g. ('en_US', 'UTF-8') or ('English_United States', '1252')
-            lang, _ = locale.getlocale()
-            if lang:
-                return lang.replace("_", " ")
-        except Exception:
-            pass
-        return "Unknown"
 
     def resize_app(
         self,
@@ -574,13 +556,6 @@ class Desktop:
                 return window
         return None
 
-    def is_window_visible(self, window: uia.Control) -> bool:
-        is_not_minimized = self.get_window_status(window) != Status.MINIMIZED
-        size = window.BoundingRectangle
-        area = size.width() * size.height()
-        is_overlay = self.is_overlay_window(window)
-        return not is_overlay and is_not_minimized and area > 10
-
     def is_overlay_window(self, element: uia.Control) -> bool:
         no_children = len(element.GetChildren()) == 0
         is_name = "Overlay" in (element.Name or "").strip()
@@ -788,36 +763,6 @@ class Desktop:
             else:
                 element = same_type_children[0]
         return element
-
-    def get_windows_version(self) -> str:
-        import platform
-
-        try:
-            with winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
-                r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
-            ) as key:
-                product_name = winreg.QueryValueEx(key, "ProductName")[0]
-                return product_name
-        except OSError:
-            return f"Windows {platform.release()}"
-
-    def get_user_account_type(self) -> str:
-        try:
-            with winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
-                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI",
-            ) as key:
-                last_user = winreg.QueryValueEx(key, "LastLoggedOnDisplayName")[0]
-                # Microsoft accounts typically show email-style display
-                if "@" in last_user:
-                    return "Microsoft Account"
-        except OSError:
-            pass
-        return "Local Account"
-
-    def get_dpi_scaling(self):
-        return self._screen.get_dpi_scaling()
 
     def get_screen_size(self) -> Size:
         return self._screen.get_screen_size()
