@@ -127,6 +127,9 @@ def app_tool(
 )
 @with_analytics(lambda: analytics, "Powershell-Tool")
 def powershell_tool(command: str, timeout: int = 30, ctx: Context = None) -> str:
+    if not command or not command.strip():
+        return "Error: command must not be empty.\nStatus Code: 1"
+    timeout = min(max(timeout, 1), 300)
     try:
         response, status_code = desktop.execute_command(command, timeout)
         return f"Response: {response}\nStatus Code: {status_code}"
@@ -413,6 +416,8 @@ def move_tool(loc: list[int], drag: bool | str = False, ctx: Context = None) -> 
 )
 @with_analytics(lambda: analytics, "Shortcut-Tool")
 def shortcut_tool(shortcut: str, ctx: Context = None):
+    if not shortcut or not shortcut.strip():
+        return "Error: shortcut must not be empty."
     desktop.shortcut(shortcut)
     return f"Pressed {shortcut}."
 
@@ -430,6 +435,7 @@ def shortcut_tool(shortcut: str, ctx: Context = None):
 )
 @with_analytics(lambda: analytics, "Wait-Tool")
 def wait_tool(duration: int, ctx: Context = None) -> str:
+    duration = max(duration, 0)
     pg.sleep(duration)
     return f"Waited for {duration} seconds."
 
@@ -482,6 +488,8 @@ def multi_select_tool(
     locs: list[list[int]], press_ctrl: bool | str = True, ctx: Context = None
 ) -> str:
     press_ctrl = _coerce_bool(press_ctrl, default=True)
+    if not locs:
+        return "Error: at least one location is required."
     for i, loc in enumerate(locs):
         if not isinstance(loc, (list, tuple)) or len(loc) != 2:
             raise ValueError(f"locs[{i}] must be [x, y], got {loc!r}")
@@ -503,6 +511,8 @@ def multi_select_tool(
 )
 @with_analytics(lambda: analytics, "Multi-Edit-Tool")
 def multi_edit_tool(locs: list[list], ctx: Context = None) -> str:
+    if not locs:
+        return "Error: at least one location is required."
     for i, entry in enumerate(locs):
         if not isinstance(entry, (list, tuple)) or len(entry) < 3:
             raise ValueError(f"locs[{i}] must be [x, y, text], got {entry!r}")

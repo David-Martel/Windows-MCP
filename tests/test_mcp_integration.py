@@ -1241,6 +1241,71 @@ class TestWaitForTimeoutCapping:
         assert "Window found" in result
 
 
+class TestInputValidationGuards:
+    """Tests for bounds checking and empty-input validation added to MCP tools."""
+
+    async def test_wait_negative_duration_clamped_to_zero(self, patched_desktop):
+        tools = await _get_tools()
+        with patch("windows_mcp.__main__.pg") as mock_pg:
+            result = await tools["Wait"].fn(duration=-5)
+        mock_pg.sleep.assert_called_once_with(0)
+        assert "Waited for 0 seconds" in result
+
+    async def test_wait_zero_duration_is_valid(self, patched_desktop):
+        tools = await _get_tools()
+        with patch("windows_mcp.__main__.pg") as mock_pg:
+            result = await tools["Wait"].fn(duration=0)
+        mock_pg.sleep.assert_called_once_with(0)
+        assert "Waited for 0 seconds" in result
+
+    async def test_shell_empty_command_returns_error(self, patched_desktop):
+        tools = await _get_tools()
+        result = await tools["Shell"].fn(command="")
+        assert "Error" in result
+        assert "empty" in result.lower()
+
+    async def test_shell_whitespace_command_returns_error(self, patched_desktop):
+        tools = await _get_tools()
+        result = await tools["Shell"].fn(command="   ")
+        assert "Error" in result
+        assert "empty" in result.lower()
+
+    async def test_shell_negative_timeout_clamped_to_1(self, patched_desktop):
+        patched_desktop.execute_command.return_value = ("output", 0)
+        tools = await _get_tools()
+        await tools["Shell"].fn(command="echo test", timeout=-10)
+        patched_desktop.execute_command.assert_called_once_with("echo test", 1)
+
+    async def test_shell_timeout_clamped_to_300(self, patched_desktop):
+        patched_desktop.execute_command.return_value = ("output", 0)
+        tools = await _get_tools()
+        await tools["Shell"].fn(command="echo test", timeout=9999)
+        patched_desktop.execute_command.assert_called_once_with("echo test", 300)
+
+    async def test_shortcut_empty_string_returns_error(self, patched_desktop):
+        tools = await _get_tools()
+        result = await tools["Shortcut"].fn(shortcut="")
+        assert "Error" in result
+        assert "empty" in result.lower()
+
+    async def test_shortcut_whitespace_returns_error(self, patched_desktop):
+        tools = await _get_tools()
+        result = await tools["Shortcut"].fn(shortcut="  ")
+        assert "Error" in result
+
+    async def test_multi_select_empty_locs_returns_error(self, patched_desktop):
+        tools = await _get_tools()
+        result = await tools["MultiSelect"].fn(locs=[])
+        assert "Error" in result
+        assert "at least one" in result.lower()
+
+    async def test_multi_edit_empty_locs_returns_error(self, patched_desktop):
+        tools = await _get_tools()
+        result = await tools["MultiEdit"].fn(locs=[])
+        assert "Error" in result
+        assert "at least one" in result.lower()
+
+
 class TestLifespanContextManager:
     async def test_lifespan_initialises_desktop(self):
         mock_app = MagicMock()
