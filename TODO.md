@@ -8,7 +8,7 @@
 ## P0 -- Must Fix Before Any Shared Deployment
 
 - [x] **[S2] Add authentication for SSE/HTTP transport** -- Bearer token auth via `BearerAuthMiddleware`. DPAPI key storage via `AuthKeyManager`. CLI: `--api-key`, `--generate-key`, `--rotate-key`. Refuses `0.0.0.0` without auth.
-- [ ] **[A4] Fix analytics decorator binding bug** -- `@with_analytics(analytics, ...)` captures `None` at decoration time. Pass a callable/lambda that resolves the global at call time, or use DI through FastMCP context.
+- [x] **[A4] Fix analytics decorator binding bug** -- Changed `with_analytics` to accept a callable factory (`lambda: analytics`). Resolves at call time, not decoration time. Also fixed [Q5] traceback formatting.
 - [x] **[P4] Fix PIL ImageDraw thread safety** -- Removed `ThreadPoolExecutor` from `get_annotated_screenshot`. Now draws sequentially (<5ms).
 - [ ] **[A5] Remove `ipykernel` from dependencies** -- Unused, pulls in jupyter/zmq/tornado. Move to `[dev]` optional deps if needed.
 - [x] **[Q6] Remove debug `print()` from analytics.py:97** -- Removed. Also fixed 3 `print()` calls in `watchdog/event_handlers.py` (replaced with `logger.debug()`).
@@ -23,18 +23,18 @@
 - [ ] **[P3] Convert tree_traversal to iterative** -- Replace recursion with an explicit stack to avoid Python's 1000-frame limit on complex UIs.
 - [x] **[P9] Make pyautogui.PAUSE configurable** -- Reduced from 1.0s to 0.05s in both `desktop/service.py` and `__main__.py`. Saves 1-6s per input operation.
 - [x] **[S7] Block SSRF in Scrape tool** -- Done. `ScraperService.validate_url()` blocks non-HTTP schemes, private/reserved IPs, DNS rebinding, cloud metadata endpoints. Extracted to `scraper/service.py`.
-- [ ] **[T1] Fix COM apartment threading violations** -- Make `self.dom` and `self.dom_bounding_box` local variables in traversal context, not shared instance fields.
-- [ ] **[T2] Add synchronization to shared mutable state** -- Lock or per-request context for `Tree.tree_state`, `Desktop.desktop_state`.
+- [x] **[T1] Fix COM apartment threading violations** -- Verified: `dom_context` dict is already thread-local in `get_nodes()`. COM init/uninit properly scoped per-thread. No cross-apartment sharing.
+- [x] **[T2] Add synchronization to shared mutable state** -- Added `threading.Lock` to `Tree._state_lock` and `Desktop._state_lock`. State built locally, then published atomically under lock.
 
 ---
 
 ## P2 -- Architectural Improvements
 
-- [ ] **[A1] Decompose Desktop God Object** -- Extract into focused services (3/6 done):
+- [ ] **[A1] Decompose Desktop God Object** -- Extract into focused services (4/6 done):
   - [x] `RegistryService` -- registry_get/set/delete/list (`registry/service.py`)
   - [x] `ShellService` -- execute, check_blocklist, ps_quote (`shell/service.py`)
   - [x] `ScraperService` -- validate_url, scrape (`scraper/service.py`)
-  - [ ] `InputService` -- click, type, scroll, drag, move, shortcut, multi_select, multi_edit
+  - [x] `InputService` -- click, type, scroll, drag, move, shortcut, multi_select, multi_edit (`input/service.py`)
   - [ ] `WindowService` -- get_windows, get_active_window, switch_app, resize_app
   - [ ] `ScreenService` -- get_screenshot, get_annotated_screenshot
 - [ ] **[A3] Replace module globals with dependency injection** -- Use FastMCP's lifespan context to pass `desktop`, `watchdog`, `analytics` via `ctx.request_context.lifespan_context`.
@@ -72,7 +72,7 @@
 
 - [ ] **[Q3] Remove wildcard imports in controls.py** -- Replace `from .enums import *` with explicit imports.
 - [ ] **[Q4] Remove dead config** -- Delete `STRUCTURAL_CONTROL_TYPE_NAMES` from `tree/config.py`.
-- [ ] **[Q5] Fix broken traceback in analytics.py:107** -- Use `traceback.format_exception()` instead of `str(error)`.
+- [x] **[Q5] Fix broken traceback in analytics.py:107** -- Now uses `traceback.format_exception()` for full stack trace string.
 - [ ] **[Q7] Fix resource leaks** -- Close HTTP response in `scrape()`. Guard `handle` in `auto_minimize`. Guard `CoUninitialize` on init failure.
 - [ ] **[P10] Cache COM pattern calls in tree traversal** -- Store `GetLegacyIAccessiblePattern()` result in local variable instead of calling 3 times per node.
 - [ ] **[P10] Fix BuildUpdatedCache** -- Check for existing cached state before issuing round-trip in `get_cached_children`.
