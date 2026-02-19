@@ -21,3 +21,4 @@ pub mod errors;
 pub mod input;
 pub mod system_info;
 pub mod tree;
+pub mod window;

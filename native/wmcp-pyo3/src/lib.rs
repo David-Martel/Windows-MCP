@@ -177,6 +177,91 @@ fn send_scroll(py: Python<'_>, x: i32, y: i32, delta: i32, horizontal: bool) -> 
     Ok(py.allow_threads(move || wmcp_core::input::send_scroll_raw(x, y, delta, horizontal)))
 }
 
+/// Drag the mouse from current position to destination coordinates.
+#[pyfunction]
+#[pyo3(signature = (to_x, to_y, steps=10))]
+fn send_drag(py: Python<'_>, to_x: i32, to_y: i32, steps: u32) -> PyResult<u32> {
+    Ok(py.allow_threads(move || wmcp_core::input::send_drag_raw(to_x, to_y, steps)))
+}
+
+// ---------------------------------------------------------------------------
+// window functions
+// ---------------------------------------------------------------------------
+
+/// Enumerate all visible top-level windows (Alt+Tab windows with titles).
+#[pyfunction]
+fn enumerate_windows(py: Python<'_>) -> PyResult<PyObject> {
+    let handles = py
+        .allow_threads(wmcp_core::window::enumerate_visible_windows)
+        .map_err(to_py_err)?;
+
+    Ok(PyList::new(py, &handles)?.into())
+}
+
+/// Get detailed information about a window by handle.
+#[pyfunction]
+#[pyo3(signature = (hwnd,))]
+fn get_window_info(py: Python<'_>, hwnd: isize) -> PyResult<PyObject> {
+    let info = py
+        .allow_threads(move || wmcp_core::window::get_window_info(hwnd))
+        .map_err(to_py_err)?;
+
+    let dict = PyDict::new(py);
+    dict.set_item("hwnd", info.hwnd)?;
+    dict.set_item("title", &info.title)?;
+    dict.set_item("class_name", &info.class_name)?;
+    dict.set_item("pid", info.pid)?;
+    dict.set_item("is_minimized", info.is_minimized)?;
+    dict.set_item("is_maximized", info.is_maximized)?;
+    dict.set_item("is_visible", info.is_visible)?;
+
+    let rect = PyDict::new(py);
+    rect.set_item("left", info.rect.left)?;
+    rect.set_item("top", info.rect.top)?;
+    rect.set_item("right", info.rect.right)?;
+    rect.set_item("bottom", info.rect.bottom)?;
+    dict.set_item("rect", rect)?;
+
+    Ok(dict.into())
+}
+
+/// Get the foreground (active) window handle.
+#[pyfunction]
+fn get_foreground_window(py: Python<'_>) -> PyResult<isize> {
+    Ok(py.allow_threads(wmcp_core::window::get_foreground_hwnd))
+}
+
+/// List all visible windows with their information.
+#[pyfunction]
+fn list_windows(py: Python<'_>) -> PyResult<PyObject> {
+    let windows = py
+        .allow_threads(wmcp_core::window::list_windows)
+        .map_err(to_py_err)?;
+
+    let result = PyList::empty(py);
+    for info in &windows {
+        let dict = PyDict::new(py);
+        dict.set_item("hwnd", info.hwnd)?;
+        dict.set_item("title", &info.title)?;
+        dict.set_item("class_name", &info.class_name)?;
+        dict.set_item("pid", info.pid)?;
+        dict.set_item("is_minimized", info.is_minimized)?;
+        dict.set_item("is_maximized", info.is_maximized)?;
+        dict.set_item("is_visible", info.is_visible)?;
+
+        let rect = PyDict::new(py);
+        rect.set_item("left", info.rect.left)?;
+        rect.set_item("top", info.rect.top)?;
+        rect.set_item("right", info.rect.right)?;
+        rect.set_item("bottom", info.rect.bottom)?;
+        dict.set_item("rect", rect)?;
+
+        result.append(dict)?;
+    }
+
+    Ok(result.into())
+}
+
 // ---------------------------------------------------------------------------
 // Module registration
 // ---------------------------------------------------------------------------
@@ -192,6 +277,11 @@ fn windows_mcp_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(send_mouse_move, m)?)?;
     m.add_function(wrap_pyfunction!(send_hotkey, m)?)?;
     m.add_function(wrap_pyfunction!(send_scroll, m)?)?;
+    m.add_function(wrap_pyfunction!(send_drag, m)?)?;
+    m.add_function(wrap_pyfunction!(enumerate_windows, m)?)?;
+    m.add_function(wrap_pyfunction!(get_window_info, m)?)?;
+    m.add_function(wrap_pyfunction!(get_foreground_window, m)?)?;
+    m.add_function(wrap_pyfunction!(list_windows, m)?)?;
 
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add("__doc__", "Native Rust acceleration layer for Windows-MCP.")?;

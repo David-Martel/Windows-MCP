@@ -93,6 +93,29 @@ fn dispatch(method: &str, params: &serde_json::Value) -> Result<serde_json::Valu
             let count = wmcp_core::input::send_hotkey_raw(&vk_codes);
             Ok(serde_json::Value::from(count))
         }
+        "enumerate_windows" => {
+            let handles = wmcp_core::window::enumerate_visible_windows()
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(handles).map_err(|e| e.to_string())
+        }
+        "list_windows" => {
+            let windows = wmcp_core::window::list_windows()
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(windows).map_err(|e| e.to_string())
+        }
+        "get_foreground_window" => {
+            let hwnd = wmcp_core::window::get_foreground_hwnd();
+            Ok(serde_json::Value::from(hwnd))
+        }
+        "get_window_info" => {
+            let hwnd = params
+                .get("hwnd")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0) as isize;
+            let info = wmcp_core::window::get_window_info(hwnd)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(info).map_err(|e| e.to_string())
+        }
         "ping" => Ok(serde_json::Value::String("pong".to_owned())),
         _ => Err(format!("unknown method: {method}")),
     }

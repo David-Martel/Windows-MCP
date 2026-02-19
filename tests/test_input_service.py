@@ -18,6 +18,8 @@ _PG = "windows_mcp.input.service.pg"
 _NATIVE_CLICK = "windows_mcp.input.service.native_send_click"
 _NATIVE_TEXT = "windows_mcp.input.service.native_send_text"
 _NATIVE_MOVE = "windows_mcp.input.service.native_send_mouse_move"
+_NATIVE_SCROLL = "windows_mcp.input.service.native_send_scroll"
+_NATIVE_DRAG = "windows_mcp.input.service.native_send_drag"
 _UIA = "windows_mcp.input.service.uia"
 
 
@@ -36,7 +38,7 @@ def svc():
 # ---------------------------------------------------------------------------
 
 
-def _all_mocks(pg_kw=None, click_rv=1, text_rv=1, move_rv=1):
+def _all_mocks(pg_kw=None, click_rv=1, text_rv=1, move_rv=1, scroll_rv=2, drag_rv=3):
     """Return a nested patch context that replaces all external symbols."""
     pg_defaults = dict(
         leftClick=MagicMock(),
@@ -49,6 +51,7 @@ def _all_mocks(pg_kw=None, click_rv=1, text_rv=1, move_rv=1):
         keyUp=MagicMock(),
         moveTo=MagicMock(),
         dragTo=MagicMock(),
+        position=MagicMock(return_value=(500, 500)),
     )
     if pg_kw:
         pg_defaults.update(pg_kw)
@@ -57,6 +60,8 @@ def _all_mocks(pg_kw=None, click_rv=1, text_rv=1, move_rv=1):
         patch(_NATIVE_CLICK, return_value=click_rv),
         patch(_NATIVE_TEXT, return_value=text_rv),
         patch(_NATIVE_MOVE, return_value=move_rv),
+        patch(_NATIVE_SCROLL, return_value=scroll_rv),
+        patch(_NATIVE_DRAG, return_value=drag_rv),
         patch(_UIA),
     )
 
@@ -281,94 +286,161 @@ class TestType:
 class TestScroll:
     """Tests for InputService.scroll()."""
 
-    def test_vertical_down_calls_wheel_down(self, svc):
-        with patch(_UIA) as mock_uia, patch(_PG), patch(_NATIVE_MOVE, return_value=1):
+    # --- Rust fast-path tests ---
+
+    def test_vertical_down_uses_native_scroll(self, svc):
+        with patch(_NATIVE_SCROLL, return_value=2) as mock_scroll, patch(_PG) as mock_pg:
+            mock_pg.position.return_value = (500, 500)
             result = svc.scroll(type="vertical", direction="down", wheel_times=3)
-            mock_uia.WheelDown.assert_called_once_with(3)
+            mock_scroll.assert_called_once_with(500, 500, -360, False)
             assert result is None
 
-    def test_vertical_up_calls_wheel_up(self, svc):
-        with patch(_UIA) as mock_uia, patch(_PG), patch(_NATIVE_MOVE, return_value=1):
+    def test_vertical_up_uses_native_scroll(self, svc):
+        with patch(_NATIVE_SCROLL, return_value=2) as mock_scroll, patch(_PG) as mock_pg:
+            mock_pg.position.return_value = (100, 200)
             result = svc.scroll(type="vertical", direction="up", wheel_times=2)
-            mock_uia.WheelUp.assert_called_once_with(2)
+            mock_scroll.assert_called_once_with(100, 200, 240, False)
             assert result is None
+
+    def test_horizontal_left_uses_native_scroll(self, svc):
+        with patch(_NATIVE_SCROLL, return_value=2) as mock_scroll, patch(_PG) as mock_pg:
+            mock_pg.position.return_value = (300, 400)
+            result = svc.scroll(type="horizontal", direction="left", wheel_times=1)
+            mock_scroll.assert_called_once_with(300, 400, -120, True)
+            assert result is None
+
+    def test_horizontal_right_uses_native_scroll(self, svc):
+        with patch(_NATIVE_SCROLL, return_value=2) as mock_scroll, patch(_PG) as mock_pg:
+            mock_pg.position.return_value = (300, 400)
+            result = svc.scroll(type="horizontal", direction="right", wheel_times=1)
+            mock_scroll.assert_called_once_with(300, 400, 120, True)
+            assert result is None
+
+    def test_loc_provided_passes_coords_to_native_scroll(self, svc):
+        with patch(_NATIVE_SCROLL, return_value=2) as mock_scroll, patch(_PG):
+            result = svc.scroll(loc=(400, 300), type="vertical", direction="down")
+            mock_scroll.assert_called_once_with(400, 300, -120, False)
+            assert result is None
+
+    def test_loc_zero_zero_passes_to_native_scroll(self, svc):
+        with patch(_NATIVE_SCROLL, return_value=2) as mock_scroll, patch(_PG):
+            result = svc.scroll(loc=(0, 0), type="vertical", direction="up")
+            mock_scroll.assert_called_once_with(0, 0, 120, False)
+            assert result is None
+
+    def test_wheel_times_zero_sends_zero_delta(self, svc):
+        with patch(_NATIVE_SCROLL, return_value=2) as mock_scroll, patch(_PG) as mock_pg:
+            mock_pg.position.return_value = (0, 0)
+            result = svc.scroll(type="vertical", direction="down", wheel_times=0)
+            mock_scroll.assert_called_once_with(0, 0, 0, False)
+            assert result is None
+
+    def test_wheel_times_large_value(self, svc):
+        with patch(_NATIVE_SCROLL, return_value=2) as mock_scroll, patch(_PG) as mock_pg:
+            mock_pg.position.return_value = (0, 0)
+            result = svc.scroll(type="vertical", direction="up", wheel_times=1000)
+            mock_scroll.assert_called_once_with(0, 0, 120000, False)
+            assert result is None
+
+    # --- Validation tests (no native needed) ---
 
     def test_vertical_invalid_direction_returns_error(self, svc):
-        with patch(_UIA), patch(_PG), patch(_NATIVE_MOVE, return_value=1):
+        with patch(_NATIVE_SCROLL), patch(_PG) as mock_pg:
+            mock_pg.position.return_value = (0, 0)
             result = svc.scroll(type="vertical", direction="left")
             assert result is not None
             assert "up" in result or "down" in result
 
-    def test_horizontal_left_holds_shift_and_calls_wheel_up(self, svc):
-        with patch(_UIA) as mock_uia, patch(_PG) as mock_pg, patch(_NATIVE_MOVE, return_value=1):
+    def test_horizontal_invalid_direction_returns_error(self, svc):
+        with patch(_NATIVE_SCROLL), patch(_PG) as mock_pg:
+            mock_pg.position.return_value = (0, 0)
+            result = svc.scroll(type="horizontal", direction="up")
+            assert result is not None
+            assert "left" in result or "right" in result
+
+    def test_invalid_type_returns_error(self, svc):
+        with patch(_NATIVE_SCROLL), patch(_PG) as mock_pg:
+            mock_pg.position.return_value = (0, 0)
+            result = svc.scroll(type="invalid", direction="down")
+            assert result is not None
+            assert "horizontal" in result or "vertical" in result
+
+    # --- Fallback tests (native returns None) ---
+
+    def test_fallback_vertical_down_calls_wheel_down(self, svc):
+        with (
+            patch(_NATIVE_SCROLL, return_value=None),
+            patch(_UIA) as mock_uia,
+            patch(_PG) as mock_pg,
+            patch(_NATIVE_MOVE, return_value=1),
+        ):
+            mock_pg.position.return_value = (500, 500)
+            result = svc.scroll(type="vertical", direction="down", wheel_times=3)
+            mock_uia.WheelDown.assert_called_once_with(3)
+            assert result is None
+
+    def test_fallback_vertical_up_calls_wheel_up(self, svc):
+        with (
+            patch(_NATIVE_SCROLL, return_value=None),
+            patch(_UIA) as mock_uia,
+            patch(_PG) as mock_pg,
+            patch(_NATIVE_MOVE, return_value=1),
+        ):
+            mock_pg.position.return_value = (500, 500)
+            result = svc.scroll(type="vertical", direction="up", wheel_times=2)
+            mock_uia.WheelUp.assert_called_once_with(2)
+            assert result is None
+
+    def test_fallback_horizontal_left_holds_shift(self, svc):
+        with (
+            patch(_NATIVE_SCROLL, return_value=None),
+            patch(_UIA) as mock_uia,
+            patch(_PG) as mock_pg,
+            patch(_NATIVE_MOVE, return_value=1),
+        ):
+            mock_pg.position.return_value = (500, 500)
             result = svc.scroll(type="horizontal", direction="left", wheel_times=1)
             mock_pg.keyDown.assert_called_with("Shift")
             mock_uia.WheelUp.assert_called_once_with(1)
             mock_pg.keyUp.assert_called_with("Shift")
             assert result is None
 
-    def test_horizontal_right_holds_shift_and_calls_wheel_down(self, svc):
-        with patch(_UIA) as mock_uia, patch(_PG) as mock_pg, patch(_NATIVE_MOVE, return_value=1):
+    def test_fallback_horizontal_right_holds_shift(self, svc):
+        with (
+            patch(_NATIVE_SCROLL, return_value=None),
+            patch(_UIA) as mock_uia,
+            patch(_PG) as mock_pg,
+            patch(_NATIVE_MOVE, return_value=1),
+        ):
+            mock_pg.position.return_value = (500, 500)
             result = svc.scroll(type="horizontal", direction="right", wheel_times=1)
             mock_pg.keyDown.assert_called_with("Shift")
             mock_uia.WheelDown.assert_called_once_with(1)
             mock_pg.keyUp.assert_called_with("Shift")
             assert result is None
 
-    def test_horizontal_invalid_direction_returns_error(self, svc):
-        with patch(_UIA), patch(_PG), patch(_NATIVE_MOVE, return_value=1):
-            result = svc.scroll(type="horizontal", direction="up")
-            assert result is not None
-            assert "left" in result or "right" in result
-
-    def test_invalid_type_returns_error(self, svc):
-        with patch(_UIA), patch(_PG), patch(_NATIVE_MOVE, return_value=1):
-            result = svc.scroll(type="invalid", direction="down")
-            assert result is not None
-            assert "horizontal" in result or "vertical" in result
-
-    def test_wheel_times_zero(self, svc):
-        """wheel_times=0 is passed through without error."""
-        with patch(_UIA) as mock_uia, patch(_PG), patch(_NATIVE_MOVE, return_value=1):
-            result = svc.scroll(type="vertical", direction="down", wheel_times=0)
-            mock_uia.WheelDown.assert_called_once_with(0)
-            assert result is None
-
-    def test_wheel_times_large_value(self, svc):
-        with patch(_UIA) as mock_uia, patch(_PG), patch(_NATIVE_MOVE, return_value=1):
-            result = svc.scroll(type="vertical", direction="up", wheel_times=1000)
-            mock_uia.WheelUp.assert_called_once_with(1000)
-            assert result is None
-
-    def test_loc_none_does_not_call_move(self, svc):
-        with patch(_UIA), patch(_PG), patch(_NATIVE_MOVE) as mock_move:
-            svc.scroll(loc=None, type="vertical", direction="down")
-            mock_move.assert_not_called()
-
-    def test_loc_provided_calls_move_first(self, svc):
-        with patch(_UIA), patch(_PG), patch(_NATIVE_MOVE, return_value=1) as mock_move:
-            svc.scroll(loc=(400, 300), type="vertical", direction="down")
+    def test_fallback_loc_provided_calls_move(self, svc):
+        with (
+            patch(_NATIVE_SCROLL, return_value=None),
+            patch(_UIA),
+            patch(_PG),
+            patch(_NATIVE_MOVE, return_value=1) as mock_move,
+        ):
+            result = svc.scroll(loc=(400, 300), type="vertical", direction="down")
             mock_move.assert_called_once_with(400, 300)
+            assert result is None
 
-    def test_loc_zero_zero_is_truthy_path_calls_move(self, svc):
-        """loc=(0, 0) is not None, so move() must be called."""
-        with patch(_UIA), patch(_PG), patch(_NATIVE_MOVE, return_value=1) as mock_move:
-            svc.scroll(loc=(0, 0), type="vertical", direction="up")
-            mock_move.assert_called_once_with(0, 0)
-
-    def test_horizontal_shift_released_even_when_wheel_raises(self, svc):
+    def test_fallback_horizontal_shift_released_on_error(self, svc):
         """Shift must be released (via finally) even if WheelUp raises."""
-        with patch(_UIA) as mock_uia, patch(_PG) as mock_pg, patch(_NATIVE_MOVE, return_value=1):
+        with (
+            patch(_NATIVE_SCROLL, return_value=None),
+            patch(_UIA) as mock_uia,
+            patch(_PG) as mock_pg,
+        ):
+            mock_pg.position.return_value = (500, 500)
             mock_uia.WheelUp.side_effect = RuntimeError("COM error")
             with pytest.raises(RuntimeError):
                 svc.scroll(type="horizontal", direction="left", wheel_times=1)
-            mock_pg.keyUp.assert_called_with("Shift")
-
-    def test_horizontal_right_shift_released_even_when_wheel_raises(self, svc):
-        with patch(_UIA) as mock_uia, patch(_PG) as mock_pg, patch(_NATIVE_MOVE, return_value=1):
-            mock_uia.WheelDown.side_effect = RuntimeError("COM error")
-            with pytest.raises(RuntimeError):
-                svc.scroll(type="horizontal", direction="right", wheel_times=1)
             mock_pg.keyUp.assert_called_with("Shift")
 
 
@@ -380,32 +452,41 @@ class TestScroll:
 class TestDrag:
     """Tests for InputService.drag()."""
 
-    def test_drag_calls_pyautogui_drag_to(self, svc):
-        with patch(_PG) as mock_pg:
+    # --- Rust fast-path tests ---
+
+    def test_drag_uses_native_drag(self, svc):
+        with patch(_NATIVE_DRAG, return_value=3) as mock_drag, patch(_PG) as mock_pg:
+            svc.drag((250, 350))
+            mock_drag.assert_called_once_with(250, 350)
+            mock_pg.dragTo.assert_not_called()
+
+    def test_drag_native_negative_coordinates(self, svc):
+        with patch(_NATIVE_DRAG, return_value=3) as mock_drag, patch(_PG):
+            svc.drag((-10, -20))
+            mock_drag.assert_called_once_with(-10, -20)
+
+    def test_drag_native_zero_zero(self, svc):
+        with patch(_NATIVE_DRAG, return_value=3) as mock_drag, patch(_PG):
+            svc.drag((0, 0))
+            mock_drag.assert_called_once_with(0, 0)
+
+    # --- Fallback tests (native returns None) ---
+
+    def test_drag_fallback_calls_pyautogui(self, svc):
+        with patch(_NATIVE_DRAG, return_value=None), patch(_PG) as mock_pg:
             svc.drag((250, 350))
             mock_pg.dragTo.assert_called_once_with(250, 350, duration=0.6)
 
-    def test_drag_calls_sleep_before_drag(self, svc):
-        with patch(_PG) as mock_pg:
+    def test_drag_fallback_calls_sleep_before_drag(self, svc):
+        with patch(_NATIVE_DRAG, return_value=None), patch(_PG) as mock_pg:
             svc.drag((100, 200))
             mock_pg.sleep.assert_called_once_with(0.5)
-            # sleep must be called before dragTo
             sleep_idx = mock_pg.method_calls.index(call.sleep(0.5))
             drag_idx = mock_pg.method_calls.index(call.dragTo(100, 200, duration=0.6))
             assert sleep_idx < drag_idx
 
-    def test_drag_negative_coordinates(self, svc):
-        with patch(_PG) as mock_pg:
-            svc.drag((-10, -20))
-            mock_pg.dragTo.assert_called_once_with(-10, -20, duration=0.6)
-
-    def test_drag_zero_zero(self, svc):
-        with patch(_PG) as mock_pg:
-            svc.drag((0, 0))
-            mock_pg.dragTo.assert_called_once_with(0, 0, duration=0.6)
-
-    def test_drag_large_coordinates(self, svc):
-        with patch(_PG) as mock_pg:
+    def test_drag_fallback_large_coordinates(self, svc):
+        with patch(_NATIVE_DRAG, return_value=None), patch(_PG) as mock_pg:
             svc.drag((9999, 9999))
             mock_pg.dragTo.assert_called_once_with(9999, 9999, duration=0.6)
 

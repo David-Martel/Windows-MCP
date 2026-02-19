@@ -630,7 +630,7 @@ class TestNativeWorkerCallErrors:
 
 
 class TestInputServiceScrollBranches:
-    """InputService.scroll() -- every match-case branch."""
+    """InputService.scroll() -- native fast-path + fallback branches."""
 
     def _make_service(self) -> object:
         from windows_mcp.input.service import InputService
@@ -638,96 +638,105 @@ class TestInputServiceScrollBranches:
         svc = InputService()
         return svc
 
-    def test_vertical_scroll_up_calls_wheel_up(self):
+    def test_vertical_scroll_up_uses_native(self):
         svc = self._make_service()
-        with patch("windows_mcp.input.service.uia.WheelUp") as mock_up:
+        with (
+            patch("windows_mcp.input.service.native_send_scroll", return_value=2) as mock_scroll,
+            patch("windows_mcp.input.service.pg") as mock_pg,
+        ):
+            mock_pg.position.return_value = (100, 200)
             result = svc.scroll(type="vertical", direction="up", wheel_times=3)
-        mock_up.assert_called_once_with(3)
+        mock_scroll.assert_called_once_with(100, 200, 360, False)
         assert result is None
 
-    def test_vertical_scroll_down_calls_wheel_down(self):
+    def test_vertical_scroll_down_uses_native(self):
         svc = self._make_service()
-        with patch("windows_mcp.input.service.uia.WheelDown") as mock_down:
+        with (
+            patch("windows_mcp.input.service.native_send_scroll", return_value=2) as mock_scroll,
+            patch("windows_mcp.input.service.pg") as mock_pg,
+        ):
+            mock_pg.position.return_value = (100, 200)
             result = svc.scroll(type="vertical", direction="down", wheel_times=2)
-        mock_down.assert_called_once_with(2)
+        mock_scroll.assert_called_once_with(100, 200, -240, False)
         assert result is None
 
     def test_vertical_invalid_direction_returns_error_string(self):
         svc = self._make_service()
-        result = svc.scroll(type="vertical", direction="sideways")
+        with patch("windows_mcp.input.service.pg") as mock_pg:
+            mock_pg.position.return_value = (0, 0)
+            result = svc.scroll(type="vertical", direction="sideways")
         assert result == 'Invalid direction. Use "up" or "down".'
 
-    def test_horizontal_scroll_left_holds_shift_and_calls_wheel_up(self):
+    def test_horizontal_scroll_left_uses_native(self):
         svc = self._make_service()
         with (
-            patch("windows_mcp.input.service.pg.keyDown") as mock_kd,
-            patch("windows_mcp.input.service.pg.keyUp") as mock_ku,
-            patch("windows_mcp.input.service.pg.sleep"),
-            patch("windows_mcp.input.service.uia.WheelUp") as mock_up,
+            patch("windows_mcp.input.service.native_send_scroll", return_value=2) as mock_scroll,
+            patch("windows_mcp.input.service.pg") as mock_pg,
         ):
+            mock_pg.position.return_value = (300, 400)
             result = svc.scroll(type="horizontal", direction="left", wheel_times=1)
-        mock_kd.assert_called_once_with("Shift")
-        mock_ku.assert_called_once_with("Shift")
-        mock_up.assert_called_once_with(1)
+        mock_scroll.assert_called_once_with(300, 400, -120, True)
         assert result is None
 
-    def test_horizontal_scroll_right_holds_shift_and_calls_wheel_down(self):
+    def test_horizontal_scroll_right_uses_native(self):
         svc = self._make_service()
         with (
-            patch("windows_mcp.input.service.pg.keyDown") as mock_kd,
-            patch("windows_mcp.input.service.pg.keyUp") as mock_ku,
-            patch("windows_mcp.input.service.pg.sleep"),
-            patch("windows_mcp.input.service.uia.WheelDown") as mock_down,
+            patch("windows_mcp.input.service.native_send_scroll", return_value=2) as mock_scroll,
+            patch("windows_mcp.input.service.pg") as mock_pg,
         ):
+            mock_pg.position.return_value = (300, 400)
             result = svc.scroll(type="horizontal", direction="right", wheel_times=4)
-        mock_kd.assert_called_once_with("Shift")
-        mock_ku.assert_called_once_with("Shift")
-        mock_down.assert_called_once_with(4)
+        mock_scroll.assert_called_once_with(300, 400, 480, True)
         assert result is None
 
     def test_horizontal_invalid_direction_returns_error_string(self):
         svc = self._make_service()
-        result = svc.scroll(type="horizontal", direction="diagonal")
+        with patch("windows_mcp.input.service.pg") as mock_pg:
+            mock_pg.position.return_value = (0, 0)
+            result = svc.scroll(type="horizontal", direction="diagonal")
         assert result == 'Invalid direction. Use "left" or "right".'
 
     def test_invalid_scroll_type_returns_error_string(self):
         svc = self._make_service()
-        result = svc.scroll(type="circular", direction="up")
+        with patch("windows_mcp.input.service.pg") as mock_pg:
+            mock_pg.position.return_value = (0, 0)
+            result = svc.scroll(type="circular", direction="up")
         assert result == 'Invalid type. Use "horizontal" or "vertical".'
 
-    def test_scroll_with_loc_calls_move_first(self):
+    def test_scroll_with_loc_passes_coords_to_native(self):
         svc = self._make_service()
         with (
-            patch.object(svc, "move") as mock_move,
-            patch("windows_mcp.input.service.uia.WheelDown"),
+            patch("windows_mcp.input.service.native_send_scroll", return_value=2) as mock_scroll,
+            patch("windows_mcp.input.service.pg"),
         ):
             svc.scroll(loc=(500, 500), type="vertical", direction="down")
-        mock_move.assert_called_once_with((500, 500))
+        mock_scroll.assert_called_once_with(500, 500, -120, False)
 
-    def test_scroll_without_loc_does_not_call_move(self):
+    def test_scroll_without_loc_uses_cursor_position(self):
         svc = self._make_service()
         with (
-            patch.object(svc, "move") as mock_move,
-            patch("windows_mcp.input.service.uia.WheelDown"),
+            patch("windows_mcp.input.service.native_send_scroll", return_value=2) as mock_scroll,
+            patch("windows_mcp.input.service.pg") as mock_pg,
         ):
+            mock_pg.position.return_value = (123, 456)
             svc.scroll(loc=None, type="vertical", direction="down")
-        mock_move.assert_not_called()
+        mock_scroll.assert_called_once_with(123, 456, -120, False)
 
-    def test_horizontal_shift_released_even_on_wheel_exception(self):
-        """keyUp("Shift") is called even if WheelUp raises."""
+    def test_fallback_horizontal_shift_released_even_on_wheel_exception(self):
+        """keyUp("Shift") is called even if WheelUp raises in fallback path."""
         svc = self._make_service()
         with (
-            patch("windows_mcp.input.service.pg.keyDown"),
-            patch("windows_mcp.input.service.pg.keyUp") as mock_ku,
-            patch("windows_mcp.input.service.pg.sleep"),
+            patch("windows_mcp.input.service.native_send_scroll", return_value=None),
+            patch("windows_mcp.input.service.pg") as mock_pg,
             patch(
                 "windows_mcp.input.service.uia.WheelUp",
                 side_effect=RuntimeError("COM error"),
             ),
         ):
+            mock_pg.position.return_value = (0, 0)
             with pytest.raises(RuntimeError):
                 svc.scroll(type="horizontal", direction="left")
-        mock_ku.assert_called_once_with("Shift")
+        mock_pg.keyUp.assert_called_once_with("Shift")
 
 
 class TestInputServiceShortcutBranches:
@@ -1047,16 +1056,27 @@ class TestInputServiceMultiEditBranches:
 
 
 class TestInputServiceDragBranches:
-    """InputService.drag() -- delegates to pg.dragTo."""
+    """InputService.drag() -- native fast-path + fallback."""
 
     def _make_service(self) -> object:
         from windows_mcp.input.service import InputService
 
         return InputService()
 
-    def test_drag_calls_drag_to_with_correct_coordinates(self):
+    def test_drag_uses_native_when_available(self):
         svc = self._make_service()
         with (
+            patch("windows_mcp.input.service.native_send_drag", return_value=3) as mock_drag,
+            patch("windows_mcp.input.service.pg") as mock_pg,
+        ):
+            svc.drag((800, 600))
+        mock_drag.assert_called_once_with(800, 600)
+        mock_pg.dragTo.assert_not_called()
+
+    def test_drag_fallback_calls_drag_to(self):
+        svc = self._make_service()
+        with (
+            patch("windows_mcp.input.service.native_send_drag", return_value=None),
             patch("windows_mcp.input.service.pg.sleep"),
             patch("windows_mcp.input.service.pg.dragTo") as mock_dt,
         ):
@@ -1442,17 +1462,25 @@ class TestInputServiceScrollBoundaryValues:
 
         return InputService()
 
-    def test_zero_wheel_times_still_calls_wheel_fn(self):
+    def test_zero_wheel_times_sends_zero_delta(self):
         svc = self._make_service()
-        with patch("windows_mcp.input.service.uia.WheelDown") as mock_down:
+        with (
+            patch("windows_mcp.input.service.native_send_scroll", return_value=2) as mock_scroll,
+            patch("windows_mcp.input.service.pg") as mock_pg,
+        ):
+            mock_pg.position.return_value = (0, 0)
             svc.scroll(type="vertical", direction="down", wheel_times=0)
-        mock_down.assert_called_once_with(0)
+        mock_scroll.assert_called_once_with(0, 0, 0, False)
 
-    def test_large_wheel_times_passes_through(self):
+    def test_large_wheel_times_sends_large_delta(self):
         svc = self._make_service()
-        with patch("windows_mcp.input.service.uia.WheelUp") as mock_up:
+        with (
+            patch("windows_mcp.input.service.native_send_scroll", return_value=2) as mock_scroll,
+            patch("windows_mcp.input.service.pg") as mock_pg,
+        ):
+            mock_pg.position.return_value = (0, 0)
             svc.scroll(type="vertical", direction="up", wheel_times=1000)
-        mock_up.assert_called_once_with(1000)
+        mock_scroll.assert_called_once_with(0, 0, 120000, False)
 
 
 class TestInputServiceShortcutBoundaryValues:

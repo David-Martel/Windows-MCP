@@ -13,7 +13,9 @@ import pyautogui as pg  # noqa: E402
 import windows_mcp.uia as uia  # noqa: E402
 from windows_mcp.native import (
     native_send_click,
+    native_send_drag,
     native_send_mouse_move,
+    native_send_scroll,
     native_send_text,
 )
 
@@ -101,48 +103,71 @@ class InputService:
         Returns:
             An error string if an invalid type/direction is supplied, else None.
         """
+        # Determine scroll position (current cursor if not specified)
         if loc is not None:
-            self.move(loc)
+            x, y = loc
+        else:
+            pos = pg.position()
+            x, y = int(pos[0]), int(pos[1])
+
         match type:
             case "vertical":
                 match direction:
                     case "up":
-                        uia.WheelUp(wheel_times)
+                        delta = 120 * wheel_times
                     case "down":
-                        uia.WheelDown(wheel_times)
+                        delta = -120 * wheel_times
                     case _:
                         return 'Invalid direction. Use "up" or "down".'
+                horizontal = False
             case "horizontal":
                 match direction:
                     case "left":
-                        pg.keyDown("Shift")
-                        try:
-                            pg.sleep(0.05)
-                            uia.WheelUp(wheel_times)
-                            pg.sleep(0.05)
-                        finally:
-                            pg.keyUp("Shift")
+                        delta = -120 * wheel_times
                     case "right":
-                        pg.keyDown("Shift")
-                        try:
-                            pg.sleep(0.05)
-                            uia.WheelDown(wheel_times)
-                            pg.sleep(0.05)
-                        finally:
-                            pg.keyUp("Shift")
+                        delta = 120 * wheel_times
                     case _:
                         return 'Invalid direction. Use "left" or "right".'
+                horizontal = True
             case _:
                 return 'Invalid type. Use "horizontal" or "vertical".'
+
+        # Rust fast-path: atomic SendInput with proper MOUSEEVENTF_HWHEEL
+        result = native_send_scroll(x, y, delta, horizontal)
+        if result is not None:
+            return None
+
+        # Fallback to UIA wheel events (COM-based)
+        if loc is not None:
+            self.move(loc)
+        if horizontal:
+            pg.keyDown("Shift")
+            try:
+                pg.sleep(0.05)
+                if delta > 0:
+                    uia.WheelDown(wheel_times)
+                else:
+                    uia.WheelUp(wheel_times)
+                pg.sleep(0.05)
+            finally:
+                pg.keyUp("Shift")
+        elif delta > 0:
+            uia.WheelUp(wheel_times)
+        else:
+            uia.WheelDown(wheel_times)
         return None
 
     def drag(self, loc: tuple[int, int]):
-        """Drag the cursor to screen coordinates (continues a drag already in progress).
+        """Drag the cursor to screen coordinates (mouse-down, move, mouse-up).
 
         Args:
             loc: (x, y) destination coordinates.
         """
         x, y = loc
+        result = native_send_drag(x, y)
+        if result is not None:
+            return
+        # Fallback to pyautogui
         pg.sleep(0.5)
         pg.dragTo(x, y, duration=0.6)
 

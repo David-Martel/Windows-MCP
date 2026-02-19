@@ -32,9 +32,10 @@ fn main() {
     let args = Args::parse();
 
     let handles = if args.all {
-        // TODO: enumerate all visible windows via EnumWindows
-        eprintln!("--all not yet implemented, using foreground window");
-        vec![get_foreground_hwnd()]
+        wmcp_core::window::enumerate_visible_windows().unwrap_or_else(|e| {
+            eprintln!("Failed to enumerate windows: {e}");
+            vec![get_foreground_hwnd()]
+        })
     } else if args.hwnd.is_empty() {
         vec![get_foreground_hwnd()]
     } else {
