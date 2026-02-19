@@ -11,14 +11,13 @@ uiautomation is shared under the Apache Licene 2.0.
 This means that the code can be freely copied and distributed, and costs nothing to use.
 """
 
+import ctypes
+import ctypes.wintypes
 import os
 import sys
 import time
-import ctypes
-import ctypes.wintypes
 from enum import IntEnum, IntFlag
 from typing import Any
-
 
 METRO_WINDOW_CLASS_NAME = "Windows.UI.Core.CoreWindow"  # for Windows 8 and 8.1
 SEARCH_INTERVAL = 0.5  # search control interval seconds

@@ -1,14 +1,12 @@
-import comtypes.client
-from comtypes import GUID, IUnknown, COMMETHOD
-from ctypes import POINTER
-from ctypes.wintypes import HWND, BOOL
-import logging
-import threading
-import sys
 import ctypes
-from ctypes import HRESULT, c_void_p, byref
-from ctypes.wintypes import UINT
-from comtypes import STDMETHOD
+import logging
+import sys
+import threading
+from ctypes import HRESULT, POINTER, byref, c_void_p
+from ctypes.wintypes import BOOL, HWND, UINT
+
+import comtypes.client
+from comtypes import COMMETHOD, GUID, STDMETHOD, IUnknown
 
 logger = logging.getLogger(__name__)
 

@@ -13,21 +13,22 @@ This means that the code can be freely copied and distributed, and costs nothing
 
 from __future__ import annotations
 
-import os
-import sys
-import time
-import datetime
-import re
-import threading
 import ctypes
 import ctypes.wintypes
-import comtypes
+import datetime
+import os
+import re
+import sys
+import threading
+import time
 from typing import Any, Callable, Dict, Generator, List, Tuple
-from .enums import *
+
+import comtypes
+
 from .core import *
 from .core import _AutomationClient
+from .enums import *
 from .patterns import *
-
 
 METRO_WINDOW_CLASS_NAME = "Windows.UI.Core.CoreWindow"  # for Windows 8 and 8.1
 SEARCH_INTERVAL = 0.5  # search control interval seconds

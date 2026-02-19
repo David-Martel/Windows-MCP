@@ -1,34 +1,38 @@
+import base64
+import csv
+import ctypes
+import io
+import ipaddress
+import logging
+import os
+import random
+import re
+import subprocess
+import winreg
+from contextlib import contextmanager
+from locale import getpreferredencoding
+from time import time
+from typing import Literal
+from urllib.parse import urlparse
+
+import requests
+import win32con
+import win32gui
+import win32process
+from markdownify import markdownify
+from PIL import Image, ImageDraw, ImageFont, ImageGrab
+from psutil import Process
+from thefuzz import process
+
+from windows_mcp.desktop.config import PROCESS_PER_MONITOR_DPI_AWARE
+from windows_mcp.desktop.views import Browser, DesktopState, Size, Status, Window
+from windows_mcp.tree.service import Tree
+from windows_mcp.tree.views import BoundingBox, TreeElementNode
 from windows_mcp.vdm.core import (
     get_all_desktops,
     get_current_desktop,
     is_window_on_current_desktop,
 )
-from windows_mcp.desktop.views import DesktopState, Window, Browser, Status, Size
-from windows_mcp.desktop.config import PROCESS_PER_MONITOR_DPI_AWARE
-from windows_mcp.tree.views import BoundingBox, TreeElementNode
-from PIL import ImageGrab, ImageFont, ImageDraw, Image
-from windows_mcp.tree.service import Tree
-from locale import getpreferredencoding
-from contextlib import contextmanager
-from typing import Literal
-from markdownify import markdownify
-from thefuzz import process
-from time import time
-from psutil import Process
-import win32process
-import subprocess
-import win32gui
-import win32con
-import requests
-import logging
-import winreg
-import base64
-import ctypes
-import csv
-import re
-import os
-import io
-import random
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -38,11 +42,57 @@ try:
 except Exception:
     ctypes.windll.user32.SetProcessDPIAware()
 
-import windows_mcp.uia as uia  # noqa: E402
 import pyautogui as pg  # noqa: E402
+
+import windows_mcp.uia as uia  # noqa: E402
 
 pg.FAILSAFE = False
 pg.PAUSE = 0.05
+
+# ---------------------------------------------------------------------------
+#  Shell sandboxing: blocked command patterns (configurable via env var)
+# ---------------------------------------------------------------------------
+# Default blocklist: commands that can cause irreversible damage.
+# Set WINDOWS_MCP_SHELL_BLOCKLIST to a comma-separated list to override.
+# Set WINDOWS_MCP_SHELL_BLOCKLIST="" (empty) to disable the blocklist.
+_DEFAULT_SHELL_BLOCKLIST = [
+    r"\bformat\b.*[a-zA-Z]:",  # format C:, format D:, etc.
+    r"\brm\s+-rf\s+[/\\]",  # rm -rf /
+    r"\bRemove-Item\b.*-Recurse.*[/\\]\s*$",  # Remove-Item -Recurse C:\
+    r"\bdel\s+/[sS]\s+[/\\]",  # del /s \
+    r"\brd\s+/[sS]\s+[/\\]",  # rd /s \
+    r"\bclear-disk\b",  # Clear-Disk
+    r"\bstop-computer\b",  # Stop-Computer (shutdown)
+    r"\brestart-computer\b",  # Restart-Computer
+    r"\bdiskpart\b",  # diskpart
+    r"\bbcdedit\b",  # bcdedit (boot config)
+    r"\bsfc\s+/scannow\b",  # sfc /scannow (system file checker)
+    r"\breg\s+delete\s+HK",  # reg delete HKLM\...
+    r"\bnet\s+user\b.*\b/add\b",  # net user <x> /add
+    r"\bnet\s+localgroup\s+administrators\b.*\b/add\b",  # privilege escalation
+    r"\bInvoke-Expression\b.*\bDownloadString\b",  # IEX(downloadstring) cradle
+    r"\biex\b.*\bNet\.WebClient\b",  # IEX cradle variant
+]
+
+_shell_blocklist_patterns: list[re.Pattern] | None = None
+
+
+def _get_shell_blocklist() -> list[re.Pattern]:
+    """Lazily compile and cache the shell blocklist patterns."""
+    global _shell_blocklist_patterns
+    if _shell_blocklist_patterns is not None:
+        return _shell_blocklist_patterns
+
+    env_val = os.environ.get("WINDOWS_MCP_SHELL_BLOCKLIST")
+    if env_val is not None:
+        if env_val.strip() == "":
+            _shell_blocklist_patterns = []
+        else:
+            raw = [p.strip() for p in env_val.split(",") if p.strip()]
+            _shell_blocklist_patterns = [re.compile(p, re.IGNORECASE) for p in raw]
+    else:
+        _shell_blocklist_patterns = [re.compile(p, re.IGNORECASE) for p in _DEFAULT_SHELL_BLOCKLIST]
+    return _shell_blocklist_patterns
 
 
 class Desktop:
@@ -61,6 +111,65 @@ class Desktop:
         which is doubled ('').
         """
         return "'" + value.replace("'", "''") + "'"
+
+    @staticmethod
+    def _validate_url(url: str) -> None:
+        """Validate a URL for SSRF safety.
+
+        Blocks:
+        - Non-HTTP(S) schemes (file://, ftp://, data:, etc.)
+        - Private/reserved IP ranges (RFC 1918, link-local, loopback)
+        - Cloud metadata endpoints (169.254.169.254, fd00::, etc.)
+
+        Raises ValueError if the URL is unsafe.
+        """
+        parsed = urlparse(url)
+
+        # Scheme check
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"Unsupported URL scheme '{parsed.scheme}'. Only http and https are allowed."
+            )
+
+        # Extract hostname
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("URL has no hostname.")
+
+        # Resolve to IP and check for private/reserved ranges
+        try:
+            addr = ipaddress.ip_address(hostname)
+        except ValueError:
+            # It's a domain name -- resolve it
+            import socket
+
+            try:
+                resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                if not resolved:
+                    raise ValueError(f"Could not resolve hostname: {hostname}")
+                # Check ALL resolved addresses (prevent DNS rebinding with multiple A records)
+                for family, _, _, _, sockaddr in resolved:
+                    ip_str = sockaddr[0]
+                    addr = ipaddress.ip_address(ip_str)
+                    if (
+                        addr.is_private
+                        or addr.is_reserved
+                        or addr.is_loopback
+                        or addr.is_link_local
+                    ):
+                        raise ValueError(
+                            f"URL resolves to private/reserved IP {addr}. "
+                            "Scraping internal network addresses is not allowed."
+                        )
+            except socket.gaierror as e:
+                raise ValueError(f"Could not resolve hostname '{hostname}': {e}") from e
+        else:
+            # Direct IP address in URL
+            if addr.is_private or addr.is_reserved or addr.is_loopback or addr.is_link_local:
+                raise ValueError(
+                    f"URL points to private/reserved IP {addr}. "
+                    "Scraping internal network addresses is not allowed."
+                )
 
     def get_state(
         self,
@@ -206,7 +315,27 @@ class Desktop:
                     apps[name] = lnk_path
         return apps
 
+    @staticmethod
+    def _check_shell_blocklist(command: str) -> str | None:
+        """Check a command against the shell blocklist.
+
+        Returns the matched pattern description if blocked, or None if allowed.
+        """
+        for pattern in _get_shell_blocklist():
+            if pattern.search(command):
+                return pattern.pattern
+        return None
+
     def execute_command(self, command: str, timeout: int = 10) -> tuple[str, int]:
+        # Check command against blocklist
+        blocked = self._check_shell_blocklist(command)
+        if blocked:
+            logger.warning("Shell command blocked by safety filter: %s", blocked)
+            return (
+                f"Command blocked by safety filter (matched pattern: {blocked}). "
+                "Set WINDOWS_MCP_SHELL_BLOCKLIST env var to customize.",
+                1,
+            )
         try:
             encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
             result = subprocess.run(
@@ -565,9 +694,20 @@ class Desktop:
             self.type((x, y), text=text, clear=True)
 
     def scrape(self, url: str) -> str:
+        self._validate_url(url)
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, timeout=10, allow_redirects=False)
+            # Follow redirects manually to validate each hop
+            redirects = 0
+            while response.is_redirect and redirects < 5:
+                redirect_url = response.headers.get("Location", "")
+                if redirect_url:
+                    self._validate_url(redirect_url)
+                response = requests.get(redirect_url, timeout=10, allow_redirects=False)
+                redirects += 1
             response.raise_for_status()
+        except (ValueError, ConnectionError, TimeoutError):
+            raise  # Re-raise our own validation errors
         except requests.exceptions.HTTPError as e:
             raise ValueError(f"HTTP error for {url}: {e}") from e
         except requests.exceptions.ConnectionError as e:
@@ -893,8 +1033,8 @@ class Desktop:
     def send_notification(self, title: str, message: str) -> str:
         from xml.sax.saxutils import escape as xml_escape
 
-        safe_title = xml_escape(title, {'"': '&quot;', "'": '&apos;'})
-        safe_message = xml_escape(message, {'"': '&quot;', "'": '&apos;'})
+        safe_title = xml_escape(title, {'"': "&quot;", "'": "&apos;"})
+        safe_message = xml_escape(message, {'"': "&quot;", "'": "&apos;"})
 
         ps_script = (
             "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null\n"
@@ -921,7 +1061,7 @@ class Desktop:
         if status == 0:
             return f'Notification sent: "{title}" - {message}'
         else:
-            return f'Notification may have been sent. PowerShell output: {response[:200]}'
+            return f"Notification may have been sent. PowerShell output: {response[:200]}"
 
     def list_processes(
         self,
@@ -1008,9 +1148,10 @@ class Desktop:
         return "Screen locked."
 
     def get_system_info(self) -> str:
-        import psutil
         import platform
         from datetime import datetime, timedelta
+
+        import psutil
 
         cpu_pct = psutil.cpu_percent(interval=1)
         cpu_count = psutil.cpu_count()
@@ -1077,7 +1218,6 @@ class Desktop:
         return hive_key, subkey
 
     def registry_get(self, path: str, name: str) -> str:
-
         try:
             hive, subkey = self._parse_reg_path(path)
             with winreg.OpenKey(hive, subkey) as key:
@@ -1088,8 +1228,7 @@ class Desktop:
         except ValueError as e:
             return f"Error reading registry: {e}"
 
-    def registry_set(self, path: str, name: str, value: str, reg_type: str = 'String') -> str:
-
+    def registry_set(self, path: str, name: str, value: str, reg_type: str = "String") -> str:
         allowed_types = {"String", "ExpandString", "Binary", "DWord", "MultiString", "QWord"}
         if reg_type not in allowed_types:
             return f"Error: invalid registry type '{reg_type}'. Allowed: {', '.join(sorted(allowed_types))}"
@@ -1119,7 +1258,6 @@ class Desktop:
             return f"Error writing registry: {e}"
 
     def registry_delete(self, path: str, name: str | None = None) -> str:
-
         try:
             hive, subkey = self._parse_reg_path(path)
             if name:
@@ -1128,14 +1266,13 @@ class Desktop:
                 return f'Registry value [{path}] "{name}" deleted.'
             else:
                 winreg.DeleteKey(hive, subkey)
-                return f'Registry key [{path}] deleted.'
+                return f"Registry key [{path}] deleted."
         except OSError as e:
             return f"Error deleting registry {'value' if name else 'key'}: {e}"
         except ValueError as e:
             return f"Error deleting registry: {e}"
 
     def registry_list(self, path: str) -> str:
-
         try:
             hive, subkey = self._parse_reg_path(path)
             with winreg.OpenKey(hive, subkey) as key:

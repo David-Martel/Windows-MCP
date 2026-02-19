@@ -1,34 +1,38 @@
-from windows_mcp.analytics import PostHogAnalytics, with_analytics
-from windows_mcp.desktop.service import Desktop, Size
-from windows_mcp.watchdog.service import WatchDog
+import asyncio
+import io
+import logging
+import os
+import sys
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from enum import Enum
+from textwrap import dedent
+from typing import Literal
+
+import click
+import pyautogui as pg
+from dotenv import load_dotenv
+from fastmcp import Context, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server.proxy import ProxyClient
-from contextlib import asynccontextmanager
 from fastmcp.utilities.types import Image
-from dataclasses import dataclass, field
-from windows_mcp.auth import AuthClient, AuthKeyManager, BearerAuthMiddleware
 from mcp.types import ToolAnnotations
-from typing import Literal
-from fastmcp import FastMCP, Context
+
 from windows_mcp import filesystem
-from dotenv import load_dotenv
-from textwrap import dedent
-import pyautogui as pg
-from enum import Enum
-import logging
-import asyncio
-import click
-import sys
-import os
-import io
+from windows_mcp.analytics import PostHogAnalytics, with_analytics
+from windows_mcp.auth import AuthClient, AuthKeyManager, BearerAuthMiddleware
+from windows_mcp.desktop.service import Desktop, Size
+from windows_mcp.watchdog.service import WatchDog
 
 load_dotenv()
+
 
 @dataclass
 class Config:
     mode: str
-    sandbox_id: str = field(default='')
-    api_key: str = field(default='')
+    sandbox_id: str = field(default="")
+    api_key: str = field(default="")
+
 
 MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT = 1920, 1080
 pg.FAILSAFE = False
@@ -48,7 +52,7 @@ thus enabling to operate the desktop on the user's behalf.
 @asynccontextmanager
 async def lifespan(app: FastMCP):
     """Runs initialization code before the server starts and cleanup code after it shuts down."""
-    global desktop, watchdog, analytics,screen_size
+    global desktop, watchdog, analytics, screen_size
 
     # Initialize components here instead of at module level
     if os.getenv("ANONYMIZED_TELEMETRY", "true").lower() != "false":
@@ -84,8 +88,15 @@ mcp = FastMCP(name="windows-mcp", instructions=instructions, lifespan=lifespan)
     ),
 )
 @with_analytics(analytics, "App-Tool")
-def app_tool(mode:Literal['launch','resize','switch']='launch',name:str|None=None,window_loc:list[int]|None=None,window_size:list[int]|None=None, ctx: Context = None):
-    return desktop.app(mode,name,window_loc,window_size)
+def app_tool(
+    mode: Literal["launch", "resize", "switch"] = "launch",
+    name: str | None = None,
+    window_loc: list[int] | None = None,
+    window_size: list[int] | None = None,
+    ctx: Context = None,
+):
+    return desktop.app(mode, name, window_loc, window_size)
+
 
 @mcp.tool(
     name="Shell",
@@ -108,19 +119,19 @@ def powershell_tool(command: str, timeout: int = 30, ctx: Context = None) -> str
 
 
 @mcp.tool(
-    name='File',
+    name="File",
     description="Manages file system operations with eight modes: 'read' (read text file contents with optional line offset/limit), 'write' (create or overwrite a file, set append=True to append), 'copy' (copy file or directory to destination), 'move' (move or rename file/directory), 'delete' (delete file or directory, set recursive=True for non-empty dirs), 'list' (list directory contents with optional pattern filter), 'search' (find files matching a glob pattern), 'info' (get file/directory metadata like size, dates, type). Relative paths are resolved from the user's Desktop folder. Use absolute paths to access other locations.",
     annotations=ToolAnnotations(
         title="File",
         readOnlyHint=False,
         destructiveHint=True,
         idempotentHint=False,
-        openWorldHint=False
-    )
-    )
+        openWorldHint=False,
+    ),
+)
 @with_analytics(analytics, "File-Tool")
 def file_tool(
-    mode: Literal['read', 'write', 'copy', 'move', 'delete', 'list', 'search', 'info'],
+    mode: Literal["read", "write", "copy", "move", "delete", "list", "search", "info"],
     path: str,
     destination: str | None = None,
     content: str | None = None,
@@ -130,56 +141,66 @@ def file_tool(
     overwrite: bool | str = False,
     offset: int | None = None,
     limit: int | None = None,
-    encoding: str = 'utf-8',
+    encoding: str = "utf-8",
     show_hidden: bool | str = False,
-    ctx: Context = None
+    ctx: Context = None,
 ) -> str:
     try:
         from platformdirs import user_desktop_dir
+
         default_dir = user_desktop_dir()
         if not os.path.isabs(path):
             path = os.path.join(default_dir, path)
         if destination and not os.path.isabs(destination):
             destination = os.path.join(default_dir, destination)
 
-        recursive = recursive is True or (isinstance(recursive, str) and recursive.lower() == 'true')
-        append = append is True or (isinstance(append, str) and append.lower() == 'true')
-        overwrite = overwrite is True or (isinstance(overwrite, str) and overwrite.lower() == 'true')
-        show_hidden = show_hidden is True or (isinstance(show_hidden, str) and show_hidden.lower() == 'true')
+        recursive = recursive is True or (
+            isinstance(recursive, str) and recursive.lower() == "true"
+        )
+        append = append is True or (isinstance(append, str) and append.lower() == "true")
+        overwrite = overwrite is True or (
+            isinstance(overwrite, str) and overwrite.lower() == "true"
+        )
+        show_hidden = show_hidden is True or (
+            isinstance(show_hidden, str) and show_hidden.lower() == "true"
+        )
 
         match mode:
-            case 'read':
+            case "read":
                 return filesystem.read_file(path, offset=offset, limit=limit, encoding=encoding)
-            case 'write':
+            case "write":
                 if content is None:
-                    return 'Error: content parameter is required for write mode.'
+                    return "Error: content parameter is required for write mode."
                 return filesystem.write_file(path, content, append=append, encoding=encoding)
-            case 'copy':
+            case "copy":
                 if destination is None:
-                    return 'Error: destination parameter is required for copy mode.'
+                    return "Error: destination parameter is required for copy mode."
                 return filesystem.copy_path(path, destination, overwrite=overwrite)
-            case 'move':
+            case "move":
                 if destination is None:
-                    return 'Error: destination parameter is required for move mode.'
+                    return "Error: destination parameter is required for move mode."
                 return filesystem.move_path(path, destination, overwrite=overwrite)
-            case 'delete':
+            case "delete":
                 return filesystem.delete_path(path, recursive=recursive)
-            case 'list':
-                return filesystem.list_directory(path, pattern=pattern, recursive=recursive, show_hidden=show_hidden)
-            case 'search':
+            case "list":
+                return filesystem.list_directory(
+                    path, pattern=pattern, recursive=recursive, show_hidden=show_hidden
+                )
+            case "search":
                 if pattern is None:
-                    return 'Error: pattern parameter is required for search mode.'
+                    return "Error: pattern parameter is required for search mode."
                 return filesystem.search_files(path, pattern, recursive=recursive)
-            case 'info':
+            case "info":
                 return filesystem.get_file_info(path)
             case _:
                 return f'Error: Unknown mode "{mode}". Use: read, write, copy, move, delete, list, search, info.'
     except Exception as e:
-        return f'Error in File tool: {str(e)}'
+        return f"Error in File tool: {str(e)}"
+
 
 @mcp.tool(
-    name='Snapshot',
-    description='Captures complete desktop state including: system language, focused/opened windows, interactive elements (buttons, text fields, links, menus with coordinates), and scrollable areas. Set use_vision=True to include screenshot. Set use_dom=True for browser content to get web page elements instead of browser UI. Always call this first to understand the current desktop state before taking actions.',
+    name="Snapshot",
+    description="Captures complete desktop state including: system language, focused/opened windows, interactive elements (buttons, text fields, links, menus with coordinates), and scrollable areas. Set use_vision=True to include screenshot. Set use_dom=True for browser content to get web page elements instead of browser UI. Always call this first to understand the current desktop state before taking actions.",
     annotations=ToolAnnotations(
         title="Snapshot",
         readOnlyHint=True,
@@ -189,24 +210,32 @@ def file_tool(
     ),
 )
 @with_analytics(analytics, "State-Tool")
-def state_tool(use_vision:bool|str=False,use_dom:bool|str=False, ctx: Context = None):
+def state_tool(use_vision: bool | str = False, use_dom: bool | str = False, ctx: Context = None):
     try:
-        use_vision = use_vision is True or (isinstance(use_vision, str) and use_vision.lower() == 'true')
-        use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == 'true')
+        use_vision = use_vision is True or (
+            isinstance(use_vision, str) and use_vision.lower() == "true"
+        )
+        use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == "true")
 
         # Calculate scale factor to cap resolution at 1080p (1920x1080)
-        scale_width = MAX_IMAGE_WIDTH / screen_size.width if screen_size.width > MAX_IMAGE_WIDTH else 1.0
-        scale_height = MAX_IMAGE_HEIGHT / screen_size.height if screen_size.height > MAX_IMAGE_HEIGHT else 1.0
+        scale_width = (
+            MAX_IMAGE_WIDTH / screen_size.width if screen_size.width > MAX_IMAGE_WIDTH else 1.0
+        )
+        scale_height = (
+            MAX_IMAGE_HEIGHT / screen_size.height if screen_size.height > MAX_IMAGE_HEIGHT else 1.0
+        )
         scale = min(scale_width, scale_height)
 
-        desktop_state=desktop.get_state(use_vision=use_vision,use_dom=use_dom,as_bytes=False,scale=scale)
+        desktop_state = desktop.get_state(
+            use_vision=use_vision, use_dom=use_dom, as_bytes=False, scale=scale
+        )
 
-        interactive_elements=desktop_state.tree_state.interactive_elements_to_string()
-        scrollable_elements=desktop_state.tree_state.scrollable_elements_to_string()
-        windows=desktop_state.windows_to_string()
-        active_window=desktop_state.active_window_to_string()
-        active_desktop=desktop_state.active_desktop_to_string()
-        all_desktops=desktop_state.desktops_to_string()
+        interactive_elements = desktop_state.tree_state.interactive_elements_to_string()
+        scrollable_elements = desktop_state.tree_state.scrollable_elements_to_string()
+        windows = desktop_state.windows_to_string()
+        active_window = desktop_state.active_window_to_string()
+        active_desktop = desktop_state.active_desktop_to_string()
+        all_desktops = desktop_state.desktops_to_string()
 
         # Convert screenshot to bytes for vision response
         screenshot_bytes = None
@@ -216,9 +245,10 @@ def state_tool(use_vision:bool|str=False,use_dom:bool|str=False, ctx: Context = 
             screenshot_bytes = buffered.getvalue()
             buffered.close()
     except Exception as e:
-        return [f'Error capturing desktop state: {str(e)}. Please try again.']
+        return [f"Error capturing desktop state: {str(e)}. Please try again."]
 
-    return [dedent(f'''
+    return [
+        dedent(f"""
     Active Desktop:
     {active_desktop}
 
@@ -235,7 +265,9 @@ def state_tool(use_vision:bool|str=False,use_dom:bool|str=False, ctx: Context = 
     {interactive_elements or "No interactive elements found."}
 
     List of Scrollable Elements:
-    {scrollable_elements or 'No scrollable elements found.'}''')]+([Image(data=screenshot_bytes,format='png')] if use_vision and screenshot_bytes else [])
+    {scrollable_elements or "No scrollable elements found."}""")
+    ] + ([Image(data=screenshot_bytes, format="png")] if use_vision and screenshot_bytes else [])
+
 
 @mcp.tool(
     name="Click",
@@ -594,57 +626,287 @@ def lock_screen_tool(ctx: Context = None) -> str:
 
 
 @mcp.tool(
-    name='Registry',
+    name="Registry",
     description='Accesses the Windows Registry. Use mode="get" to read a value, mode="set" to create/update a value, mode="delete" to remove a value or key, mode="list" to list values and sub-keys under a path. Paths use PowerShell format (e.g. "HKCU:\\Software\\MyApp", "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion").',
     annotations=ToolAnnotations(
         title="Registry",
         readOnlyHint=False,
         destructiveHint=True,
         idempotentHint=False,
-        openWorldHint=False
-    )
+        openWorldHint=False,
+    ),
 )
 @with_analytics(analytics, "Registry-Tool")
-def registry_tool(mode: Literal['get', 'set', 'delete', 'list'], path: str, name: str | None = None, value: str | None = None, type: Literal['String', 'DWord', 'QWord', 'Binary', 'MultiString', 'ExpandString'] = 'String', ctx: Context = None) -> str:
+def registry_tool(
+    mode: Literal["get", "set", "delete", "list"],
+    path: str,
+    name: str | None = None,
+    value: str | None = None,
+    type: Literal["String", "DWord", "QWord", "Binary", "MultiString", "ExpandString"] = "String",
+    ctx: Context = None,
+) -> str:
     try:
-        if mode == 'get':
+        if mode == "get":
             if name is None:
-                return 'Error: name parameter is required for get mode.'
+                return "Error: name parameter is required for get mode."
             return desktop.registry_get(path=path, name=name)
-        elif mode == 'set':
+        elif mode == "set":
             if name is None:
-                return 'Error: name parameter is required for set mode.'
+                return "Error: name parameter is required for set mode."
             if value is None:
-                return 'Error: value parameter is required for set mode.'
+                return "Error: value parameter is required for set mode."
             return desktop.registry_set(path=path, name=name, value=value, reg_type=type)
-        elif mode == 'delete':
+        elif mode == "delete":
             return desktop.registry_delete(path=path, name=name)
-        elif mode == 'list':
+        elif mode == "list":
             return desktop.registry_list(path=path)
         else:
             return 'Error: mode must be "get", "set", "delete", or "list".'
     except Exception as e:
-        return f'Error accessing registry: {str(e)}'
+        return f"Error accessing registry: {str(e)}"
+
+
+@mcp.tool(
+    name="WaitFor",
+    description=(
+        "Waits for a window or UI element to appear within a timeout. "
+        "mode='window': waits for a window whose title contains the given name. "
+        "mode='element': waits for an interactive element matching the name in the accessibility tree. "
+        "Returns the matched item or times out with an error. "
+        "Use this instead of the Wait tool when you need to wait for a specific condition."
+    ),
+    annotations=ToolAnnotations(
+        title="WaitFor",
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+)
+@with_analytics(analytics, "WaitFor-Tool")
+async def waitfor_tool(
+    mode: Literal["window", "element"],
+    name: str,
+    timeout: int = 10,
+    ctx: Context = None,
+) -> str:
+    import time
+
+    # Cap timeout to prevent unbounded task lifetime
+    timeout = min(max(timeout, 1), 300)
+    poll_interval = 0.5
+    deadline = time.monotonic() + timeout
+
+    while time.monotonic() < deadline:
+        try:
+            # Run blocking get_state in thread pool to avoid blocking the event loop
+            desktop_state = await asyncio.to_thread(
+                desktop.get_state, use_vision=False, use_dom=False
+            )
+            if mode == "window":
+                for w in desktop_state.windows:
+                    if name.lower() in w.name.lower():
+                        return f"Window found: '{w.name}'"
+                if (
+                    desktop_state.active_window
+                    and name.lower() in desktop_state.active_window.name.lower()
+                ):
+                    return f"Window found: '{desktop_state.active_window.name}'"
+            elif mode == "element":
+                tree_state = desktop_state.tree_state
+                if tree_state:
+                    for node in tree_state.interactive_nodes:
+                        if name.lower() in node.name.lower():
+                            center = node.center
+                            return (
+                                f"Element found: '{node.name}' "
+                                f"({node.control_type}) at ({center.x},{center.y})"
+                            )
+        except Exception:
+            pass
+        await asyncio.sleep(poll_interval)
+
+    return f"Timeout: '{name}' {mode} not found within {timeout}s."
+
+
+@mcp.tool(
+    name="Find",
+    description=(
+        "Searches for UI elements by name, control type, or window. "
+        "Returns matching interactive elements with their coordinates. "
+        "Useful when you know what you're looking for and only need matching results."
+    ),
+    annotations=ToolAnnotations(
+        title="Find",
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+)
+@with_analytics(analytics, "Find-Tool")
+def find_tool(
+    name: str | None = None,
+    control_type: str | None = None,
+    window: str | None = None,
+    limit: int = 20,
+    ctx: Context = None,
+) -> str:
+    if not name and not control_type and not window:
+        return "Error: at least one of name, control_type, or window must be specified."
+
+    desktop_state = desktop.get_state(use_vision=False, use_dom=False)
+    tree_state = desktop_state.tree_state
+    if not tree_state:
+        return "Error: could not capture desktop state."
+
+    matches = []
+    for i, node in enumerate(tree_state.interactive_nodes):
+        if name and name.lower() not in node.name.lower():
+            continue
+        if control_type and control_type.lower() not in node.control_type.lower():
+            continue
+        if window and window.lower() not in node.window_name.lower():
+            continue
+        center = node.center
+        matches.append(
+            f"[{i}] '{node.name}' ({node.control_type}) "
+            f"at ({center.x},{center.y}) window='{node.window_name}'"
+        )
+        if len(matches) >= limit:
+            break
+
+    if not matches:
+        criteria = []
+        if name:
+            criteria.append(f"name='{name}'")
+        if control_type:
+            criteria.append(f"type='{control_type}'")
+        if window:
+            criteria.append(f"window='{window}'")
+        return f"No elements found matching {', '.join(criteria)}."
+
+    return f"Found {len(matches)} element(s):\n" + "\n".join(matches)
+
+
+@mcp.tool(
+    name="Invoke",
+    description=(
+        "Invokes a UIA automation pattern on an element at coordinates [x, y]. "
+        "Actions: 'invoke' (click buttons), 'toggle' (checkboxes/switches), "
+        "'set_value' (type into fields without clicking), 'expand'/'collapse' (dropdowns/trees), "
+        "'select' (list items). More reliable than coordinate-based Click for UI automation."
+    ),
+    annotations=ToolAnnotations(
+        title="Invoke",
+        readOnlyHint=False,
+        destructiveHint=True,
+        idempotentHint=False,
+        openWorldHint=False,
+    ),
+)
+@with_analytics(analytics, "Invoke-Tool")
+def invoke_tool(
+    loc: list[int],
+    action: Literal["invoke", "toggle", "set_value", "expand", "collapse", "select"] = "invoke",
+    value: str | None = None,
+    ctx: Context = None,
+) -> str:
+    from windows_mcp.uia import ControlFromPoint, PatternId
+
+    if len(loc) != 2:
+        return "Error: loc must be [x, y]."
+    x, y = loc[0], loc[1]
+
+    element = ControlFromPoint(x, y)
+    if not element:
+        return f"Error: no element found at ({x},{y})."
+
+    element_name = element.Name or element.AutomationId or "unnamed"
+    element_type = element.LocalizedControlType or "unknown"
+
+    try:
+        if action == "invoke":
+            pattern = element.GetPattern(PatternId.InvokePattern)
+            if not pattern:
+                return f"Error: element '{element_name}' does not support InvokePattern."
+            pattern.Invoke()
+            return f"Invoked '{element_name}' ({element_type}) at ({x},{y})."
+
+        elif action == "toggle":
+            pattern = element.GetPattern(PatternId.TogglePattern)
+            if not pattern:
+                return f"Error: element '{element_name}' does not support TogglePattern."
+            pattern.Toggle()
+            state = pattern.ToggleState
+            state_name = {0: "off", 1: "on", 2: "indeterminate"}.get(state, str(state))
+            return f"Toggled '{element_name}' ({element_type}) at ({x},{y}). State: {state_name}."
+
+        elif action == "set_value":
+            if value is None:
+                return "Error: value parameter required for set_value action."
+            if len(value) > 10000:
+                return f"Error: value too long ({len(value)} chars, max 10000)."
+            pattern = element.GetPattern(PatternId.ValuePattern)
+            if not pattern:
+                return f"Error: element '{element_name}' does not support ValuePattern."
+            pattern.SetValue(value)
+            preview = value[:50] + "..." if len(value) > 50 else value
+            return f"Set value '{preview}' on '{element_name}' ({element_type}) at ({x},{y})."
+
+        elif action == "expand":
+            pattern = element.GetPattern(PatternId.ExpandCollapsePattern)
+            if not pattern:
+                return f"Error: element '{element_name}' does not support ExpandCollapsePattern."
+            pattern.Expand()
+            return f"Expanded '{element_name}' ({element_type}) at ({x},{y})."
+
+        elif action == "collapse":
+            pattern = element.GetPattern(PatternId.ExpandCollapsePattern)
+            if not pattern:
+                return f"Error: element '{element_name}' does not support ExpandCollapsePattern."
+            pattern.Collapse()
+            return f"Collapsed '{element_name}' ({element_type}) at ({x},{y})."
+
+        elif action == "select":
+            pattern = element.GetPattern(PatternId.SelectionItemPattern)
+            if not pattern:
+                return f"Error: element '{element_name}' does not support SelectionItemPattern."
+            pattern.Select()
+            return f"Selected '{element_name}' ({element_type}) at ({x},{y})."
+
+        else:
+            return f"Error: unknown action '{action}'."
+
+    except Exception as e:
+        return f"Error invoking {action} on '{element_name}': {str(e)}"
+
 
 class Transport(Enum):
     STDIO = "stdio"
     SSE = "sse"
     STREAMABLE_HTTP = "streamable-http"
+
     def __str__(self):
         return self.value
+
 
 class Mode(Enum):
     LOCAL = "local"
     REMOTE = "remote"
+
     def __str__(self):
         return self.value
+
 
 @click.command()
 @click.option(
     "--transport",
     help="The transport layer used by the MCP server.",
-    type=click.Choice([Transport.STDIO.value, Transport.SSE.value, Transport.STREAMABLE_HTTP.value]),
-    default='stdio'
+    type=click.Choice(
+        [Transport.STDIO.value, Transport.SSE.value, Transport.STREAMABLE_HTTP.value]
+    ),
+    default="stdio",
 )
 @click.option(
     "--host",
@@ -722,8 +984,8 @@ def main(transport, host, port, api_key, generate_key, rotate_key):
 
     config = Config(
         mode=os.getenv("MODE", Mode.LOCAL.value).lower(),
-        sandbox_id=os.getenv("SANDBOX_ID", ''),
-        api_key=os.getenv("API_KEY", ''),
+        sandbox_id=os.getenv("SANDBOX_ID", ""),
+        api_key=os.getenv("API_KEY", ""),
     )
     match config.mode:
         case Mode.LOCAL.value:

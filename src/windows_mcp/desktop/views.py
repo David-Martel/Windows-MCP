@@ -1,8 +1,10 @@
-from windows_mcp.tree.views import TreeState, BoundingBox
 from dataclasses import dataclass
-from tabulate import tabulate
-from PIL.Image import Image
 from enum import Enum
+
+from PIL.Image import Image
+from tabulate import tabulate
+
+from windows_mcp.tree.views import BoundingBox, TreeState
 
 
 class Browser(Enum):

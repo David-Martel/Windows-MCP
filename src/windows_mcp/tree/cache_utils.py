@@ -5,14 +5,30 @@ This module provides utilities for implementing UI Automation caching
 to reduce cross-process COM calls during tree traversal.
 """
 
-from windows_mcp.uia import CacheRequest, PropertyId, TreeScope, Control
 import logging
+
+from windows_mcp.uia import CacheRequest, Control, PropertyId, TreeScope
 
 logger = logging.getLogger(__name__)
 
 
 class CacheRequestFactory:
     """Factory for creating optimized cache requests for different scenarios."""
+
+    @staticmethod
+    def create_subtree_cache() -> CacheRequest:
+        """
+        Creates a cache request with TreeScope_Subtree for single-call tree caching.
+
+        Caches the entire subtree in one COM round-trip, eliminating
+        per-node BuildUpdatedCache calls during traversal (2N calls -> 1).
+
+        Returns:
+            CacheRequest configured for full subtree caching
+        """
+        cache_request = CacheRequestFactory.create_tree_traversal_cache()
+        cache_request.TreeScope = TreeScope.TreeScope_Subtree
+        return cache_request
 
     @staticmethod
     def create_tree_traversal_cache() -> CacheRequest:

@@ -11,21 +11,21 @@ uiautomation is shared under the Apache Licene 2.0.
 This means that the code can be freely copied and distributed, and costs nothing to use.
 """
 
-import os
-import sys
-import time
-import datetime
-import shlex
-import struct
 import atexit
-import threading
 import ctypes
 import ctypes.wintypes
-import comtypes
-import comtypes.client
+import datetime
+import os
+import shlex
+import struct
+import sys
+import threading
+import time
 from io import TextIOWrapper
 from typing import Any, Callable, Dict, Generator, List, Tuple, Union
 
+import comtypes
+import comtypes.client
 
 METRO_WINDOW_CLASS_NAME = "Windows.UI.Core.CoreWindow"  # for Windows 8 and 8.1
 SEARCH_INTERVAL = 0.5  # search control interval seconds

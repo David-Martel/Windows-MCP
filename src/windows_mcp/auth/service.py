@@ -1,6 +1,7 @@
-import requests
 import logging
 import time
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,9 @@ class AuthClient:
         last_error: AuthError | None = None
 
         for attempt in range(1, MAX_RETRIES + 1):
-            logger.info("Authenticating with dashboard at %s (attempt %d/%d)", url, attempt, MAX_RETRIES)
+            logger.info(
+                "Authenticating with dashboard at %s (attempt %d/%d)", url, attempt, MAX_RETRIES
+            )
 
             try:
                 response = requests.post(url, json=payload, timeout=30)
@@ -129,7 +132,9 @@ class AuthClient:
             time.sleep(delay)
 
     def __repr__(self) -> str:
-        masked_key = f"{self.api_key[:12]}...{self.api_key[-4:]}" if len(self.api_key) > 16 else "***"
+        masked_key = (
+            f"{self.api_key[:12]}...{self.api_key[-4:]}" if len(self.api_key) > 16 else "***"
+        )
         return (
             f"AuthClient(dashboard={self.dashboard_url!r}, "
             f"sandbox={self.sandbox_id!r}, key={masked_key})"

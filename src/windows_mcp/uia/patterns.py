@@ -13,16 +13,18 @@ This means that the code can be freely copied and distributed, and costs nothing
 
 from __future__ import annotations
 
+import ctypes
+import ctypes.wintypes
 import os
 import sys
 import time
-import ctypes
-import ctypes.wintypes
+from typing import TYPE_CHECKING, Any, List
+
 import comtypes
-from typing import Any, List, TYPE_CHECKING
-from .enums import *
+
 from .core import *
 from .core import _AutomationClient
+from .enums import *
 
 if TYPE_CHECKING:
     from .controls import Control

@@ -1,38 +1,40 @@
-from windows_mcp.uia import (
-    Control,
-    ScrollPattern,
-    WindowControl,
-    Rect,
-    PatternId,
-    AccessibleRoleNames,
-    TreeScope,
-    ControlFromHandle,
-)
+import logging
+import os
+import weakref
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from time import time
+from typing import TYPE_CHECKING, Any
+
+import comtypes
+
+from windows_mcp.tree.cache_utils import CachedControlHelper, CacheRequestFactory
 from windows_mcp.tree.config import (
-    INTERACTIVE_CONTROL_TYPE_NAMES,
+    DEFAULT_ACTIONS,
     DOCUMENT_CONTROL_TYPE_NAMES,
     INFORMATIVE_CONTROL_TYPE_NAMES,
-    DEFAULT_ACTIONS,
+    INTERACTIVE_CONTROL_TYPE_NAMES,
     INTERACTIVE_ROLES,
     THREAD_MAX_RETRIES,
 )
+from windows_mcp.tree.utils import random_point_within_bounding_box
 from windows_mcp.tree.views import (
-    TreeElementNode,
+    BoundingBox,
+    Center,
     ScrollElementNode,
     TextElementNode,
-    Center,
-    BoundingBox,
+    TreeElementNode,
     TreeState,
 )
-from windows_mcp.tree.cache_utils import CacheRequestFactory, CachedControlHelper
-from windows_mcp.tree.utils import random_point_within_bounding_box
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import TYPE_CHECKING, Any
-from time import time
-import logging
-import weakref
-import comtypes
-import os
+from windows_mcp.uia import (
+    AccessibleRoleNames,
+    Control,
+    ControlFromHandle,
+    PatternId,
+    Rect,
+    ScrollPattern,
+    TreeScope,
+    WindowControl,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -45,8 +47,6 @@ class Tree:
     def __init__(self, desktop: "Desktop"):
         self.desktop = weakref.proxy(desktop)
         self.screen_size = desktop.get_screen_size()
-        self.dom: Control | None = None
-        self.dom_bounding_box: BoundingBox = None
         self.screen_box = BoundingBox(
             top=0,
             left=0,
@@ -63,9 +63,6 @@ class Tree:
         other_windows_handles: list[int],
         use_dom: bool = False,
     ) -> TreeState:
-        # Reset DOM state to prevent leaks and stale data
-        self.dom = None
-        self.dom_bounding_box = None
         start_time = time()
 
         active_window_flag = False
@@ -75,10 +72,12 @@ class Tree:
         else:
             windows_handles = other_windows_handles
 
-        interactive_nodes, scrollable_nodes, dom_informative_nodes = self.get_window_wise_nodes(
-            windows_handles=windows_handles,
-            active_window_flag=active_window_flag,
-            use_dom=use_dom,
+        interactive_nodes, scrollable_nodes, dom_informative_nodes, dom_node = (
+            self.get_window_wise_nodes(
+                windows_handles=windows_handles,
+                active_window_flag=active_window_flag,
+                use_dom=use_dom,
+            )
         )
         root_node = TreeElementNode(
             name="Desktop",
@@ -91,31 +90,6 @@ class Tree:
             shortcut="",
             is_focused=False,
         )
-        if self.dom:
-            scroll_pattern: ScrollPattern = self.dom.GetPattern(PatternId.ScrollPattern)
-            dom_node = ScrollElementNode(
-                name="DOM",
-                control_type="DocumentControl",
-                bounding_box=self.dom_bounding_box,
-                center=self.dom_bounding_box.get_center(),
-                horizontal_scrollable=scroll_pattern.HorizontallyScrollable
-                if scroll_pattern
-                else False,
-                horizontal_scroll_percent=scroll_pattern.HorizontalScrollPercent
-                if scroll_pattern and scroll_pattern.HorizontallyScrollable
-                else 0,
-                vertical_scrollable=scroll_pattern.VerticallyScrollable
-                if scroll_pattern
-                else False,
-                vertical_scroll_percent=scroll_pattern.VerticalScrollPercent
-                if scroll_pattern and scroll_pattern.VerticallyScrollable
-                else 0,
-                xpath="",
-                window_name="DOM",
-                is_focused=False,
-            )
-        else:
-            dom_node = None
         self.tree_state = TreeState(
             root_node=root_node,
             dom_node=dom_node,
@@ -132,8 +106,14 @@ class Tree:
         windows_handles: list[int],
         active_window_flag: bool,
         use_dom: bool = False,
-    ) -> tuple[list[TreeElementNode], list[ScrollElementNode], list[TextElementNode]]:
+    ) -> tuple[
+        list[TreeElementNode],
+        list[ScrollElementNode],
+        list[TextElementNode],
+        ScrollElementNode | None,
+    ]:
         interactive_nodes, scrollable_nodes, dom_informative_nodes = [], [], []
+        dom_node: ScrollElementNode | None = None
 
         # Pre-calculate browser status in main thread to pass simple types to workers
         task_inputs = []
@@ -162,10 +142,12 @@ class Tree:
                     try:
                         result = future.result()
                         if result:
-                            element_nodes, scroll_nodes, info_nodes = result
+                            element_nodes, scroll_nodes, info_nodes, window_dom_node = result
                             interactive_nodes.extend(element_nodes)
                             scrollable_nodes.extend(scroll_nodes)
                             dom_informative_nodes.extend(info_nodes)
+                            if window_dom_node is not None:
+                                dom_node = window_dom_node
                     except Exception as e:
                         retry_counts[handle] += 1
                         logger.debug(
@@ -182,7 +164,7 @@ class Tree:
                             logger.error(
                                 f"Task failed completely for handle {handle} after {THREAD_MAX_RETRIES} retries"
                             )
-        return interactive_nodes, scrollable_nodes, dom_informative_nodes
+        return interactive_nodes, scrollable_nodes, dom_informative_nodes, dom_node
 
     def iou_bounding_box(
         self,
@@ -228,6 +210,7 @@ class Tree:
         node: Control,
         dom_interactive_nodes: list[TreeElementNode],
         window_name: str,
+        dom_bounding_box: BoundingBox,
     ):
         if self.element_has_child_element(
             node, "list item", "link"
@@ -266,7 +249,7 @@ class Tree:
                 legacy_pattern = node.GetLegacyIAccessiblePattern()
                 value = legacy_pattern.Value
                 element_bounding_box = node.BoundingRectangle
-                bounding_box = self.iou_bounding_box(self.dom_bounding_box, element_bounding_box)
+                bounding_box = self.iou_bounding_box(dom_bounding_box, element_bounding_box)
                 center = bounding_box.get_center()
                 is_focused = node.HasKeyboardFocus
                 dom_interactive_nodes.append(
@@ -291,7 +274,7 @@ class Tree:
             legacy_pattern = node.GetLegacyIAccessiblePattern()
             value = legacy_pattern.Value
             element_bounding_box = node.BoundingRectangle
-            bounding_box = self.iou_bounding_box(self.dom_bounding_box, element_bounding_box)
+            bounding_box = self.iou_bounding_box(dom_bounding_box, element_bounding_box)
             center = bounding_box.get_center()
             is_focused = node.HasKeyboardFocus
             dom_interactive_nodes.append(
@@ -310,6 +293,8 @@ class Tree:
                 )
             )
 
+    MAX_TREE_DEPTH = 200
+
     def tree_traversal(
         self,
         node: Control,
@@ -324,10 +309,18 @@ class Tree:
         is_dialog: bool = False,
         element_cache_req: Any | None = None,
         children_cache_req: Any | None = None,
+        subtree_cached: bool = False,
+        dom_bounding_box: BoundingBox | None = None,
+        dom_context: dict | None = None,
+        depth: int = 0,
     ):
+        if depth >= self.MAX_TREE_DEPTH:
+            logger.warning("Max tree depth %d reached, stopping traversal", self.MAX_TREE_DEPTH)
+            return
+
         try:
-            # Build cached control if caching is enabled
-            if not hasattr(node, "_is_cached") and element_cache_req:
+            # Build cached control if per-node caching (skipped in subtree mode)
+            if not subtree_cached and not hasattr(node, "_is_cached") and element_cache_req:
                 node = CachedControlHelper.build_cached_control(node, element_cache_req)
 
             # Checks to skip the nodes that are not interactive
@@ -420,6 +413,9 @@ class Tree:
                     # Interactive Check
                     if interactive_nodes is not None:
                         is_interactive = False
+                        # Cache LegacyIAccessiblePattern per element (was 3-4 COM calls)
+                        legacy_pattern = None
+
                         if (
                             is_browser
                             and control_type_name in set(["DataItemControl", "ListItemControl"])
@@ -437,7 +433,8 @@ class Tree:
                         ):
                             # Role check
                             try:
-                                legacy_pattern = node.GetLegacyIAccessiblePattern()
+                                if legacy_pattern is None:
+                                    legacy_pattern = node.GetLegacyIAccessiblePattern()
                                 is_role_interactive = (
                                     AccessibleRoleNames.get(legacy_pattern.Role, "Default")
                                     in INTERACTIVE_ROLES
@@ -458,7 +455,8 @@ class Tree:
                         elif control_type_name == "GroupControl":
                             if is_browser:
                                 try:
-                                    legacy_pattern = node.GetLegacyIAccessiblePattern()
+                                    if legacy_pattern is None:
+                                        legacy_pattern = node.GetLegacyIAccessiblePattern()
                                     is_role_interactive = (
                                         AccessibleRoleNames.get(legacy_pattern.Role, "Default")
                                         in INTERACTIVE_ROLES
@@ -468,7 +466,8 @@ class Tree:
 
                                 is_default_action = False
                                 try:
-                                    legacy_pattern = node.GetLegacyIAccessiblePattern()
+                                    if legacy_pattern is None:
+                                        legacy_pattern = node.GetLegacyIAccessiblePattern()
                                     if legacy_pattern.DefaultAction.title() in DEFAULT_ACTIONS:
                                         is_default_action = True
                                 except Exception:
@@ -480,7 +479,8 @@ class Tree:
                                     is_interactive = True
 
                         if is_interactive:
-                            legacy_pattern = node.GetLegacyIAccessiblePattern()
+                            if legacy_pattern is None:
+                                legacy_pattern = node.GetLegacyIAccessiblePattern()
                             value = (
                                 legacy_pattern.Value.strip()
                                 if legacy_pattern.Value is not None
@@ -493,7 +493,7 @@ class Tree:
 
                             if is_browser and is_dom:
                                 bounding_box = self.iou_bounding_box(
-                                    self.dom_bounding_box, element_bounding_box
+                                    dom_bounding_box, element_bounding_box
                                 )
                                 center = bounding_box.get_center()
                                 tree_node = TreeElementNode(
@@ -510,7 +510,9 @@ class Tree:
                                     }
                                 )
                                 dom_interactive_nodes.append(tree_node)
-                                self._dom_correction(node, dom_interactive_nodes, window_name)
+                                self._dom_correction(
+                                    node, dom_interactive_nodes, window_name, dom_bounding_box
+                                )
                             else:
                                 bounding_box = self.iou_bounding_box(
                                     window_bounding_box, element_bounding_box
@@ -536,20 +538,12 @@ class Tree:
                         # is_element_text check
                         is_text = False
                         if control_type_name in INFORMATIVE_CONTROL_TYPE_NAMES:
-                            # is_element_image check
+                            # is_element_image: True when ImageControl is not focusable OR
+                            # its localized type is "graphic"
                             is_image_check = False
                             if control_type_name == "ImageControl":
                                 localized = node.CachedLocalizedControlType
-
-                                # Check keybord focusable again if not established, but reuse
-                                if not is_keyboard_focusable:
-                                    # If localized is graphic OR not focusable -> image
-                                    # wait, is_element_image: if localized=='graphic' or not focusable -> True
-                                    if localized == "graphic":
-                                        is_image_check = True
-                                    else:
-                                        is_image_check = True  # not focusable
-                                elif localized == "graphic":
+                                if not is_keyboard_focusable or localized == "graphic":
                                     is_image_check = True
 
                             if not is_image_check:
@@ -564,8 +558,17 @@ class Tree:
                                     )
                                 )
 
-            # Phase 3: Cached Children Retrieval
-            children = CachedControlHelper.get_cached_children(node, children_cache_req)
+            # Phase 3: Children Retrieval
+            if subtree_cached:
+                # Subtree pre-cached: walk cached tree directly (no COM calls)
+                try:
+                    children = node.GetCachedChildren()
+                    for child in children:
+                        child._is_cached = True
+                except Exception:
+                    children = CachedControlHelper.get_cached_children(node, children_cache_req)
+            else:
+                children = CachedControlHelper.get_cached_children(node, children_cache_req)
 
             # Recursively traverse the tree the right to left for normal apps and for DOM traverse from left to right
             for child in children if is_dom else children[::-1]:
@@ -573,16 +576,18 @@ class Tree:
 
                 # Check if the child is a DOM element
                 if is_browser and child.CachedAutomationId == "RootWebArea":
-                    bounding_box = child.CachedBoundingRectangle
-                    self.dom_bounding_box = BoundingBox(
-                        left=bounding_box.left,
-                        top=bounding_box.top,
-                        right=bounding_box.right,
-                        bottom=bounding_box.bottom,
-                        width=bounding_box.width(),
-                        height=bounding_box.height(),
+                    rect = child.CachedBoundingRectangle
+                    child_dom_bb = BoundingBox(
+                        left=rect.left,
+                        top=rect.top,
+                        right=rect.right,
+                        bottom=rect.bottom,
+                        width=rect.width(),
+                        height=rect.height(),
                     )
-                    self.dom = child
+                    if dom_context is not None:
+                        dom_context["dom"] = child
+                        dom_context["dom_bounding_box"] = child_dom_bb
                     # enter DOM subtree
                     self.tree_traversal(
                         child,
@@ -597,13 +602,17 @@ class Tree:
                         is_dialog=is_dialog,
                         element_cache_req=element_cache_req,
                         children_cache_req=children_cache_req,
+                        subtree_cached=subtree_cached,
+                        dom_bounding_box=child_dom_bb,
+                        dom_context=dom_context,
+                        depth=depth + 1,
                     )
                 # Check if the child is a dialog
                 elif isinstance(child, WindowControl):
                     if not child.CachedIsOffscreen:
-                        if is_dom:
-                            bounding_box = child.CachedBoundingRectangle
-                            if bounding_box.width() > 0.8 * self.dom_bounding_box.width:
+                        if is_dom and dom_bounding_box:
+                            rect = child.CachedBoundingRectangle
+                            if rect.width() > 0.8 * dom_bounding_box.width:
                                 # Because this window element covers the majority of the screen
                                 dom_interactive_nodes.clear()
                         else:
@@ -632,6 +641,10 @@ class Tree:
                         is_dialog=True,
                         element_cache_req=element_cache_req,
                         children_cache_req=children_cache_req,
+                        subtree_cached=subtree_cached,
+                        dom_bounding_box=dom_bounding_box,
+                        dom_context=dom_context,
+                        depth=depth + 1,
                     )
                 else:
                     # normal non-dialog children
@@ -648,6 +661,10 @@ class Tree:
                         is_dialog=is_dialog,
                         element_cache_req=element_cache_req,
                         children_cache_req=children_cache_req,
+                        subtree_cached=subtree_cached,
+                        dom_bounding_box=dom_bounding_box,
+                        dom_context=dom_context,
+                        depth=depth + 1,
                     )
         except Exception as e:
             logger.error(f"Error in tree_traversal: {e}", exc_info=True)
@@ -666,24 +683,47 @@ class Tree:
 
     def get_nodes(
         self, handle: int, is_browser: bool = False, use_dom: bool = False
-    ) -> tuple[list[TreeElementNode], list[ScrollElementNode], list[TextElementNode]]:
+    ) -> tuple[
+        list[TreeElementNode],
+        list[ScrollElementNode],
+        list[TextElementNode],
+        ScrollElementNode | None,
+    ]:
+        com_initialized = False
         try:
             comtypes.CoInitialize()
+            com_initialized = True
             # Rehydrate Control from handle within the thread's COM context
             node = ControlFromHandle(handle)
             if not node:
                 raise Exception("Failed to create Control from handle")
 
-            # Create fresh cache requests for this traversal session
-            element_cache_req = CacheRequestFactory.create_tree_traversal_cache()
-            element_cache_req.TreeScope = TreeScope.TreeScope_Element
+            # Try single-call subtree caching (1 COM call vs 2N per-node calls)
+            subtree_cached = False
+            try:
+                subtree_req = CacheRequestFactory.create_subtree_cache()
+                cached_root = node.BuildUpdatedCache(subtree_req)
+                cached_root._is_cached = True
+                node = cached_root
+                subtree_cached = True
+            except Exception as e:
+                logger.debug(f"Subtree caching failed for handle {handle}: {e}")
 
-            children_cache_req = CacheRequestFactory.create_tree_traversal_cache()
-            children_cache_req.TreeScope = (
-                TreeScope.TreeScope_Element | TreeScope.TreeScope_Children
-            )
+            # Fallback: per-node cache requests
+            element_cache_req = None
+            children_cache_req = None
+            if not subtree_cached:
+                element_cache_req = CacheRequestFactory.create_tree_traversal_cache()
+                element_cache_req.TreeScope = TreeScope.TreeScope_Element
+                children_cache_req = CacheRequestFactory.create_tree_traversal_cache()
+                children_cache_req.TreeScope = (
+                    TreeScope.TreeScope_Element | TreeScope.TreeScope_Children
+                )
 
-            window_bounding_box = node.BoundingRectangle
+            if subtree_cached:
+                window_bounding_box = node.CachedBoundingRectangle
+            else:
+                window_bounding_box = node.BoundingRectangle
 
             (
                 interactive_nodes,
@@ -691,8 +731,14 @@ class Tree:
                 dom_informative_nodes,
                 scrollable_nodes,
             ) = [], [], [], []
-            window_name = node.Name.strip()
+            if subtree_cached:
+                window_name = node.CachedName.strip()
+            else:
+                window_name = node.Name.strip()
             window_name = self.app_name_correction(window_name)
+
+            # Thread-local DOM context (avoids cross-thread COM object sharing)
+            dom_context: dict = {}
 
             self.tree_traversal(
                 node,
@@ -707,6 +753,8 @@ class Tree:
                 is_dialog=False,
                 element_cache_req=element_cache_req,
                 children_cache_req=children_cache_req,
+                subtree_cached=subtree_cached,
+                dom_context=dom_context,
             )
             logger.debug(f"Window name:{window_name}")
             logger.debug(f"Interactive nodes:{len(interactive_nodes)}")
@@ -715,23 +763,56 @@ class Tree:
                 logger.debug(f"DOM informative nodes:{len(dom_informative_nodes)}")
             logger.debug(f"Scrollable nodes:{len(scrollable_nodes)}")
 
+            # Extract DOM scroll info in worker thread (COM object stays in its apartment)
+            dom_node: ScrollElementNode | None = None
+            if dom_context.get("dom"):
+                dom_element = dom_context["dom"]
+                dom_bb = dom_context["dom_bounding_box"]
+                try:
+                    scroll_pattern: ScrollPattern = dom_element.GetPattern(PatternId.ScrollPattern)
+                    dom_node = ScrollElementNode(
+                        name="DOM",
+                        control_type="DocumentControl",
+                        bounding_box=dom_bb,
+                        center=dom_bb.get_center(),
+                        horizontal_scrollable=scroll_pattern.HorizontallyScrollable
+                        if scroll_pattern
+                        else False,
+                        horizontal_scroll_percent=scroll_pattern.HorizontalScrollPercent
+                        if scroll_pattern and scroll_pattern.HorizontallyScrollable
+                        else 0,
+                        vertical_scrollable=scroll_pattern.VerticallyScrollable
+                        if scroll_pattern
+                        else False,
+                        vertical_scroll_percent=scroll_pattern.VerticalScrollPercent
+                        if scroll_pattern and scroll_pattern.VerticallyScrollable
+                        else 0,
+                        xpath="",
+                        window_name="DOM",
+                        is_focused=False,
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to extract DOM scroll info: {e}")
+
             if use_dom:
                 if is_browser:
                     return (
                         dom_interactive_nodes,
                         scrollable_nodes,
                         dom_informative_nodes,
+                        dom_node,
                     )
                 else:
-                    return ([], [], [])
+                    return ([], [], [], None)
             else:
                 interactive_nodes.extend(dom_interactive_nodes)
-                return (interactive_nodes, scrollable_nodes, dom_informative_nodes)
+                return (interactive_nodes, scrollable_nodes, dom_informative_nodes, dom_node)
         except Exception as e:
-            logger.error(f"Error getting nodes for {node.Name}: {e}")
-            raise e
+            logger.error(f"Error getting nodes for handle {handle}: {e}")
+            raise
         finally:
-            comtypes.CoUninitialize()
+            if com_initialized:
+                comtypes.CoUninitialize()
 
     def _on_focus_change(self, sender: Any):
         """Handle focus change events."""

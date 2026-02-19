@@ -1,7 +1,9 @@
-from windows_mcp.uia.core import _AutomationClient
-import comtypes
 import logging
 import weakref
+
+import comtypes
+
+from windows_mcp.uia.core import _AutomationClient
 
 logger = logging.getLogger(__name__)
 
