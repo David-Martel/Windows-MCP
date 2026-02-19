@@ -1,25 +1,19 @@
-import base64
 import csv
 import ctypes
 import io
-import ipaddress
 import logging
 import os
 import random
 import re
-import subprocess
 import winreg
 from contextlib import contextmanager
 from locale import getpreferredencoding
 from time import time
 from typing import Literal
-from urllib.parse import urlparse
 
-import requests
 import win32con
 import win32gui
 import win32process
-from markdownify import markdownify
 from PIL import Image, ImageDraw, ImageFont, ImageGrab
 from psutil import Process
 from thefuzz import process
@@ -49,127 +43,31 @@ import windows_mcp.uia as uia  # noqa: E402
 pg.FAILSAFE = False
 pg.PAUSE = 0.05
 
-# ---------------------------------------------------------------------------
-#  Shell sandboxing: blocked command patterns (configurable via env var)
-# ---------------------------------------------------------------------------
-# Default blocklist: commands that can cause irreversible damage.
-# Set WINDOWS_MCP_SHELL_BLOCKLIST to a comma-separated list to override.
-# Set WINDOWS_MCP_SHELL_BLOCKLIST="" (empty) to disable the blocklist.
-_DEFAULT_SHELL_BLOCKLIST = [
-    r"\bformat\b.*[a-zA-Z]:",  # format C:, format D:, etc.
-    r"\brm\s+-rf\s+[/\\]",  # rm -rf /
-    r"\bRemove-Item\b.*-Recurse.*[/\\]\s*$",  # Remove-Item -Recurse C:\
-    r"\bdel\s+/[sS]\s+[/\\]",  # del /s \
-    r"\brd\s+/[sS]\s+[/\\]",  # rd /s \
-    r"\bclear-disk\b",  # Clear-Disk
-    r"\bstop-computer\b",  # Stop-Computer (shutdown)
-    r"\brestart-computer\b",  # Restart-Computer
-    r"\bdiskpart\b",  # diskpart
-    r"\bbcdedit\b",  # bcdedit (boot config)
-    r"\bsfc\s+/scannow\b",  # sfc /scannow (system file checker)
-    r"\breg\s+delete\s+HK",  # reg delete HKLM\...
-    r"\bnet\s+user\b.*/add\b",  # net user <x> /add
-    r"\bnet\s+localgroup\s+administrators\b.*/add\b",  # privilege escalation
-    r"\bInvoke-Expression\b.*\bDownloadString\b",  # IEX(downloadstring) cradle
-    r"\biex\b.*\bNet\.WebClient\b",  # IEX cradle variant
-]
-
-_shell_blocklist_patterns: list[re.Pattern] | None = None
-
-
-def _get_shell_blocklist() -> list[re.Pattern]:
-    """Lazily compile and cache the shell blocklist patterns."""
-    global _shell_blocklist_patterns
-    if _shell_blocklist_patterns is not None:
-        return _shell_blocklist_patterns
-
-    env_val = os.environ.get("WINDOWS_MCP_SHELL_BLOCKLIST")
-    if env_val is not None:
-        if env_val.strip() == "":
-            _shell_blocklist_patterns = []
-        else:
-            raw = [p.strip() for p in env_val.split(",") if p.strip()]
-            _shell_blocklist_patterns = [re.compile(p, re.IGNORECASE) for p in raw]
-    else:
-        _shell_blocklist_patterns = [re.compile(p, re.IGNORECASE) for p in _DEFAULT_SHELL_BLOCKLIST]
-    return _shell_blocklist_patterns
-
 
 class Desktop:
     def __init__(self):
+        from windows_mcp.registry import RegistryService
+        from windows_mcp.scraper import ScraperService
+        from windows_mcp.shell import ShellService
+
         self.encoding = getpreferredencoding()
+        self._registry = RegistryService()
+        self._shell = ShellService()
+        self._scraper = ScraperService()
         self.tree = Tree(self)
         self.desktop_state = None
 
     @staticmethod
     def _ps_quote(value: str) -> str:
-        """Wrap a value in a PowerShell single-quoted string literal.
+        from windows_mcp.shell import ShellService
 
-        Single-quoted strings in PowerShell are truly literal -- they do NOT
-        expand variables ($env:X), subexpressions ($(…)), or escape sequences.
-        The only character that needs escaping is the single quote itself,
-        which is doubled ('').
-        """
-        return "'" + value.replace("'", "''") + "'"
+        return ShellService.ps_quote(value)
 
     @staticmethod
     def _validate_url(url: str) -> None:
-        """Validate a URL for SSRF safety.
+        from windows_mcp.scraper import ScraperService
 
-        Blocks:
-        - Non-HTTP(S) schemes (file://, ftp://, data:, etc.)
-        - Private/reserved IP ranges (RFC 1918, link-local, loopback)
-        - Cloud metadata endpoints (169.254.169.254, fd00::, etc.)
-
-        Raises ValueError if the URL is unsafe.
-        """
-        parsed = urlparse(url)
-
-        # Scheme check
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError(
-                f"Unsupported URL scheme '{parsed.scheme}'. Only http and https are allowed."
-            )
-
-        # Extract hostname
-        hostname = parsed.hostname
-        if not hostname:
-            raise ValueError("URL has no hostname.")
-
-        # Resolve to IP and check for private/reserved ranges
-        try:
-            addr = ipaddress.ip_address(hostname)
-        except ValueError:
-            # It's a domain name -- resolve it
-            import socket
-
-            try:
-                resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-                if not resolved:
-                    raise ValueError(f"Could not resolve hostname: {hostname}")
-                # Check ALL resolved addresses (prevent DNS rebinding with multiple A records)
-                for family, _, _, _, sockaddr in resolved:
-                    ip_str = sockaddr[0]
-                    addr = ipaddress.ip_address(ip_str)
-                    if (
-                        addr.is_private
-                        or addr.is_reserved
-                        or addr.is_loopback
-                        or addr.is_link_local
-                    ):
-                        raise ValueError(
-                            f"URL resolves to private/reserved IP {addr}. "
-                            "Scraping internal network addresses is not allowed."
-                        )
-            except socket.gaierror as e:
-                raise ValueError(f"Could not resolve hostname '{hostname}': {e}") from e
-        else:
-            # Direct IP address in URL
-            if addr.is_private or addr.is_reserved or addr.is_loopback or addr.is_link_local:
-                raise ValueError(
-                    f"URL points to private/reserved IP {addr}. "
-                    "Scraping internal network addresses is not allowed."
-                )
+        ScraperService.validate_url(url)
 
     def get_state(
         self,
@@ -315,55 +213,16 @@ class Desktop:
                     apps[name] = lnk_path
         return apps
 
+    # --- Shell facade (delegates to ShellService) ---
+
     @staticmethod
     def _check_shell_blocklist(command: str) -> str | None:
-        """Check a command against the shell blocklist.
+        from windows_mcp.shell import ShellService
 
-        Returns the matched pattern description if blocked, or None if allowed.
-        """
-        for pattern in _get_shell_blocklist():
-            if pattern.search(command):
-                return pattern.pattern
-        return None
+        return ShellService.check_blocklist(command)
 
     def execute_command(self, command: str, timeout: int = 10) -> tuple[str, int]:
-        # Check command against blocklist
-        blocked = self._check_shell_blocklist(command)
-        if blocked:
-            logger.warning("Shell command blocked by safety filter: %s", blocked)
-            return (
-                f"Command blocked by safety filter (matched pattern: {blocked}). "
-                "Set WINDOWS_MCP_SHELL_BLOCKLIST env var to customize.",
-                1,
-            )
-        try:
-            encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
-            result = subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-OutputFormat",
-                    "Text",
-                    "-EncodedCommand",
-                    encoded,
-                ],
-                capture_output=True,  # No errors='ignore' - let subprocess return bytes
-                timeout=timeout,
-                cwd=os.path.expanduser(path="~"),
-                env=os.environ.copy(),  # Inherit environment variables including PATH
-            )
-            # Handle both bytes and str output (subprocess behavior varies by environment)
-            stdout = result.stdout
-            stderr = result.stderr
-            if isinstance(stdout, bytes):
-                stdout = stdout.decode(self.encoding, errors="ignore")
-            if isinstance(stderr, bytes):
-                stderr = stderr.decode(self.encoding, errors="ignore")
-            return (stdout or stderr, result.returncode)
-        except subprocess.TimeoutExpired:
-            return ("Command execution timed out", 1)
-        except Exception as e:
-            return (f"Command execution failed: {type(e).__name__}: {e}", 1)
+        return self._shell.execute(command, timeout)
 
     def is_window_browser(self, node: uia.Control):
         """Give any node of the app and it will return True if the app is a browser, False otherwise."""
@@ -693,31 +552,10 @@ class Desktop:
             x, y, text = loc
             self.type((x, y), text=text, clear=True)
 
+    # --- Scraper facade (delegates to ScraperService) ---
+
     def scrape(self, url: str) -> str:
-        self._validate_url(url)
-        try:
-            response = requests.get(url, timeout=10, allow_redirects=False)
-            # Follow redirects manually to validate each hop
-            redirects = 0
-            while response.is_redirect and redirects < 5:
-                redirect_url = response.headers.get("Location", "")
-                if not redirect_url:
-                    break
-                self._validate_url(redirect_url)
-                response = requests.get(redirect_url, timeout=10, allow_redirects=False)
-                redirects += 1
-            response.raise_for_status()
-        except (ValueError, ConnectionError, TimeoutError):
-            raise  # Re-raise our own validation errors
-        except requests.exceptions.HTTPError as e:
-            raise ValueError(f"HTTP error for {url}: {e}") from e
-        except requests.exceptions.ConnectionError as e:
-            raise ConnectionError(f"Failed to connect to {url}: {e}") from e
-        except requests.exceptions.Timeout as e:
-            raise TimeoutError(f"Request timed out for {url}: {e}") from e
-        html = response.text
-        content = markdownify(html=html)
-        return content
+        return self._scraper.scrape(url)
 
     def get_window_from_element(self, element: uia.Control) -> Window | None:
         if element is None:
@@ -1175,142 +1013,22 @@ class Desktop:
   Network: ↑ {round(net.bytes_sent / 1024**2, 1)} MB sent, ↓ {round(net.bytes_recv / 1024**2, 1)} MB received
   Uptime: {uptime_str} (booted {boot.strftime("%Y-%m-%d %H:%M")})""")
 
-    _REG_HIVE_MAP = {
-        "HKCU": "HKEY_CURRENT_USER",
-        "HKEY_CURRENT_USER": "HKEY_CURRENT_USER",
-        "HKLM": "HKEY_LOCAL_MACHINE",
-        "HKEY_LOCAL_MACHINE": "HKEY_LOCAL_MACHINE",
-        "HKCR": "HKEY_CLASSES_ROOT",
-        "HKEY_CLASSES_ROOT": "HKEY_CLASSES_ROOT",
-        "HKU": "HKEY_USERS",
-        "HKEY_USERS": "HKEY_USERS",
-        "HKCC": "HKEY_CURRENT_CONFIG",
-        "HKEY_CURRENT_CONFIG": "HKEY_CURRENT_CONFIG",
-    }
-
-    _REG_TYPE_MAP = {
-        "String": "REG_SZ",
-        "ExpandString": "REG_EXPAND_SZ",
-        "Binary": "REG_BINARY",
-        "DWord": "REG_DWORD",
-        "QWord": "REG_QWORD",
-        "MultiString": "REG_MULTI_SZ",
-    }
+    # --- Registry facade (delegates to RegistryService) ---
 
     def _parse_reg_path(self, path: str) -> tuple:
-        """Parse a PowerShell-style registry path into (hive_key, subkey).
-
-        Accepts paths like 'HKCU:\\Software\\MyApp' or 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Key'.
-        """
-
-        # Normalize separators: remove trailing colon from hive abbreviation
-        normalized = path.replace(":/", "\\").replace(":\\", "\\").replace("/", "\\")
-        # Handle bare hive with trailing colon (e.g., "HKCU:")
-        normalized = normalized.rstrip(":")
-        parts = normalized.split("\\", 1)
-        hive_name = parts[0].upper()
-        subkey = parts[1] if len(parts) > 1 else ""
-
-        hive_full = self._REG_HIVE_MAP.get(hive_name)
-        if not hive_full:
-            raise ValueError(f"Unknown registry hive: {parts[0]}")
-
-        hive_key = getattr(winreg, hive_full)
-        return hive_key, subkey
+        return self._registry._parse_reg_path(path)
 
     def registry_get(self, path: str, name: str) -> str:
-        try:
-            hive, subkey = self._parse_reg_path(path)
-            with winreg.OpenKey(hive, subkey) as key:
-                value, _ = winreg.QueryValueEx(key, name)
-                return f'Registry value [{path}] "{name}" = {value}'
-        except OSError as e:
-            return f"Error reading registry: {e}"
-        except ValueError as e:
-            return f"Error reading registry: {e}"
+        return self._registry.registry_get(path, name)
 
     def registry_set(self, path: str, name: str, value: str, reg_type: str = "String") -> str:
-        allowed_types = {"String", "ExpandString", "Binary", "DWord", "MultiString", "QWord"}
-        if reg_type not in allowed_types:
-            return f"Error: invalid registry type '{reg_type}'. Allowed: {', '.join(sorted(allowed_types))}"
-
-        type_const_name = self._REG_TYPE_MAP[reg_type]
-        reg_type_const = getattr(winreg, type_const_name)
-
-        # Convert value based on type
-        if reg_type in ("DWord", "QWord"):
-            typed_value = int(value)
-        elif reg_type == "Binary":
-            typed_value = bytes.fromhex(value)
-        elif reg_type == "MultiString":
-            typed_value = value.split("\\0")
-        else:
-            typed_value = value
-
-        try:
-            hive, subkey = self._parse_reg_path(path)
-            winreg.CreateKey(hive, subkey)
-            with winreg.OpenKey(hive, subkey, 0, winreg.KEY_SET_VALUE) as key:
-                winreg.SetValueEx(key, name, 0, reg_type_const, typed_value)
-            return f'Registry value [{path}] "{name}" set to "{value}" (type: {reg_type}).'
-        except OSError as e:
-            return f"Error writing registry: {e}"
-        except ValueError as e:
-            return f"Error writing registry: {e}"
+        return self._registry.registry_set(path, name, value, reg_type)
 
     def registry_delete(self, path: str, name: str | None = None) -> str:
-        try:
-            hive, subkey = self._parse_reg_path(path)
-            if name:
-                with winreg.OpenKey(hive, subkey, 0, winreg.KEY_SET_VALUE) as key:
-                    winreg.DeleteValue(key, name)
-                return f'Registry value [{path}] "{name}" deleted.'
-            else:
-                winreg.DeleteKey(hive, subkey)
-                return f"Registry key [{path}] deleted."
-        except OSError as e:
-            return f"Error deleting registry {'value' if name else 'key'}: {e}"
-        except ValueError as e:
-            return f"Error deleting registry: {e}"
+        return self._registry.registry_delete(path, name)
 
     def registry_list(self, path: str) -> str:
-        try:
-            hive, subkey = self._parse_reg_path(path)
-            with winreg.OpenKey(hive, subkey) as key:
-                # Enumerate values
-                values = []
-                i = 0
-                while True:
-                    try:
-                        vname, vdata, vtype = winreg.EnumValue(key, i)
-                        values.append(f"  {vname} = {vdata}")
-                        i += 1
-                    except OSError:
-                        break
-
-                # Enumerate sub-keys
-                subkeys = []
-                i = 0
-                while True:
-                    try:
-                        sk_name = winreg.EnumKey(key, i)
-                        subkeys.append(sk_name)
-                        i += 1
-                    except OSError:
-                        break
-
-            parts = []
-            if values:
-                parts.append("Values:\n" + "\n".join(values))
-            if subkeys:
-                parts.append("Sub-Keys:\n" + "\n".join(f"  {sk}" for sk in subkeys))
-            if not parts:
-                parts.append("No values or sub-keys found.")
-            return f"Registry key [{path}]:\n" + "\n\n".join(parts)
-        except OSError as e:
-            return f"Error listing registry: {e}"
-        except ValueError as e:
-            return f"Error listing registry: {e}"
+        return self._registry.registry_list(path)
 
     @contextmanager
     def auto_minimize(self):

@@ -106,7 +106,6 @@ class TestFocusChangedEventHandler:
 
         handler = FocusChangedEventHandler.__new__(FocusChangedEventHandler)
 
-
         handler._parent = weakref.ref(parent)
 
         sender = MagicMock()
@@ -143,7 +142,6 @@ class TestFocusChangedEventHandler:
 
         handler = FocusChangedEventHandler.__new__(FocusChangedEventHandler)
 
-
         handler._parent = weakref.ref(parent)
 
         result = handler.HandleFocusChangedEvent(MagicMock())
@@ -162,7 +160,6 @@ class TestFocusChangedEventHandler:
         parent._focus_callback = callback
 
         handler = FocusChangedEventHandler.__new__(FocusChangedEventHandler)
-
 
         handler._parent = weakref.ref(parent)
 
@@ -194,7 +191,6 @@ class TestStructureChangedEventHandler:
 
         handler = StructureChangedEventHandler.__new__(StructureChangedEventHandler)
 
-
         handler._parent = weakref.ref(parent)
 
         sender = MagicMock()
@@ -217,7 +213,6 @@ class TestStructureChangedEventHandler:
         parent._structure_callback = callback
 
         handler = StructureChangedEventHandler.__new__(StructureChangedEventHandler)
-
 
         handler._parent = weakref.ref(parent)
 
@@ -262,7 +257,6 @@ class TestPropertyChangedEventHandler:
 
         handler = PropertyChangedEventHandler.__new__(PropertyChangedEventHandler)
 
-
         handler._parent = weakref.ref(parent)
 
         sender = MagicMock()
@@ -286,7 +280,6 @@ class TestPropertyChangedEventHandler:
 
         handler = PropertyChangedEventHandler.__new__(PropertyChangedEventHandler)
 
-
         handler._parent = weakref.ref(parent)
 
         result = handler.HandlePropertyChangedEvent(MagicMock(), 30005, "val")
@@ -303,7 +296,6 @@ class TestPropertyChangedEventHandler:
         parent._property_callback = None
 
         handler = PropertyChangedEventHandler.__new__(PropertyChangedEventHandler)
-
 
         handler._parent = weakref.ref(parent)
 
