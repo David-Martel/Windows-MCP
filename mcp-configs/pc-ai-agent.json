@@ -1,0 +1,38 @@
+{
+  "mcpServers": {
+    "windows-mcp": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--directory", "C:/codedev/windows-mcp", "windows-mcp"],
+      "env": {
+        "ANONYMIZED_TELEMETRY": "false"
+      },
+      "description": "Windows desktop automation: App launch/resize/switch, Shell execution, File operations, Screenshot/Snapshot, Click/Type/Scroll/Move, Shortcut, Wait/WaitFor, Scrape, MultiSelect, MultiEdit, Clipboard, Process management, SystemInfo, Notification, LockScreen, Registry, Find, Invoke, VisionAnalyze",
+      "tools": [
+        "App",
+        "Shell",
+        "File",
+        "Snapshot",
+        "Click",
+        "Type",
+        "Scroll",
+        "Move",
+        "Shortcut",
+        "Wait",
+        "WaitFor",
+        "Scrape",
+        "MultiSelect",
+        "MultiEdit",
+        "Clipboard",
+        "Process",
+        "SystemInfo",
+        "Notification",
+        "LockScreen",
+        "Registry",
+        "Find",
+        "Invoke",
+        "VisionAnalyze"
+      ]
+    }
+  }
+}
