@@ -1,7 +1,7 @@
 # Windows-MCP TODO
 
 **Generated:** 2026-02-18 from REVIEW.md findings
-**Last updated:** 2026-02-19 -- 2099 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete
+**Last updated:** 2026-02-19 -- 2123 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete
 **Reference:** See [REVIEW.md](REVIEW.md) for full context on each item.
 
 ---
@@ -101,7 +101,7 @@
 
 ## P2.5 -- Performance Caching Layer
 
-- [ ] **Per-window tree cache with WatchDog invalidation** -- Cache TreeState per window handle. On focus change, only re-traverse changed windows. 80-95% reduction on repeated `get_state()` calls.
+- [x] **Per-window tree cache with WatchDog invalidation** -- `_CachedWindowNodes` dataclass caches per-HWND traversal results. Active window always re-traversed; background windows served from cache. WatchDog `_on_focus_change`/`_on_property_change` mark dirty. 30s TTL fallback. Stale entries pruned. 24 tests.
 - [ ] **Cache Start Menu app list with filesystem watcher** -- Build app map once at init, monitor Start Menu folders via `ReadDirectoryChangesW`. Invalidate on change.
 - [ ] **Element coordinate cache** -- Reuse `TreeElementNode.bounding_box` for click/type instead of re-querying XPath. Invalidate on window move/resize.
 - [x] **Cache VDM desktop list with TTL** -- `_enumerate_desktops()` results cached for 5s via `_CACHE_TTL`. Cache invalidated on create/remove/rename/switch. Avoids redundant COM round-trips within rapid `get_state()` calls.
