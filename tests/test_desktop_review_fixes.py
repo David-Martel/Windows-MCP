@@ -55,6 +55,7 @@ def _make_bare_desktop():
     d._registry = MagicMock()
     d._shell = MagicMock()
     d._scraper = MagicMock()
+    d._screen = MagicMock()
     return d
 
 
@@ -483,35 +484,45 @@ class TestGetElementFromXpathIndex:
 
 class TestGetAnnotatedScreenshotPadding:
     """Padded image dimensions must be screenshot.width + 2*padding and
-    screenshot.height + 2*padding (not 1.5*padding)."""
+    screenshot.height + 2*padding (not 1.5*padding).
+
+    Tests ScreenService directly since the logic was extracted from Desktop.
+    """
+
+    _SCREEN_UIA = "windows_mcp.screen.service.uia"
+
+    def _make_screen_service(self):
+        from windows_mcp.screen.service import ScreenService
+
+        return ScreenService()
 
     def test_padded_width_is_screenshot_width_plus_2x_padding(self):
-        d = _make_bare_desktop()
+        svc = self._make_screen_service()
         padding = 5
         orig_w, orig_h = 200, 100
 
         fake_screenshot = Image.new("RGB", (orig_w, orig_h), color=(0, 0, 0))
-        d.get_screenshot = MagicMock(return_value=fake_screenshot)
 
-        with patch(_UIA) as mock_uia:
-            mock_uia.GetVirtualScreenRect.return_value = (0, 0, orig_w, orig_h)
-            result = d.get_annotated_screenshot(nodes=[])
+        with patch.object(svc, "get_screenshot", return_value=fake_screenshot):
+            with patch(self._SCREEN_UIA) as mock_uia:
+                mock_uia.GetVirtualScreenRect.return_value = (0, 0, orig_w, orig_h)
+                result = svc.get_annotated_screenshot(nodes=[])
 
         assert result.width == orig_w + 2 * padding
         assert result.height == orig_h + 2 * padding
 
     def test_padded_dimensions_are_not_1_5x_padding(self):
         """Guard against regression to 1.5*padding."""
-        d = _make_bare_desktop()
+        svc = self._make_screen_service()
         padding = 5
         orig_w, orig_h = 300, 200
 
         fake_screenshot = Image.new("RGB", (orig_w, orig_h))
-        d.get_screenshot = MagicMock(return_value=fake_screenshot)
 
-        with patch(_UIA) as mock_uia:
-            mock_uia.GetVirtualScreenRect.return_value = (0, 0, orig_w, orig_h)
-            result = d.get_annotated_screenshot(nodes=[])
+        with patch.object(svc, "get_screenshot", return_value=fake_screenshot):
+            with patch(self._SCREEN_UIA) as mock_uia:
+                mock_uia.GetVirtualScreenRect.return_value = (0, 0, orig_w, orig_h)
+                result = svc.get_annotated_screenshot(nodes=[])
 
         expected_w = orig_w + 2 * padding  # 310
         expected_h = orig_h + 2 * padding  # 210
@@ -528,27 +539,27 @@ class TestGetAnnotatedScreenshotPadding:
         )
 
     def test_padded_image_is_rgb(self):
-        d = _make_bare_desktop()
+        svc = self._make_screen_service()
         orig_w, orig_h = 100, 80
         fake_screenshot = Image.new("RGB", (orig_w, orig_h))
-        d.get_screenshot = MagicMock(return_value=fake_screenshot)
 
-        with patch(_UIA) as mock_uia:
-            mock_uia.GetVirtualScreenRect.return_value = (0, 0, orig_w, orig_h)
-            result = d.get_annotated_screenshot(nodes=[])
+        with patch.object(svc, "get_screenshot", return_value=fake_screenshot):
+            with patch(self._SCREEN_UIA) as mock_uia:
+                mock_uia.GetVirtualScreenRect.return_value = (0, 0, orig_w, orig_h)
+                result = svc.get_annotated_screenshot(nodes=[])
 
         assert result.mode == "RGB"
 
     def test_padding_value_is_5(self):
         """Verify the hardcoded padding=5 gives the right offset for the paste."""
-        d = _make_bare_desktop()
+        svc = self._make_screen_service()
         orig_w, orig_h = 50, 40
         fake_screenshot = Image.new("RGB", (orig_w, orig_h), color=(255, 0, 0))
-        d.get_screenshot = MagicMock(return_value=fake_screenshot)
 
-        with patch(_UIA) as mock_uia:
-            mock_uia.GetVirtualScreenRect.return_value = (0, 0, orig_w, orig_h)
-            result = d.get_annotated_screenshot(nodes=[])
+        with patch.object(svc, "get_screenshot", return_value=fake_screenshot):
+            with patch(self._SCREEN_UIA) as mock_uia:
+                mock_uia.GetVirtualScreenRect.return_value = (0, 0, orig_w, orig_h)
+                result = svc.get_annotated_screenshot(nodes=[])
 
         # Pixel at (0,0) should be white (padding background)
         assert result.getpixel((0, 0)) == (255, 255, 255)
