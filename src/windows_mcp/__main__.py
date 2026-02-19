@@ -96,7 +96,9 @@ def app_tool(
     window_size: list[int] | None = None,
     ctx: Context = None,
 ):
-    return desktop.app(mode, name, window_loc, window_size)
+    loc = tuple(window_loc) if window_loc else None
+    size = tuple(window_size) if window_size else None
+    return desktop.app(mode, name, loc, size)
 
 
 @mcp.tool(

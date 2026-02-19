@@ -172,8 +172,23 @@ class NativeWorker:
                     timeout=self._call_timeout,
                 )
             except asyncio.TimeoutError:
+                # Worker is in an undefined state after timeout -- the sent
+                # request may produce a belated response that would corrupt
+                # the next call.  Kill and mark unhealthy so the next call
+                # gets a clear error rather than a response-ID mismatch.
+                logger.warning(
+                    "Worker call '%s' timed out after %ss, killing worker",
+                    method, self._call_timeout,
+                )
+                try:
+                    self._process.kill()
+                    await self._process.wait()
+                except Exception:
+                    pass
+                self._process = None
                 raise TimeoutError(
-                    f"Worker call '{method}' timed out after {self._call_timeout}s"
+                    f"Worker call '{method}' timed out after {self._call_timeout}s. "
+                    "Worker has been killed; call start() to respawn."
                 ) from None
 
             if not response_line:

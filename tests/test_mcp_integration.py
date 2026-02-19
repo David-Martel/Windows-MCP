@@ -635,7 +635,7 @@ class TestAppToolDispatch:
             window_loc=[0, 0],
             window_size=[800, 600],
         )
-        patched_desktop.app.assert_called_once_with("resize", None, [0, 0], [800, 600])
+        patched_desktop.app.assert_called_once_with("resize", None, (0, 0), (800, 600))
 
     async def test_app_switch_passes_name(self, patched_desktop):
         tools = await _get_tools()
