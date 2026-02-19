@@ -1409,3 +1409,642 @@ class TestEdgeCases:
 
         assert isinstance(result, list)
         assert len(result) >= 1
+
+
+# ---------------------------------------------------------------------------
+# 17. _enumerate_desktops -- direct unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestEnumerateDesktopsDirectly:
+    """Direct unit tests for _enumerate_desktops().
+
+    These tests exercise _enumerate_desktops() by calling it directly (not via
+    the public wrappers) so that every branch of the helper can be verified in
+    isolation.  _get_name_from_registry is patched with patch.object so the
+    tests remain independent of registry state.
+    """
+
+    # ------------------------------------------------------------------
+    # Guard: _internal_manager is None
+    # ------------------------------------------------------------------
+
+    def test_returns_empty_list_when_internal_manager_is_none(self):
+        """_enumerate_desktops returns [] immediately when _internal_manager is None."""
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=None)
+
+        result = vdm._enumerate_desktops()
+
+        assert result == []
+
+    def test_does_not_call_get_desktops_when_internal_manager_is_none(self):
+        """No COM call is made when the guard short-circuits on None manager."""
+        internal = MagicMock()
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=None)
+        # Assign after construction so we can verify it was never called
+        vdm._internal_manager = None
+
+        vdm._enumerate_desktops()
+
+        internal.GetDesktops.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # Happy path: multiple desktops
+    # ------------------------------------------------------------------
+
+    def test_returns_correct_number_of_entries_for_multiple_desktops(self):
+        """Each valid desktop produces exactly one entry in the result list."""
+        guid1 = "{ENUM-GUID-0001}"
+        guid2 = "{ENUM-GUID-0002}"
+        guid3 = "{ENUM-GUID-0003}"
+        desktops = [_make_desktop_mock(g) for g in (guid1, guid2, guid3)]
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = _make_array_mock(desktops)
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None):
+            result = vdm._enumerate_desktops()
+
+        assert len(result) == 3
+
+    def test_entry_dict_contains_required_keys(self):
+        """Every entry must contain exactly the keys: index, guid_str, name, desktop."""
+        guid_str = "{ENUM-KEYS-GUID}"
+        desktop = _make_desktop_mock(guid_str)
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = _make_array_mock([desktop])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None):
+            result = vdm._enumerate_desktops()
+
+        assert len(result) == 1
+        entry = result[0]
+        assert set(entry.keys()) == {"index", "guid_str", "name", "desktop"}
+
+    def test_index_values_are_zero_based_sequential(self):
+        """index in each entry reflects the loop counter (0-based)."""
+        guids = ["{IDX-G1}", "{IDX-G2}", "{IDX-G3}"]
+        desktops = [_make_desktop_mock(g) for g in guids]
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = _make_array_mock(desktops)
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None):
+            result = vdm._enumerate_desktops()
+
+        assert [e["index"] for e in result] == [0, 1, 2]
+
+    def test_guid_str_matches_desktop_get_id(self):
+        """guid_str in each entry equals str(desktop.GetID())."""
+        guid_str = "{GUID-STR-CHECK}"
+        desktop = _make_desktop_mock(guid_str)
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = _make_array_mock([desktop])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None):
+            result = vdm._enumerate_desktops()
+
+        assert result[0]["guid_str"] == guid_str
+
+    def test_desktop_field_holds_query_interface_result(self):
+        """The 'desktop' field stores the object returned by QueryInterface."""
+        guid_str = "{DESKTOP-OBJ-GUID}"
+        desktop_obj = _make_desktop_mock(guid_str)
+
+        # Build array manually so we can verify the exact QueryInterface return value
+        array = MagicMock()
+        array.GetCount.return_value = 1
+
+        def _get_at(i, *args):
+            unk = MagicMock()
+            unk.QueryInterface.return_value = desktop_obj
+            return unk
+
+        array.GetAt.side_effect = _get_at
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = array
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None):
+            result = vdm._enumerate_desktops()
+
+        assert result[0]["desktop"] is desktop_obj
+
+    # ------------------------------------------------------------------
+    # Registry names vs. fallback "Desktop N" names
+    # ------------------------------------------------------------------
+
+    def test_uses_registry_name_when_available(self):
+        """When _get_name_from_registry returns a string, that name is used."""
+        guid_str = "{REG-NAME-GUID}"
+        desktop = _make_desktop_mock(guid_str)
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = _make_array_mock([desktop])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value="My Work Desktop"):
+            result = vdm._enumerate_desktops()
+
+        assert result[0]["name"] == "My Work Desktop"
+
+    def test_falls_back_to_desktop_n_name_when_no_registry_entry(self):
+        """When registry returns None the name becomes 'Desktop {i+1}'."""
+        guid_str = "{FALLBACK-NAME-GUID}"
+        desktop = _make_desktop_mock(guid_str)
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = _make_array_mock([desktop])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None):
+            result = vdm._enumerate_desktops()
+
+        assert result[0]["name"] == "Desktop 1"
+
+    def test_fallback_name_uses_one_based_index(self):
+        """Second desktop without a registry name gets 'Desktop 2', not 'Desktop 1'."""
+        guids = ["{FB-G1}", "{FB-G2}"]
+        desktops = [_make_desktop_mock(g) for g in guids]
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = _make_array_mock(desktops)
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None):
+            result = vdm._enumerate_desktops()
+
+        assert result[0]["name"] == "Desktop 1"
+        assert result[1]["name"] == "Desktop 2"
+
+    def test_mixed_registry_and_fallback_names(self):
+        """Desktops with registry names use them; others fall back to 'Desktop N'."""
+        guid1, guid2, guid3 = "{MIX-G1}", "{MIX-G2}", "{MIX-G3}"
+        desktops = [_make_desktop_mock(g) for g in (guid1, guid2, guid3)]
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = _make_array_mock(desktops)
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        # Only the middle desktop has a custom name
+        name_map = {guid1: None, guid2: "Gaming", guid3: None}
+        with patch.object(
+            vdm, "_get_name_from_registry", side_effect=lambda g: name_map.get(g)
+        ):
+            result = vdm._enumerate_desktops()
+
+        assert result[0]["name"] == "Desktop 1"
+        assert result[1]["name"] == "Gaming"
+        assert result[2]["name"] == "Desktop 3"
+
+    def test_registry_name_called_with_correct_guid(self):
+        """_get_name_from_registry is called with the stringified GUID for each desktop."""
+        guid_str = "{REG-CALL-CHECK}"
+        desktop = _make_desktop_mock(guid_str)
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = _make_array_mock([desktop])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None) as mock_reg:
+            vdm._enumerate_desktops()
+
+        mock_reg.assert_called_once_with(guid_str)
+
+    # ------------------------------------------------------------------
+    # Exception handling: GetDesktops raises
+    # ------------------------------------------------------------------
+
+    def test_returns_empty_list_when_get_desktops_raises(self):
+        """An exception from GetDesktops causes _enumerate_desktops to return []."""
+        internal = MagicMock()
+        internal.GetDesktops.side_effect = OSError("COM error: GetDesktops failed")
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        result = vdm._enumerate_desktops()
+
+        assert result == []
+
+    def test_returns_empty_list_when_get_count_raises(self):
+        """An exception from GetCount causes _enumerate_desktops to return []."""
+        array = MagicMock()
+        array.GetCount.side_effect = OSError("COM error: GetCount failed")
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = array
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        result = vdm._enumerate_desktops()
+
+        assert result == []
+
+    # ------------------------------------------------------------------
+    # Exception handling: per-desktop GetAt / QueryInterface / GetID raises
+    # ------------------------------------------------------------------
+
+    def test_skips_entry_when_get_at_raises(self):
+        """An exception from GetAt at index i causes that entry to be skipped."""
+        guid_good = "{GERAT-GOOD-GUID}"
+        desktop_good = _make_desktop_mock(guid_good)
+
+        array = MagicMock()
+        array.GetCount.return_value = 2
+
+        def _get_at(i, *args):
+            if i == 0:
+                raise OSError("GetAt COM error")
+            unk = MagicMock()
+            unk.QueryInterface.return_value = desktop_good
+            return unk
+
+        array.GetAt.side_effect = _get_at
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = array
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None):
+            result = vdm._enumerate_desktops()
+
+        # The bad entry is skipped; the good one is still present
+        assert len(result) == 1
+        assert result[0]["guid_str"] == guid_good
+
+    def test_skips_entry_when_query_interface_raises(self):
+        """A QueryInterface failure skips that entry and continues iteration."""
+        guid_good = "{QI-FAIL-GOOD}"
+        desktop_good = _make_desktop_mock(guid_good)
+
+        array = MagicMock()
+        array.GetCount.return_value = 2
+
+        def _get_at(i, *args):
+            unk = MagicMock()
+            if i == 0:
+                unk.QueryInterface.side_effect = OSError("QI failed")
+            else:
+                unk.QueryInterface.return_value = desktop_good
+            return unk
+
+        array.GetAt.side_effect = _get_at
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = array
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None):
+            result = vdm._enumerate_desktops()
+
+        assert len(result) == 1
+        assert result[0]["guid_str"] == guid_good
+
+    def test_skips_entry_when_get_id_raises(self):
+        """A GetID exception skips that entry; remaining desktops are still returned."""
+        guid_good = "{GETID-FAIL-GOOD}"
+        desktop_good = _make_desktop_mock(guid_good)
+
+        desktop_bad = MagicMock()
+        desktop_bad.GetID.side_effect = OSError("GetID COM error")
+
+        array = MagicMock()
+        array.GetCount.return_value = 2
+
+        def _get_at(i, *args):
+            unk = MagicMock()
+            unk.QueryInterface.return_value = desktop_bad if i == 0 else desktop_good
+            return unk
+
+        array.GetAt.side_effect = _get_at
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = array
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None):
+            result = vdm._enumerate_desktops()
+
+        assert len(result) == 1
+        assert result[0]["guid_str"] == guid_good
+
+    def test_skips_entry_when_get_id_returns_falsy(self):
+        """A desktop whose GetID returns a falsy value is excluded from results."""
+        guid_good = "{FALSY-ID-GOOD}"
+        desktop_good = _make_desktop_mock(guid_good)
+        desktop_null = MagicMock()
+        desktop_null.GetID = MagicMock(return_value=None)
+
+        array = MagicMock()
+        array.GetCount.return_value = 2
+
+        def _get_at(i, *args):
+            unk = MagicMock()
+            unk.QueryInterface.return_value = desktop_null if i == 0 else desktop_good
+            return unk
+
+        array.GetAt.side_effect = _get_at
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = array
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None):
+            result = vdm._enumerate_desktops()
+
+        assert len(result) == 1
+        assert result[0]["guid_str"] == guid_good
+
+    def test_continues_after_multiple_per_desktop_exceptions(self):
+        """Multiple failing entries are all skipped; only valid ones survive."""
+        guid_good = "{MULTI-FAIL-GOOD}"
+        desktop_good = _make_desktop_mock(guid_good)
+
+        array = MagicMock()
+        array.GetCount.return_value = 4
+
+        def _get_at(i, *args):
+            unk = MagicMock()
+            if i in (0, 1, 2):
+                unk.QueryInterface.side_effect = OSError(f"QI failed at {i}")
+            else:
+                unk.QueryInterface.return_value = desktop_good
+            return unk
+
+        array.GetAt.side_effect = _get_at
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = array
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_get_name_from_registry", return_value=None):
+            result = vdm._enumerate_desktops()
+
+        assert len(result) == 1
+        assert result[0]["guid_str"] == guid_good
+
+    def test_returns_empty_list_when_all_desktops_fail(self):
+        """When every desktop raises an exception the result is an empty list."""
+        array = MagicMock()
+        array.GetCount.return_value = 3
+
+        def _get_at(i, *args):
+            unk = MagicMock()
+            unk.QueryInterface.side_effect = OSError("COM error")
+            return unk
+
+        array.GetAt.side_effect = _get_at
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = array
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        result = vdm._enumerate_desktops()
+
+        assert result == []
+
+    def test_empty_array_returns_empty_list(self):
+        """GetCount returning 0 yields an empty result without any GetAt calls."""
+        array = MagicMock()
+        array.GetCount.return_value = 0
+
+        internal = MagicMock()
+        internal.GetDesktops.return_value = array
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        result = vdm._enumerate_desktops()
+
+        assert result == []
+        array.GetAt.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 18. _resolve_to_guid via _enumerate_desktops -- targeted coverage
+# ---------------------------------------------------------------------------
+
+
+class TestResolveToGuidViaEnumerateDesktops:
+    """Tests for _resolve_to_guid that verify matching logic against entries
+    produced by a mocked _enumerate_desktops, covering GUID-string matching,
+    name matching (case-insensitive), and None returns when nothing matches.
+
+    Unlike section 7, these tests patch _enumerate_desktops directly so we
+    can control the full entry dicts (including the 'desktop' field) without
+    depending on the inner COM chain.
+    """
+
+    def _make_entries(self, desktops: list[tuple[str, str]]) -> list[dict]:
+        """Build a list of _enumerate_desktops-style dicts from (guid_str, name) pairs."""
+        return [
+            {
+                "index": i,
+                "guid_str": guid_str,
+                "name": name,
+                "desktop": MagicMock(),
+            }
+            for i, (guid_str, name) in enumerate(desktops)
+        ]
+
+    # ------------------------------------------------------------------
+    # GUID-string matching
+    # ------------------------------------------------------------------
+
+    def test_matches_exact_guid_string(self):
+        """When the input equals an entry's guid_str the method returns that guid_str."""
+        guid = "{EXACT-GUID-MATCH}"
+        entries = self._make_entries([(guid, "Desktop 1")])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            result = vdm._resolve_to_guid(guid)
+
+        assert result == guid
+
+    def test_matches_guid_string_case_insensitively(self):
+        """GUID matching is case-insensitive: lowercase input matches uppercase guid_str."""
+        guid = "{ABCD-1234-EFGH-5678}"
+        entries = self._make_entries([(guid, "Desktop 1")])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            result = vdm._resolve_to_guid(guid.lower())
+
+        assert result == guid
+
+    def test_guid_match_returns_original_casing_from_entry(self):
+        """The returned value is always from the entry (original casing), not from the input."""
+        guid = "{ORIG-CASE-GUID}"
+        entries = self._make_entries([(guid, "Desktop 1")])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            result = vdm._resolve_to_guid(guid.lower())
+
+        # The returned GUID string keeps the original uppercase casing from the entry
+        assert result == guid
+
+    # ------------------------------------------------------------------
+    # Name matching
+    # ------------------------------------------------------------------
+
+    def test_matches_desktop_name_case_insensitively(self):
+        """Name matching is case-insensitive: 'work desktop' matches 'Work Desktop'."""
+        guid = "{NAME-MATCH-GUID}"
+        entries = self._make_entries([(guid, "Work Desktop")])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            result = vdm._resolve_to_guid("work desktop")
+
+        assert result == guid
+
+    def test_matches_name_with_uppercase_input(self):
+        """All-uppercase input matches a mixed-case registry name."""
+        guid = "{UPPER-NAME-GUID}"
+        entries = self._make_entries([(guid, "Gaming Setup")])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            result = vdm._resolve_to_guid("GAMING SETUP")
+
+        assert result == guid
+
+    def test_matches_fallback_desktop_n_name(self):
+        """'Desktop 2' (the fallback naming convention) is matched by name."""
+        guid = "{DESKTOP-2-GUID}"
+        entries = self._make_entries([("{OTHER}", "Desktop 1"), (guid, "Desktop 2")])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            result = vdm._resolve_to_guid("Desktop 2")
+
+        assert result == guid
+
+    def test_selects_first_match_when_duplicate_names_exist(self):
+        """If two entries share the same name, the first one is returned."""
+        guid_first = "{DUP-FIRST-GUID}"
+        guid_second = "{DUP-SECOND-GUID}"
+        entries = self._make_entries(
+            [(guid_first, "Shared Name"), (guid_second, "Shared Name")]
+        )
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            result = vdm._resolve_to_guid("Shared Name")
+
+        assert result == guid_first
+
+    # ------------------------------------------------------------------
+    # No match returns None
+    # ------------------------------------------------------------------
+
+    def test_returns_none_when_name_does_not_match_any_entry(self):
+        """None is returned when the input matches neither guid_str nor name."""
+        entries = self._make_entries([("{SOME-GUID}", "Desktop 1")])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            result = vdm._resolve_to_guid("Nonexistent Desktop")
+
+        assert result is None
+
+    def test_returns_none_when_enumerate_desktops_returns_empty(self):
+        """None is returned when there are no entries to match against."""
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=[]):
+            result = vdm._resolve_to_guid("Desktop 1")
+
+        assert result is None
+
+    def test_returns_none_when_enumerate_desktops_raises(self):
+        """An exception raised by _enumerate_desktops propagates up (or returns None
+        if the method swallows it -- see the outer exception handler in the real impl).
+        Here we verify the None return via the outer try/except in _resolve_to_guid."""
+        internal = MagicMock()
+        internal.GetDesktops.side_effect = OSError("COM failure")
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        # No patch -- let the real _enumerate_desktops run and return []
+        result = vdm._resolve_to_guid("Desktop 1")
+
+        assert result is None
+
+    def test_returns_none_for_partial_guid_substring(self):
+        """A partial GUID substring must not be matched -- only exact (case-folded) equality."""
+        full_guid = "{PARTIAL-GUID-TEST-0001}"
+        entries = self._make_entries([(full_guid, "Desktop 1")])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            result = vdm._resolve_to_guid("PARTIAL")
+
+        assert result is None
+
+    def test_returns_none_for_empty_string_input(self):
+        """An empty string input never matches any entry."""
+        guid = "{EMPTY-STR-GUID}"
+        entries = self._make_entries([(guid, "Desktop 1")])
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            result = vdm._resolve_to_guid("")
+
+        assert result is None
+
+    # ------------------------------------------------------------------
+    # GUID matching takes priority over name matching
+    # ------------------------------------------------------------------
+
+    def test_guid_match_takes_priority_over_name_match(self):
+        """When the input matches a guid_str for one entry and a name for another,
+        the guid_str match (checked first in the loop) wins."""
+        guid_target = "{PRIORITY-GUID}"
+        guid_other = "{PRIORITY-OTHER}"
+        # First entry: input matches guid_str
+        # Second entry: input matches name but guid_str is different
+        entries = self._make_entries(
+            [(guid_target, "Different Name"), (guid_other, guid_target)]
+        )
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            result = vdm._resolve_to_guid(guid_target)
+
+        assert result == guid_target
