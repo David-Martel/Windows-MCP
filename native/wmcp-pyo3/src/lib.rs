@@ -22,30 +22,47 @@ fn to_py_err(e: wmcp_core::errors::WindowsMcpError) -> PyErr {
 // Tree element -> Python dict conversion
 // ---------------------------------------------------------------------------
 
-fn snapshot_to_py_dict(py: Python<'_>, snap: &TreeElementSnapshot) -> PyResult<PyObject> {
-    let dict = PyDict::new(py);
+/// Convert a [`TreeElementSnapshot`] tree into a nested Python dict.
+///
+/// Uses an iterative (stack-based) approach to avoid stack overflow on
+/// deeply nested trees, even though Rust caps at `MAX_TREE_DEPTH = 50`.
+fn snapshot_to_py_dict(py: Python<'_>, root: &TreeElementSnapshot) -> PyResult<PyObject> {
+    // Each stack frame: (snapshot ref, parent PyList to append result to)
+    let root_list = PyList::empty(py);
+    let mut stack: Vec<(&TreeElementSnapshot, PyObject)> =
+        vec![(root, root_list.clone().into())];
 
-    dict.set_item("name", &snap.name)?;
-    dict.set_item("automation_id", &snap.automation_id)?;
-    dict.set_item("control_type", &snap.control_type)?;
-    dict.set_item("localized_control_type", &snap.localized_control_type)?;
-    dict.set_item("class_name", &snap.class_name)?;
-    dict.set_item("bounding_rect", snap.bounding_rect.to_vec())?;
-    dict.set_item("is_offscreen", snap.is_offscreen)?;
-    dict.set_item("is_enabled", snap.is_enabled)?;
-    dict.set_item("is_control_element", snap.is_control_element)?;
-    dict.set_item("has_keyboard_focus", snap.has_keyboard_focus)?;
-    dict.set_item("is_keyboard_focusable", snap.is_keyboard_focusable)?;
-    dict.set_item("accelerator_key", &snap.accelerator_key)?;
-    dict.set_item("depth", snap.depth)?;
+    while let Some((snap, parent_list)) = stack.pop() {
+        let dict = PyDict::new(py);
 
-    let children_list = PyList::empty(py);
-    for child in &snap.children {
-        children_list.append(snapshot_to_py_dict(py, child)?)?;
+        dict.set_item("name", &snap.name)?;
+        dict.set_item("automation_id", &snap.automation_id)?;
+        dict.set_item("control_type", &snap.control_type)?;
+        dict.set_item("localized_control_type", &snap.localized_control_type)?;
+        dict.set_item("class_name", &snap.class_name)?;
+        dict.set_item("bounding_rect", snap.bounding_rect.to_vec())?;
+        dict.set_item("is_offscreen", snap.is_offscreen)?;
+        dict.set_item("is_enabled", snap.is_enabled)?;
+        dict.set_item("is_control_element", snap.is_control_element)?;
+        dict.set_item("has_keyboard_focus", snap.has_keyboard_focus)?;
+        dict.set_item("is_keyboard_focusable", snap.is_keyboard_focusable)?;
+        dict.set_item("accelerator_key", &snap.accelerator_key)?;
+        dict.set_item("depth", snap.depth)?;
+
+        let children_list = PyList::empty(py);
+        dict.set_item("children", &children_list)?;
+
+        // Append this dict to the parent's children list
+        parent_list.call_method1(py, "append", (dict.as_any(),))?;
+
+        // Push children in reverse so they're processed left-to-right
+        for child in snap.children.iter().rev() {
+            stack.push((child, children_list.clone().into()));
+        }
     }
-    dict.set_item("children", children_list)?;
 
-    Ok(dict.into())
+    // The root_list contains exactly one element (the root dict)
+    root_list.get_item(0).map(|item| item.into())
 }
 
 // ---------------------------------------------------------------------------
@@ -98,7 +115,7 @@ fn capture_tree(
     window_handles: Vec<isize>,
     max_depth: Option<usize>,
 ) -> PyResult<PyObject> {
-    let max_depth = max_depth.unwrap_or(50);
+    let max_depth = max_depth.unwrap_or(wmcp_core::tree::MAX_TREE_DEPTH);
 
     let snapshots = py.allow_threads(|| {
         wmcp_core::tree::capture_tree_raw(&window_handles, max_depth)

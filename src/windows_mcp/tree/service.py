@@ -16,6 +16,7 @@ from windows_mcp.tree.config import (
     INFORMATIVE_CONTROL_TYPE_NAMES,
     INTERACTIVE_CONTROL_TYPE_NAMES,
     INTERACTIVE_ROLES,
+    STRUCTURAL_CONTROL_TYPE_NAMES,
     THREAD_MAX_RETRIES,
 )
 from windows_mcp.tree.utils import random_point_within_bounding_box
@@ -116,9 +117,11 @@ class Tree:
         name.removesuffix("Control") for name in INTERACTIVE_CONTROL_TYPE_NAMES
     } | {name.removesuffix("Control") for name in DOCUMENT_CONTROL_TYPE_NAMES}
 
-    _RUST_INFORMATIVE_TYPES = {
-        name.removesuffix("Control") for name in INFORMATIVE_CONTROL_TYPE_NAMES
-    }
+    # Structural types that may be scrollable containers.  Used for
+    # heuristic scroll detection when live COM ScrollPattern is unavailable.
+    _RUST_SCROLLABLE_CANDIDATES = {
+        name.removesuffix("Control") for name in STRUCTURAL_CONTROL_TYPE_NAMES
+    } | {"List", "Tree", "DataGrid", "Table"}
 
     def _classify_rust_tree(
         self,
@@ -126,21 +129,31 @@ class Tree:
         window_name: str,
         window_rect: list[float],
         interactive_nodes: list[TreeElementNode],
+        scrollable_nodes: list[ScrollElementNode] | None = None,
     ):
         """Walk a Rust TreeElementSnapshot dict and classify elements.
 
         Uses only cached properties (no live COM calls).  Produces
         interactive TreeElementNodes from the Rust tree structure.
 
-        This is the fast path -- it skips scroll detection and
-        LegacyIAccessiblePattern role checks, relying on control type
-        and is_keyboard_focusable for classification.
+        Limitations vs the full Python path:
+        - **Scroll detection** is heuristic only.  The Python path queries
+          ``ScrollPattern.VerticallyScrollable`` via live COM, which requires
+          a pattern invocation that cached properties cannot provide.  Here we
+          detect *likely* scrollable containers by control type + child count,
+          but report them with 0% scroll position.
+        - **Informative text nodes** are not collected.  The Python path only
+          collects these for browser DOM subtrees (``is_browser and is_dom``),
+          which are never routed through the Rust fast-path.
+        - **LegacyIAccessiblePattern role checks** are skipped.  Classification
+          relies on ``control_type`` and ``is_keyboard_focusable`` instead.
 
         Args:
             snapshot: Dict from native_capture_tree (one window root).
             window_name: Corrected window name for the output nodes.
             window_rect: [left, top, right, bottom] of the window.
             interactive_nodes: Output list to append to.
+            scrollable_nodes: Optional list to append heuristic scroll nodes to.
         """
         # Build window bounding box for intersection
         wl, wt, wr, wb = window_rect
@@ -167,6 +180,65 @@ class Tree:
                 area = (er - el) * (eb - et)
 
                 if area > 0:
+                    children = elem.get("children", [])
+
+                    # Heuristic scroll detection: structural containers with
+                    # children that extend beyond the container bounds are
+                    # likely scrollable.  We cannot query ScrollPattern from
+                    # cached data, so this is a best-effort approximation.
+                    if (
+                        scrollable_nodes is not None
+                        and control_type in self._RUST_SCROLLABLE_CANDIDATES
+                        and len(children) > 0
+                    ):
+                        # Check if any child extends below the container --
+                        # a strong signal that the container scrolls vertically.
+                        has_overflow = False
+                        for child in children:
+                            cr = child.get("bounding_rect", [0, 0, 0, 0])
+                            if int(cr[3]) > eb:  # child bottom > parent bottom
+                                has_overflow = True
+                                break
+
+                        if has_overflow:
+                            il = max(window_box_left, self.screen_box.left, el)
+                            it = max(window_box_top, self.screen_box.top, et)
+                            ir = min(window_box_right, self.screen_box.right, er)
+                            ib = min(window_box_bottom, self.screen_box.bottom, eb)
+                            if ir > il and ib > it:
+                                sbb = BoundingBox(
+                                    left=il,
+                                    top=it,
+                                    right=ir,
+                                    bottom=ib,
+                                    width=ir - il,
+                                    height=ib - it,
+                                )
+                                name = (
+                                    elem.get("name", "").strip()
+                                    or elem.get("automation_id", "")
+                                    or elem.get("localized_control_type", control_type).capitalize()
+                                    or "''"
+                                )
+                                scrollable_nodes.append(
+                                    ScrollElementNode(
+                                        name=name,
+                                        control_type=elem.get(
+                                            "localized_control_type", control_type
+                                        ).title(),
+                                        bounding_box=sbb,
+                                        center=sbb.get_center(),
+                                        xpath="",
+                                        window_name=window_name,
+                                        # Heuristic: assume vertical scroll, no percentage info
+                                        horizontal_scrollable=False,
+                                        horizontal_scroll_percent=0,
+                                        vertical_scrollable=True,
+                                        vertical_scroll_percent=-1,
+                                        is_focused=elem.get("has_keyboard_focus", False),
+                                    )
+                                )
+
                     # Interactive classification
                     is_kb_focusable = elem.get("is_keyboard_focusable", False)
                     is_interactive = False
@@ -210,7 +282,7 @@ class Tree:
 
             # Push children onto the stack (reversed for left-to-right order)
             for child in reversed(elem.get("children", [])):
-                stack.append(child)
+                stack.append(child)  # noqa: PERF402
 
     def get_window_wise_nodes(
         self,
@@ -256,7 +328,9 @@ class Tree:
                     rect = snapshot.get("bounding_rect", [0, 0, 0, 0])
                     wname = snapshot.get("name", "").strip()
                     wname = self.app_name_correction(wname)
-                    self._classify_rust_tree(snapshot, wname, rect, interactive_nodes)
+                    self._classify_rust_tree(
+                        snapshot, wname, rect, interactive_nodes, scrollable_nodes
+                    )
                 logger.info(
                     "Rust fast-path: %d windows, %d interactive elements in %.2fs",
                     len(rust_handles),

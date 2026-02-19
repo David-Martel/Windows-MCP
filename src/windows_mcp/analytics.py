@@ -188,23 +188,29 @@ def with_analytics(
                 duration_ms = int((time.time() - start) * 1000)
 
                 if instance:
-                    await instance.track_tool(
-                        tool_name,
-                        {"duration_ms": duration_ms, "success": True, **client_data},
-                    )
+                    try:
+                        await instance.track_tool(
+                            tool_name,
+                            {"duration_ms": duration_ms, "success": True, **client_data},
+                        )
+                    except Exception:
+                        logger.debug("Analytics track_tool failed for %s", tool_name)
 
                 return result
             except Exception as error:
                 duration_ms = int((time.time() - start) * 1000)
                 if instance:
-                    await instance.track_error(
-                        error,
-                        {
-                            "tool_name": tool_name,
-                            "duration_ms": duration_ms,
-                            **client_data,
-                        },
-                    )
+                    try:
+                        await instance.track_error(
+                            error,
+                            {
+                                "tool_name": tool_name,
+                                "duration_ms": duration_ms,
+                                **client_data,
+                            },
+                        )
+                    except Exception:
+                        logger.debug("Analytics track_error failed for %s", tool_name)
                 raise error
 
         return wrapper
