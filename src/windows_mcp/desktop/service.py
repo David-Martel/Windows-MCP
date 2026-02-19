@@ -124,9 +124,15 @@ class Desktop:
         # Preparing handles for Tree
         other_windows_handles = list(controls_handles - windows_handles)
 
-        tree_state = self.tree.get_state(
-            active_window_handle, other_windows_handles, use_dom=use_dom
-        )
+        try:
+            tree_state = self.tree.get_state(
+                active_window_handle, other_windows_handles, use_dom=use_dom
+            )
+        except Exception:
+            logger.exception("Failed to capture tree state")
+            from windows_mcp.tree.views import TreeState
+
+            tree_state = TreeState()
 
         if use_vision:
             if use_annotation:
@@ -672,7 +678,7 @@ class Desktop:
             windows = []
             window_handles = set()
             controls_handles = controls_handles or self.get_controls_handles()
-            for depth, hwnd in enumerate(controls_handles):
+            for idx, hwnd in enumerate(controls_handles):
                 try:
                     child = uia.ControlFromHandle(hwnd)
                 except Exception:
@@ -698,7 +704,7 @@ class Desktop:
                             Window(
                                 **{
                                     "name": child.Name,
-                                    "depth": depth,
+                                    "depth": idx,
                                     "status": status,
                                     "bounding_box": BoundingBox(
                                         left=bounding_rect.left,
