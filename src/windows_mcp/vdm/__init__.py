@@ -5,5 +5,8 @@ from .core import (
     get_current_desktop as get_current_desktop,
 )
 from .core import (
+    get_desktop_info as get_desktop_info,
+)
+from .core import (
     is_window_on_current_desktop as is_window_on_current_desktop,
 )

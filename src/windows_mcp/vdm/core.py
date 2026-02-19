@@ -670,6 +670,33 @@ class VirtualDesktopManager:
 
         return {"id": guid_str, "name": "Unknown"}
 
+    def get_desktop_info(self) -> tuple[dict, list[dict]]:
+        """Return (current_desktop, all_desktops) from a single enumeration.
+
+        Avoids the duplicate COM round-trip that occurs when calling
+        get_current_desktop() and get_all_desktops() separately.
+        """
+        fallback = {"id": "00000000-0000-0000-0000-000000000000", "name": "Default Desktop"}
+
+        if not self._internal_manager:
+            return fallback, [fallback]
+
+        entries = self._enumerate_desktops()
+        all_desktops = [{"id": e["guid_str"], "name": e["name"]} for e in entries]
+
+        try:
+            current_desktop_obj = self._internal_manager.GetCurrentDesktop()
+            current_guid = str(current_desktop_obj.GetID())
+            for desktop in all_desktops:
+                if desktop["id"] == current_guid:
+                    return desktop, all_desktops
+            return {"id": current_guid, "name": "Unknown"}, all_desktops
+        except Exception:
+            logger.debug("GetCurrentDesktop failed, using first desktop", exc_info=True)
+            if all_desktops:
+                return all_desktops[0], all_desktops
+            return fallback, [fallback]
+
 
 def create_desktop(name: str | None = None) -> str:
     return _get_manager().create_desktop(name)
@@ -693,3 +720,7 @@ def get_all_desktops() -> list[dict]:
 
 def get_current_desktop() -> dict:
     return _get_manager().get_current_desktop()
+
+
+def get_desktop_info() -> tuple[dict, list[dict]]:
+    return _get_manager().get_desktop_info()

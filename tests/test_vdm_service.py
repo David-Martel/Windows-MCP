@@ -2042,3 +2042,280 @@ class TestResolveToGuidViaEnumerateDesktops:
             result = vdm._resolve_to_guid(guid_target)
 
         assert result == guid_target
+
+
+# ---------------------------------------------------------------------------
+# 19. get_desktop_info
+# ---------------------------------------------------------------------------
+
+
+class TestGetDesktopInfo:
+    """get_desktop_info() returns (current_desktop, all_desktops) from one enumeration."""
+
+    # Helper: build _enumerate_desktops-style entries from (guid_str, name) pairs.
+    def _make_entries(self, desktops: list[tuple[str, str]]) -> list[dict]:
+        return [
+            {"index": i, "guid_str": guid, "name": name, "desktop": MagicMock()}
+            for i, (guid, name) in enumerate(desktops)
+        ]
+
+    # ------------------------------------------------------------------
+    # No internal manager -- fallback behaviour
+    # ------------------------------------------------------------------
+
+    def test_no_internal_manager_returns_fallback(self):
+        """When _internal_manager is None both return values are the fallback sentinel."""
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=None)
+
+        current, all_desktops = vdm.get_desktop_info()
+
+        assert current["id"] == "00000000-0000-0000-0000-000000000000"
+        assert current["name"] == "Default Desktop"
+        assert len(all_desktops) == 1
+        assert all_desktops[0] == current
+
+    def test_no_internal_manager_all_desktops_is_list(self):
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=None)
+
+        _, all_desktops = vdm.get_desktop_info()
+
+        assert isinstance(all_desktops, list)
+
+    # ------------------------------------------------------------------
+    # Single desktop that is current
+    # ------------------------------------------------------------------
+
+    def test_single_desktop_is_current(self):
+        guid = "{SINGLE-GUID-0001}"
+        entries = self._make_entries([(guid, "My Desktop")])
+
+        current_obj = MagicMock()
+        current_obj.GetID.return_value = MagicMock(__str__=MagicMock(return_value=guid))
+
+        internal = MagicMock()
+        internal.GetCurrentDesktop.return_value = current_obj
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            current, all_desktops = vdm.get_desktop_info()
+
+        assert current == {"id": guid, "name": "My Desktop"}
+        assert len(all_desktops) == 1
+        assert all_desktops[0] == {"id": guid, "name": "My Desktop"}
+
+    def test_single_desktop_current_is_same_object_as_all_entry(self):
+        """The returned current dict is the same object as the matching all_desktops entry."""
+        guid = "{SAME-OBJ-GUID}"
+        entries = self._make_entries([(guid, "Work")])
+
+        current_obj = MagicMock()
+        current_obj.GetID.return_value = MagicMock(__str__=MagicMock(return_value=guid))
+
+        internal = MagicMock()
+        internal.GetCurrentDesktop.return_value = current_obj
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            current, all_desktops = vdm.get_desktop_info()
+
+        assert current is all_desktops[0]
+
+    # ------------------------------------------------------------------
+    # Multiple desktops -- current is the second one
+    # ------------------------------------------------------------------
+
+    def test_multiple_desktops_current_is_second(self):
+        guid1 = "{MULTI-GUID-001}"
+        guid2 = "{MULTI-GUID-002}"
+        entries = self._make_entries([(guid1, "Desktop 1"), (guid2, "Desktop 2")])
+
+        current_obj = MagicMock()
+        current_obj.GetID.return_value = MagicMock(__str__=MagicMock(return_value=guid2))
+
+        internal = MagicMock()
+        internal.GetCurrentDesktop.return_value = current_obj
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            current, all_desktops = vdm.get_desktop_info()
+
+        assert current == {"id": guid2, "name": "Desktop 2"}
+        assert len(all_desktops) == 2
+        assert all_desktops[0] == {"id": guid1, "name": "Desktop 1"}
+        assert all_desktops[1] == {"id": guid2, "name": "Desktop 2"}
+
+    def test_all_desktops_count_matches_entries(self):
+        """all_desktops contains one entry per enumerated desktop."""
+        entries = self._make_entries(
+            [(f"{{G{i}}}", f"Desktop {i + 1}") for i in range(4)]
+        )
+        current_obj = MagicMock()
+        current_obj.GetID.return_value = MagicMock(__str__=MagicMock(return_value="{G0}"))
+
+        internal = MagicMock()
+        internal.GetCurrentDesktop.return_value = current_obj
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            _, all_desktops = vdm.get_desktop_info()
+
+        assert len(all_desktops) == 4
+
+    # ------------------------------------------------------------------
+    # GetCurrentDesktop raises -- falls back to first desktop
+    # ------------------------------------------------------------------
+
+    def test_get_current_desktop_fails_returns_first(self):
+        """When GetCurrentDesktop raises, the first enumerated desktop is returned as current."""
+        guid1 = "{FALLBACK-FIRST-001}"
+        guid2 = "{FALLBACK-FIRST-002}"
+        entries = self._make_entries([(guid1, "First"), (guid2, "Second")])
+
+        internal = MagicMock()
+        internal.GetCurrentDesktop.side_effect = OSError("COM failure")
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            current, all_desktops = vdm.get_desktop_info()
+
+        assert current == {"id": guid1, "name": "First"}
+        assert len(all_desktops) == 2
+
+    def test_get_current_desktop_fails_empty_enum_returns_fallback(self):
+        """When GetCurrentDesktop raises and there are no desktops, the fallback is returned."""
+        internal = MagicMock()
+        internal.GetCurrentDesktop.side_effect = OSError("COM failure")
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=[]):
+            current, all_desktops = vdm.get_desktop_info()
+
+        assert current["id"] == "00000000-0000-0000-0000-000000000000"
+        assert current["name"] == "Default Desktop"
+        assert all_desktops == [current]
+
+    # ------------------------------------------------------------------
+    # Current GUID not found in enumerated list -- "Unknown" name
+    # ------------------------------------------------------------------
+
+    def test_current_not_in_list_returns_unknown_name(self):
+        """When GetCurrentDesktop returns a GUID not present in all_desktops, name is 'Unknown'."""
+        guid_known = "{KNOWN-GUID-001}"
+        guid_current = "{UNKNOWN-CURRENT-GUID}"
+        entries = self._make_entries([(guid_known, "Desktop 1")])
+
+        current_obj = MagicMock()
+        current_obj.GetID.return_value = MagicMock(
+            __str__=MagicMock(return_value=guid_current)
+        )
+
+        internal = MagicMock()
+        internal.GetCurrentDesktop.return_value = current_obj
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            current, all_desktops = vdm.get_desktop_info()
+
+        assert current == {"id": guid_current, "name": "Unknown"}
+        assert len(all_desktops) == 1
+
+    def test_current_not_in_list_all_desktops_still_complete(self):
+        """Even with an 'Unknown' current, all_desktops still lists every enumerated desktop."""
+        entries = self._make_entries([("{G1}", "Desktop 1"), ("{G2}", "Desktop 2")])
+
+        current_obj = MagicMock()
+        current_obj.GetID.return_value = MagicMock(
+            __str__=MagicMock(return_value="{NOT-IN-LIST}")
+        )
+
+        internal = MagicMock()
+        internal.GetCurrentDesktop.return_value = current_obj
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            _, all_desktops = vdm.get_desktop_info()
+
+        assert len(all_desktops) == 2
+
+    # ------------------------------------------------------------------
+    # Return type invariants
+    # ------------------------------------------------------------------
+
+    def test_returns_tuple_of_dict_and_list(self):
+        entries = self._make_entries([("{RET-GUID}", "Desktop 1")])
+
+        current_obj = MagicMock()
+        current_obj.GetID.return_value = MagicMock(
+            __str__=MagicMock(return_value="{RET-GUID}")
+        )
+
+        internal = MagicMock()
+        internal.GetCurrentDesktop.return_value = current_obj
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            result = vdm.get_desktop_info()
+
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        current, all_desktops = result
+        assert isinstance(current, dict)
+        assert isinstance(all_desktops, list)
+
+    def test_each_desktop_dict_has_id_and_name_keys(self):
+        guid = "{KEYS-GUID}"
+        entries = self._make_entries([(guid, "My Desktop")])
+
+        current_obj = MagicMock()
+        current_obj.GetID.return_value = MagicMock(__str__=MagicMock(return_value=guid))
+
+        internal = MagicMock()
+        internal.GetCurrentDesktop.return_value = current_obj
+
+        vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=internal)
+
+        with patch.object(vdm, "_enumerate_desktops", return_value=entries):
+            current, all_desktops = vdm.get_desktop_info()
+
+        assert "id" in current and "name" in current
+        for desktop in all_desktops:
+            assert "id" in desktop and "name" in desktop
+
+    # ------------------------------------------------------------------
+    # Module-level get_desktop_info delegates to the manager
+    # ------------------------------------------------------------------
+
+    def test_module_level_get_desktop_info_delegates(self):
+        """The module-level get_desktop_info() delegates to the thread-local manager."""
+        expected = ({"id": "{MOD-GUID}", "name": "Work"}, [{"id": "{MOD-GUID}", "name": "Work"}])
+        mock_vdm = MagicMock()
+        mock_vdm.get_desktop_info.return_value = expected
+
+        with patch("windows_mcp.vdm.core._get_manager", return_value=mock_vdm):
+            result = vdm_mod.get_desktop_info()
+
+        mock_vdm.get_desktop_info.assert_called_once_with()
+        assert result == expected
+
+    def test_module_level_get_desktop_info_called_once(self):
+        """The module function calls the manager method exactly once per invocation."""
+        mock_vdm = MagicMock()
+        mock_vdm.get_desktop_info.return_value = (
+            {"id": "{ONCE}", "name": "D"},
+            [{"id": "{ONCE}", "name": "D"}],
+        )
+
+        with patch("windows_mcp.vdm.core._get_manager", return_value=mock_vdm):
+            vdm_mod.get_desktop_info()
+            vdm_mod.get_desktop_info()
+
+        assert mock_vdm.get_desktop_info.call_count == 2

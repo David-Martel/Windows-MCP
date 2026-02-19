@@ -18,10 +18,7 @@ from windows_mcp.desktop.config import PROCESS_PER_MONITOR_DPI_AWARE
 from windows_mcp.desktop.views import DesktopState, Size, Status, Window
 from windows_mcp.tree.service import Tree
 from windows_mcp.tree.views import TreeElementNode
-from windows_mcp.vdm.core import (
-    get_all_desktops,
-    get_current_desktop,
-)
+from windows_mcp.vdm.core import get_desktop_info
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -38,6 +35,7 @@ import windows_mcp.uia as uia  # noqa: E402
 class Desktop:
     def __init__(self):
         from windows_mcp.input import InputService
+        from windows_mcp.process import ProcessService
         from windows_mcp.registry import RegistryService
         from windows_mcp.scraper import ScraperService
         from windows_mcp.screen import ScreenService
@@ -46,6 +44,7 @@ class Desktop:
 
         self.encoding = getpreferredencoding()
         self._input = InputService()
+        self._process = ProcessService()
         self._screen = ScreenService()
         self._window = WindowService()
         self._registry = RegistryService()
@@ -94,8 +93,7 @@ class Desktop:
         active_window_handle = active_window.handle if active_window else None
 
         try:
-            active_desktop = get_current_desktop()
-            all_desktops = get_all_desktops()
+            active_desktop, all_desktops = get_desktop_info()
         except RuntimeError:
             active_desktop = {
                 "id": "00000000-0000-0000-0000-000000000000",
@@ -585,79 +583,12 @@ class Desktop:
         sort_by: Literal["memory", "cpu", "name"] = "memory",
         limit: int = 20,
     ) -> str:
-        import psutil
-        from tabulate import tabulate
-
-        procs = []
-        for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]):
-            try:
-                info = p.info
-                mem_mb = info["memory_info"].rss / (1024 * 1024) if info["memory_info"] else 0
-                procs.append(
-                    {
-                        "pid": info["pid"],
-                        "name": info["name"] or "Unknown",
-                        "cpu": info["cpu_percent"] or 0,
-                        "mem_mb": round(mem_mb, 1),
-                    }
-                )
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-        if name:
-            from thefuzz import fuzz
-
-            procs = [p for p in procs if fuzz.partial_ratio(name.lower(), p["name"].lower()) > 60]
-        sort_key = {
-            "memory": lambda x: x["mem_mb"],
-            "cpu": lambda x: x["cpu"],
-            "name": lambda x: x["name"].lower(),
-        }
-        procs.sort(key=sort_key.get(sort_by, sort_key["memory"]), reverse=(sort_by != "name"))
-        procs = procs[: max(1, limit)]
-        if not procs:
-            return f"No processes found{f' matching {name}' if name else ''}."
-        table = tabulate(
-            [[p["pid"], p["name"], f"{p['cpu']:.1f}%", f"{p['mem_mb']:.1f} MB"] for p in procs],
-            headers=["PID", "Name", "CPU%", "Memory"],
-            tablefmt="simple",
-        )
-        return f"Processes ({len(procs)} shown):\n{table}"
+        return self._process.list_processes(name=name, sort_by=sort_by, limit=limit)
 
     def kill_process(
         self, name: str | None = None, pid: int | None = None, force: bool = False
     ) -> str:
-        import psutil
-
-        if pid is None and name is None:
-            return "Error: Provide either pid or name parameter for kill mode."
-        killed = []
-        if pid is not None:
-            try:
-                p = psutil.Process(pid)
-                pname = p.name()
-                if force:
-                    p.kill()
-                else:
-                    p.terminate()
-                killed.append(f"{pname} (PID {pid})")
-            except psutil.NoSuchProcess:
-                return f"No process with PID {pid} found."
-            except psutil.AccessDenied:
-                return f"Access denied to kill PID {pid}. Try running as administrator."
-        else:
-            for p in psutil.process_iter(["pid", "name"]):
-                try:
-                    if p.info["name"] and p.info["name"].lower() == name.lower():
-                        if force:
-                            p.kill()
-                        else:
-                            p.terminate()
-                        killed.append(f"{p.info['name']} (PID {p.info['pid']})")
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-        if not killed:
-            return f'No process matching "{name}" found or access denied.'
-        return f"{'Force killed' if force else 'Terminated'}: {', '.join(killed)}"
+        return self._process.kill_process(name=name, pid=pid, force=force)
 
     def lock_screen(self) -> str:
         try:

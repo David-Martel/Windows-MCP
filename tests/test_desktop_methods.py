@@ -258,202 +258,20 @@ class TestSendNotification:
 
 
 class TestListProcesses:
-    """list_processes filters, sorts, and limits the process list."""
+    """Desktop.list_processes delegates to ProcessService."""
 
-    def _run(
-        self,
-        d,
-        proc_infos: list,
-        *,
-        name=None,
-        sort_by="memory",
-        limit=20,
-    ) -> str:
-        mock_psutil = _make_mock_psutil(proc_infos)
-        tab_fn = MagicMock(return_value="table_output")
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn):
-            result = d.list_processes(name=name, sort_by=sort_by, limit=limit)
-        return result
-
-    def test_no_filter_returns_table(self):
+    def test_delegates_with_all_args(self):
         d = _make_bare_desktop()
-        infos = [_make_proc_info(1, "alpha"), _make_proc_info(2, "beta")]
-        result = self._run(d, infos)
+        d._process.list_processes.return_value = "Processes (3 shown):\ntable"
+        result = d.list_processes(name="chrome", sort_by="cpu", limit=10)
+        d._process.list_processes.assert_called_once_with(name="chrome", sort_by="cpu", limit=10)
         assert "Processes" in result
 
-    def test_empty_process_list_no_filter(self):
+    def test_delegates_with_defaults(self):
         d = _make_bare_desktop()
-        result = self._run(d, [])
-        assert "No processes found" in result
-        assert "matching" not in result
-
-    def test_empty_after_name_filter(self):
-        d = _make_bare_desktop()
-        infos = [_make_proc_info(1, "notepad")]
-        mock_fuzz = MagicMock()
-        mock_fuzz.partial_ratio.return_value = 10  # below threshold -- all filtered out
-        mock_psutil = _make_mock_psutil(infos)
-        tab_fn = MagicMock(return_value="table_output")
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn), _inject_thefuzz_fuzz(mock_fuzz):
-            result = d.list_processes(name="chrome")
-        assert "No processes found" in result
-        assert "matching chrome" in result
-
-    def test_name_filter_includes_high_ratio_process(self):
-        d = _make_bare_desktop()
-        infos = [_make_proc_info(1, "notepad"), _make_proc_info(2, "chrome")]
-        tab_fn = MagicMock(return_value="table_output")
-        mock_psutil = _make_mock_psutil(infos)
-        mock_fuzz = MagicMock()
-        # notepad scores low, chrome scores high
-        mock_fuzz.partial_ratio.side_effect = lambda a, b: 90 if "chrome" in b else 10
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn), _inject_thefuzz_fuzz(mock_fuzz):
-            d.list_processes(name="chrome")
-        rows = tab_fn.call_args[0][0]
-        pids = [r[0] for r in rows]
-        assert 2 in pids
-        assert 1 not in pids
-
-    def test_sort_by_memory_default_descending(self):
-        d = _make_bare_desktop()
-        infos = [
-            _make_proc_info(1, "low", mem_rss=10 * 1024 * 1024),
-            _make_proc_info(2, "high", mem_rss=100 * 1024 * 1024),
-            _make_proc_info(3, "mid", mem_rss=50 * 1024 * 1024),
-        ]
-        tab_fn = MagicMock(return_value="table_output")
-        mock_psutil = _make_mock_psutil(infos)
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn):
-            d.list_processes(sort_by="memory")
-        rows = tab_fn.call_args[0][0]
-        pids = [r[0] for r in rows]
-        assert pids == [2, 3, 1], f"Expected [2,3,1] (desc memory), got {pids}"
-
-    def test_sort_by_cpu_descending(self):
-        d = _make_bare_desktop()
-        infos = [
-            _make_proc_info(1, "low", cpu=5.0),
-            _make_proc_info(2, "high", cpu=80.0),
-            _make_proc_info(3, "mid", cpu=30.0),
-        ]
-        tab_fn = MagicMock(return_value="table_output")
-        mock_psutil = _make_mock_psutil(infos)
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn):
-            d.list_processes(sort_by="cpu")
-        rows = tab_fn.call_args[0][0]
-        pids = [r[0] for r in rows]
-        assert pids == [2, 3, 1], f"Expected [2,3,1] (desc cpu), got {pids}"
-
-    def test_sort_by_name_ascending(self):
-        d = _make_bare_desktop()
-        infos = [
-            _make_proc_info(1, "zebra"),
-            _make_proc_info(2, "alpha"),
-            _make_proc_info(3, "monkey"),
-        ]
-        tab_fn = MagicMock(return_value="table_output")
-        mock_psutil = _make_mock_psutil(infos)
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn):
-            d.list_processes(sort_by="name")
-        rows = tab_fn.call_args[0][0]
-        pids = [r[0] for r in rows]
-        assert pids == [2, 3, 1], f"Expected [2,3,1] (asc name), got {pids}"
-
-    def test_limit_positive_respected(self):
-        d = _make_bare_desktop()
-        infos = [_make_proc_info(i, f"proc{i}") for i in range(10)]
-        tab_fn = MagicMock(return_value="table_output")
-        mock_psutil = _make_mock_psutil(infos)
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn):
-            d.list_processes(limit=3)
-        rows = tab_fn.call_args[0][0]
-        assert len(rows) == 3
-
-    def test_limit_negative_clamped_to_one(self):
-        d = _make_bare_desktop()
-        infos = [_make_proc_info(i, f"proc{i}") for i in range(5)]
-        tab_fn = MagicMock(return_value="table_output")
-        mock_psutil = _make_mock_psutil(infos)
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn):
-            d.list_processes(limit=-5)
-        rows = tab_fn.call_args[0][0]
-        assert len(rows) == 1
-
-    def test_limit_zero_clamped_to_one(self):
-        d = _make_bare_desktop()
-        infos = [_make_proc_info(i, f"proc{i}") for i in range(5)]
-        tab_fn = MagicMock(return_value="table_output")
-        mock_psutil = _make_mock_psutil(infos)
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn):
-            d.list_processes(limit=0)
-        rows = tab_fn.call_args[0][0]
-        assert len(rows) == 1
-
-    def test_result_contains_count(self):
-        d = _make_bare_desktop()
-        infos = [_make_proc_info(i, f"p{i}") for i in range(3)]
-        tab_fn = MagicMock(return_value="faked_table")
-        mock_psutil = _make_mock_psutil(infos)
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn):
-            result = d.list_processes()
-        assert "3 shown" in result
-
-    def test_none_name_skips_fuzzy_filter(self):
-        d = _make_bare_desktop()
-        infos = [_make_proc_info(1, "notepad"), _make_proc_info(2, "chrome")]
-        tab_fn = MagicMock(return_value="table_output")
-        mock_fuzz = MagicMock()
-        mock_psutil = _make_mock_psutil(infos)
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn), _inject_thefuzz_fuzz(mock_fuzz):
-            d.list_processes(name=None)
-        # fuzz.partial_ratio must NOT be called when name is None
-        mock_fuzz.partial_ratio.assert_not_called()
-
-    def test_nosuchprocess_and_accessdenied_are_skipped(self):
-        """Processes that raise NoSuchProcess or AccessDenied are silently skipped."""
-        mock_psutil = MagicMock()
-        NoSuch = type("NoSuchProcess", (Exception,), {})
-        AccessDenied = type("AccessDenied", (Exception,), {})
-        mock_psutil.NoSuchProcess = NoSuch
-        mock_psutil.AccessDenied = AccessDenied
-
-        good_proc = MagicMock()
-        good_mem = MagicMock()
-        good_mem.rss = 1024 * 1024
-        good_proc.info = {"pid": 42, "name": "good", "cpu_percent": 0.0, "memory_info": good_mem}
-
-        bad_proc = MagicMock()
-        bad_proc.info = {"pid": 99, "name": "bad", "cpu_percent": 0.0, "memory_info": None}
-        # Accessing bad_proc.info raises the exception during iteration
-        # Simulate: the for loop body raises for this proc
-        # We achieve this by making info a property that raises
-        type(bad_proc).info = property(lambda self: (_ for _ in ()).throw(NoSuch("gone")))
-
-        mock_psutil.process_iter.return_value = [good_proc, bad_proc]
-
-        d = _make_bare_desktop()
-        tab_fn = MagicMock(return_value="table_output")
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn):
-            result = d.list_processes()
-        assert "Processes" in result
-        rows = tab_fn.call_args[0][0]
-        pids = [r[0] for r in rows]
-        assert 42 in pids
-        assert 99 not in pids
-
-    def test_table_headers_correct(self):
-        d = _make_bare_desktop()
-        infos = [_make_proc_info(1, "notepad")]
-        tab_fn = MagicMock(return_value="table_output")
-        mock_psutil = _make_mock_psutil(infos)
-        with _inject_psutil(mock_psutil), _inject_tabulate(tab_fn):
-            d.list_processes()
-        _, kwargs = tab_fn.call_args
-        headers = kwargs.get("headers") or tab_fn.call_args[0][1]
-        assert "PID" in headers
-        assert "Name" in headers
-        assert "CPU%" in headers
-        assert "Memory" in headers
+        d._process.list_processes.return_value = "ok"
+        d.list_processes()
+        d._process.list_processes.assert_called_once_with(name=None, sort_by="memory", limit=20)
 
 
 # ===========================================================================
@@ -462,211 +280,28 @@ class TestListProcesses:
 
 
 class TestKillProcess:
-    """kill_process kills by PID or by name, with optional force mode."""
+    """Desktop.kill_process delegates to ProcessService."""
 
-    def _make_pid_psutil(self, pid, name, *, force_raises=None, term_raises=None):
-        """Build a psutil mock for PID-based kill tests."""
-        mock_psutil = MagicMock()
-        NoSuch = type("NoSuchProcess", (Exception,), {})
-        AccessDenied = type("AccessDenied", (Exception,), {})
-        mock_psutil.NoSuchProcess = NoSuch
-        mock_psutil.AccessDenied = AccessDenied
-
-        proc = MagicMock()
-        proc.name.return_value = name
-        if force_raises:
-            proc.kill.side_effect = force_raises
-        if term_raises:
-            proc.terminate.side_effect = term_raises
-        mock_psutil.Process.return_value = proc
-        return mock_psutil, NoSuch, AccessDenied, proc
-
-    def test_neither_pid_nor_name_returns_error(self):
+    def test_delegates_by_pid(self):
         d = _make_bare_desktop()
-        mock_psutil = MagicMock()
-        mock_psutil.NoSuchProcess = Exception
-        mock_psutil.AccessDenied = Exception
-        with _inject_psutil(mock_psutil):
-            result = d.kill_process(name=None, pid=None)
-        assert "Error" in result
-        assert "pid" in result.lower() or "name" in result.lower()
-
-    def test_kill_by_pid_terminate_called(self):
-        d = _make_bare_desktop()
-        mock_psutil, _, _, proc = self._make_pid_psutil(123, "notepad.exe")
-        with _inject_psutil(mock_psutil):
-            result = d.kill_process(pid=123, force=False)
-        proc.terminate.assert_called_once()
-        proc.kill.assert_not_called()
-        assert "123" in result
-        assert "notepad.exe" in result
-
-    def test_kill_by_pid_force_uses_kill(self):
-        d = _make_bare_desktop()
-        mock_psutil, _, _, proc = self._make_pid_psutil(456, "chrome.exe")
-        with _inject_psutil(mock_psutil):
-            result = d.kill_process(pid=456, force=True)
-        proc.kill.assert_called_once()
-        proc.terminate.assert_not_called()
-        assert "Force killed" in result
-
-    def test_kill_by_pid_no_such_process(self):
-        d = _make_bare_desktop()
-        mock_psutil = MagicMock()
-        NoSuch = type("NoSuchProcess", (Exception,), {})
-        AccessDenied = type("AccessDenied", (Exception,), {})
-        mock_psutil.NoSuchProcess = NoSuch
-        mock_psutil.AccessDenied = AccessDenied
-        mock_psutil.Process.side_effect = NoSuch("gone")
-        with _inject_psutil(mock_psutil):
-            result = d.kill_process(pid=9999)
-        assert "9999" in result
-        assert "No process" in result
-
-    def test_kill_by_pid_access_denied(self):
-        d = _make_bare_desktop()
-        mock_psutil = MagicMock()
-        NoSuch = type("NoSuchProcess", (Exception,), {})
-        AccessDenied = type("AccessDenied", (Exception,), {})
-        mock_psutil.NoSuchProcess = NoSuch
-        mock_psutil.AccessDenied = AccessDenied
-        mock_psutil.Process.side_effect = AccessDenied("denied")
-        with _inject_psutil(mock_psutil):
-            result = d.kill_process(pid=1234)
-        assert "Access denied" in result
-        assert "1234" in result
-
-    def test_kill_by_name_terminates_matching(self):
-        d = _make_bare_desktop()
-        mock_psutil = MagicMock()
-        NoSuch = type("NoSuchProcess", (Exception,), {})
-        AccessDenied = type("AccessDenied", (Exception,), {})
-        mock_psutil.NoSuchProcess = NoSuch
-        mock_psutil.AccessDenied = AccessDenied
-
-        p1 = MagicMock()
-        p1.info = {"pid": 10, "name": "notepad.exe"}
-        p2 = MagicMock()
-        p2.info = {"pid": 20, "name": "chrome.exe"}
-        mock_psutil.process_iter.return_value = [p1, p2]
-
-        with _inject_psutil(mock_psutil):
-            result = d.kill_process(name="notepad.exe", force=False)
-
-        p1.terminate.assert_called_once()
-        p2.terminate.assert_not_called()
-        assert "notepad.exe" in result
+        d._process.kill_process.return_value = "Terminated: notepad.exe (PID 123)"
+        result = d.kill_process(pid=123, force=False)
+        d._process.kill_process.assert_called_once_with(name=None, pid=123, force=False)
         assert "Terminated" in result
 
-    def test_kill_by_name_force_uses_kill(self):
+    def test_delegates_by_name(self):
         d = _make_bare_desktop()
-        mock_psutil = MagicMock()
-        NoSuch = type("NoSuchProcess", (Exception,), {})
-        AccessDenied = type("AccessDenied", (Exception,), {})
-        mock_psutil.NoSuchProcess = NoSuch
-        mock_psutil.AccessDenied = AccessDenied
-
-        p1 = MagicMock()
-        p1.info = {"pid": 11, "name": "target.exe"}
-        mock_psutil.process_iter.return_value = [p1]
-
-        with _inject_psutil(mock_psutil):
-            result = d.kill_process(name="target.exe", force=True)
-
-        p1.kill.assert_called_once()
-        assert "Force killed" in result
-
-    def test_kill_by_name_case_insensitive(self):
-        d = _make_bare_desktop()
-        mock_psutil = MagicMock()
-        NoSuch = type("NoSuchProcess", (Exception,), {})
-        AccessDenied = type("AccessDenied", (Exception,), {})
-        mock_psutil.NoSuchProcess = NoSuch
-        mock_psutil.AccessDenied = AccessDenied
-
-        p1 = MagicMock()
-        p1.info = {"pid": 77, "name": "Notepad.EXE"}
-        mock_psutil.process_iter.return_value = [p1]
-
-        with _inject_psutil(mock_psutil):
-            result = d.kill_process(name="notepad.exe")
-
-        p1.terminate.assert_called_once()
-        assert "Notepad.EXE" in result
-
-    def test_kill_by_name_no_match_returns_no_process_message(self):
-        d = _make_bare_desktop()
-        mock_psutil = MagicMock()
-        NoSuch = type("NoSuchProcess", (Exception,), {})
-        AccessDenied = type("AccessDenied", (Exception,), {})
-        mock_psutil.NoSuchProcess = NoSuch
-        mock_psutil.AccessDenied = AccessDenied
-
-        p1 = MagicMock()
-        p1.info = {"pid": 5, "name": "explorer.exe"}
-        mock_psutil.process_iter.return_value = [p1]
-
-        with _inject_psutil(mock_psutil):
-            result = d.kill_process(name="ghost.exe")
-
-        assert "No process matching" in result
+        d._process.kill_process.return_value = "Terminated: ghost.exe (PID 5)"
+        result = d.kill_process(name="ghost.exe")
+        d._process.kill_process.assert_called_once_with(name="ghost.exe", pid=None, force=False)
         assert "ghost.exe" in result
 
-    def test_kill_by_name_multiple_processes_all_terminated(self):
+    def test_delegates_force(self):
         d = _make_bare_desktop()
-        mock_psutil = MagicMock()
-        NoSuch = type("NoSuchProcess", (Exception,), {})
-        AccessDenied = type("AccessDenied", (Exception,), {})
-        mock_psutil.NoSuchProcess = NoSuch
-        mock_psutil.AccessDenied = AccessDenied
-
-        procs = []
-        for i in range(3):
-            p = MagicMock()
-            p.info = {"pid": 100 + i, "name": "worker.exe"}
-            procs.append(p)
-        mock_psutil.process_iter.return_value = procs
-
-        with _inject_psutil(mock_psutil):
-            result = d.kill_process(name="worker.exe")
-
-        for p in procs:
-            p.terminate.assert_called_once()
-        assert "Terminated" in result
-        assert "worker.exe" in result
-
-    def test_kill_by_name_nosuchprocess_skipped(self):
-        """Processes that disappear mid-iteration are silently skipped."""
-        d = _make_bare_desktop()
-        mock_psutil = MagicMock()
-        NoSuch = type("NoSuchProcess", (Exception,), {})
-        AccessDenied = type("AccessDenied", (Exception,), {})
-        mock_psutil.NoSuchProcess = NoSuch
-        mock_psutil.AccessDenied = AccessDenied
-
-        vanished = MagicMock()
-        vanished.info = {"pid": 55, "name": "target.exe"}
-        vanished.terminate.side_effect = NoSuch("gone")
-
-        surviving = MagicMock()
-        surviving.info = {"pid": 56, "name": "target.exe"}
-
-        mock_psutil.process_iter.return_value = [vanished, surviving]
-
-        with _inject_psutil(mock_psutil):
-            result = d.kill_process(name="target.exe")
-
-        surviving.terminate.assert_called_once()
-        # Only the surviving process appears in the killed list
-        assert "56" in result
-
-    def test_terminate_label_when_not_force(self):
-        d = _make_bare_desktop()
-        mock_psutil, _, _, _ = self._make_pid_psutil(1, "app.exe")
-        with _inject_psutil(mock_psutil):
-            result = d.kill_process(pid=1, force=False)
-        assert "Terminated" in result
-        assert "Force killed" not in result
+        d._process.kill_process.return_value = "Force killed: app.exe (PID 1)"
+        result = d.kill_process(pid=1, force=True)
+        d._process.kill_process.assert_called_once_with(name=None, pid=1, force=True)
+        assert "Force killed" in result
 
 
 # ===========================================================================
@@ -944,12 +579,8 @@ class TestGetStateTreeException:
         with (
             patch(self._UIA),
             patch(
-                "windows_mcp.desktop.service.get_current_desktop",
-                return_value={"id": "0", "name": "Default"},
-            ),
-            patch(
-                "windows_mcp.desktop.service.get_all_desktops",
-                return_value=[{"id": "0", "name": "Default"}],
+                "windows_mcp.desktop.service.get_desktop_info",
+                return_value=({"id": "0", "name": "Default"}, [{"id": "0", "name": "Default"}]),
             ),
         ):
             state = d.get_state(use_vision=False)
@@ -967,12 +598,8 @@ class TestGetStateTreeException:
         with (
             patch(self._UIA),
             patch(
-                "windows_mcp.desktop.service.get_current_desktop",
-                return_value={"id": "0", "name": "Default"},
-            ),
-            patch(
-                "windows_mcp.desktop.service.get_all_desktops",
-                return_value=[{"id": "0", "name": "Default"}],
+                "windows_mcp.desktop.service.get_desktop_info",
+                return_value=({"id": "0", "name": "Default"}, [{"id": "0", "name": "Default"}]),
             ),
         ):
             try:
@@ -990,12 +617,8 @@ class TestGetStateTreeException:
         with (
             patch(self._UIA),
             patch(
-                "windows_mcp.desktop.service.get_current_desktop",
-                return_value={"id": "0", "name": "Default"},
-            ),
-            patch(
-                "windows_mcp.desktop.service.get_all_desktops",
-                return_value=[{"id": "0", "name": "Default"}],
+                "windows_mcp.desktop.service.get_desktop_info",
+                return_value=({"id": "0", "name": "Default"}, [{"id": "0", "name": "Default"}]),
             ),
         ):
             state = d.get_state(use_vision=False)
@@ -1013,12 +636,8 @@ class TestGetStateTreeException:
         with (
             patch(self._UIA),
             patch(
-                "windows_mcp.desktop.service.get_current_desktop",
-                return_value={"id": "0", "name": "Default"},
-            ),
-            patch(
-                "windows_mcp.desktop.service.get_all_desktops",
-                return_value=[{"id": "0", "name": "Default"}],
+                "windows_mcp.desktop.service.get_desktop_info",
+                return_value=({"id": "0", "name": "Default"}, [{"id": "0", "name": "Default"}]),
             ),
         ):
             state = d.get_state(use_vision=False)
@@ -1035,12 +654,8 @@ class TestGetStateTreeException:
         with (
             patch(self._UIA),
             patch(
-                "windows_mcp.desktop.service.get_current_desktop",
-                return_value={"id": "0", "name": "Default"},
-            ),
-            patch(
-                "windows_mcp.desktop.service.get_all_desktops",
-                return_value=[{"id": "0", "name": "Default"}],
+                "windows_mcp.desktop.service.get_desktop_info",
+                return_value=({"id": "0", "name": "Default"}, [{"id": "0", "name": "Default"}]),
             ),
         ):
             state = d.get_state(use_vision=False)
@@ -1244,11 +859,7 @@ class TestGetStateVdmFallback:
         with (
             patch(self._UIA),
             patch(
-                "windows_mcp.desktop.service.get_current_desktop",
-                side_effect=RuntimeError("VDM not available"),
-            ),
-            patch(
-                "windows_mcp.desktop.service.get_all_desktops",
+                "windows_mcp.desktop.service.get_desktop_info",
                 side_effect=RuntimeError("VDM not available"),
             ),
         ):
