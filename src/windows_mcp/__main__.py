@@ -6,7 +6,7 @@ from fastmcp.server.proxy import ProxyClient
 from contextlib import asynccontextmanager
 from fastmcp.utilities.types import Image
 from dataclasses import dataclass, field
-from windows_mcp.auth import AuthClient
+from windows_mcp.auth import AuthClient, AuthKeyManager, BearerAuthMiddleware
 from mcp.types import ToolAnnotations
 from typing import Literal
 from fastmcp import FastMCP, Context
@@ -15,8 +15,10 @@ from dotenv import load_dotenv
 from textwrap import dedent
 import pyautogui as pg
 from enum import Enum
+import logging
 import asyncio
 import click
+import sys
 import os
 import io
 
@@ -30,7 +32,7 @@ class Config:
 
 MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT = 1920, 1080
 pg.FAILSAFE = False
-pg.PAUSE = 1.0
+pg.PAUSE = 0.05
 
 desktop: Desktop | None = None
 watchdog: WatchDog | None = None
@@ -84,7 +86,7 @@ mcp = FastMCP(name="windows-mcp", instructions=instructions, lifespan=lifespan)
 @with_analytics(analytics, "App-Tool")
 def app_tool(mode:Literal['launch','resize','switch']='launch',name:str|None=None,window_loc:list[int]|None=None,window_size:list[int]|None=None, ctx: Context = None):
     return desktop.app(mode,name,window_loc,window_size)
-    
+
 @mcp.tool(
     name="Shell",
     description="A comprehensive system tool for executing any PowerShell commands. Use it to navigate the file system, manage files and processes, and execute system-level operations. Capable of accessing web content (e.g., via Invoke-WebRequest), interacting with network resources, and performing complex administrative tasks. This tool provides full access to the underlying operating system capabilities, making it the primary interface for system automation, scripting, and deep system interaction.",
@@ -191,21 +193,21 @@ def state_tool(use_vision:bool|str=False,use_dom:bool|str=False, ctx: Context = 
     try:
         use_vision = use_vision is True or (isinstance(use_vision, str) and use_vision.lower() == 'true')
         use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == 'true')
-        
+
         # Calculate scale factor to cap resolution at 1080p (1920x1080)
         scale_width = MAX_IMAGE_WIDTH / screen_size.width if screen_size.width > MAX_IMAGE_WIDTH else 1.0
         scale_height = MAX_IMAGE_HEIGHT / screen_size.height if screen_size.height > MAX_IMAGE_HEIGHT else 1.0
         scale = min(scale_width, scale_height)
-        
+
         desktop_state=desktop.get_state(use_vision=use_vision,use_dom=use_dom,as_bytes=False,scale=scale)
-        
+
         interactive_elements=desktop_state.tree_state.interactive_elements_to_string()
         scrollable_elements=desktop_state.tree_state.scrollable_elements_to_string()
         windows=desktop_state.windows_to_string()
         active_window=desktop_state.active_window_to_string()
         active_desktop=desktop_state.active_desktop_to_string()
         all_desktops=desktop_state.desktops_to_string()
-        
+
         # Convert screenshot to bytes for vision response
         screenshot_bytes = None
         if use_vision and desktop_state.screenshot is not None:
@@ -215,7 +217,7 @@ def state_tool(use_vision:bool|str=False,use_dom:bool|str=False, ctx: Context = 
             buffered.close()
     except Exception as e:
         return [f'Error capturing desktop state: {str(e)}. Please try again.']
-    
+
     return [dedent(f'''
     Active Desktop:
     {active_desktop}
@@ -641,7 +643,7 @@ class Mode(Enum):
 @click.option(
     "--transport",
     help="The transport layer used by the MCP server.",
-    type=click.Choice([Transport.STDIO.value,Transport.SSE.value,Transport.STREAMABLE_HTTP.value]),
+    type=click.Choice([Transport.STDIO.value, Transport.SSE.value, Transport.STREAMABLE_HTTP.value]),
     default='stdio'
 )
 @click.option(
@@ -658,20 +660,78 @@ class Mode(Enum):
     type=int,
     show_default=True,
 )
+@click.option(
+    "--api-key",
+    help="API key for authenticating HTTP/SSE clients. If not set, loads from DPAPI store.",
+    default=None,
+    type=str,
+)
+@click.option(
+    "--generate-key",
+    help="Generate a new API key, store it encrypted (DPAPI), and exit.",
+    is_flag=True,
+    default=False,
+)
+@click.option(
+    "--rotate-key",
+    help="Rotate the stored API key and exit.",
+    is_flag=True,
+    default=False,
+)
+def main(transport, host, port, api_key, generate_key, rotate_key):
+    logger = logging.getLogger("windows_mcp")
 
-def main(transport, host, port):
-    config=Config(
-        mode=os.getenv("MODE",Mode.LOCAL.value).lower(),
-        sandbox_id=os.getenv("SANDBOX_ID",''),
-        api_key=os.getenv("API_KEY",'')
+    # Handle key management commands
+    if generate_key:
+        key = AuthKeyManager.generate_key()
+        click.echo(f"API key generated and encrypted with DPAPI.\nKey: {key}")
+        click.echo("Save this key -- it will not be shown again.")
+        click.echo("Use: windows-mcp --transport sse --api-key <key>")
+        sys.exit(0)
+
+    if rotate_key:
+        key = AuthKeyManager.rotate_key()
+        click.echo(f"API key rotated.\nNew key: {key}")
+        click.echo("Update your client configurations with the new key.")
+        sys.exit(0)
+
+    # Resolve API key for HTTP transports
+    resolved_key = api_key
+    if transport in (Transport.SSE.value, Transport.STREAMABLE_HTTP.value):
+        if not resolved_key:
+            resolved_key = AuthKeyManager.load_key()
+
+        if resolved_key:
+            mcp.add_middleware(BearerAuthMiddleware(resolved_key))
+            logger.info("Bearer token authentication enabled for %s transport", transport)
+        else:
+            # Safety: no auth configured -- bind to localhost only
+            if host != "localhost" and host != "127.0.0.1":
+                logger.warning(
+                    "No API key configured. Refusing to bind to %s. "
+                    "Use --api-key or --generate-key, or bind to localhost.",
+                    host,
+                )
+                click.echo(
+                    f"Error: Cannot bind to {host} without authentication.\n"
+                    "Run 'windows-mcp --generate-key' first, or use --host localhost.",
+                    err=True,
+                )
+                sys.exit(1)
+            logger.warning("No API key configured. Server accessible without authentication.")
+
+    config = Config(
+        mode=os.getenv("MODE", Mode.LOCAL.value).lower(),
+        sandbox_id=os.getenv("SANDBOX_ID", ''),
+        api_key=os.getenv("API_KEY", ''),
     )
     match config.mode:
         case Mode.LOCAL.value:
             match transport:
                 case Transport.STDIO.value:
-                    mcp.run(transport=Transport.STDIO.value,show_banner=False)
-                case Transport.SSE.value|Transport.STREAMABLE_HTTP.value:
-                    mcp.run(transport=transport,host=host,port=port,show_banner=False)
+                    mcp.run(transport=Transport.STDIO.value, show_banner=False)
+                case Transport.SSE.value | Transport.STREAMABLE_HTTP.value:
+                    mcp.run(transport=transport, host=host, port=port, show_banner=False)
                 case _:
                     raise ValueError(f"Invalid transport: {transport}")
         case Mode.REMOTE.value:
@@ -679,15 +739,15 @@ def main(transport, host, port):
                 raise ValueError("SANDBOX_ID is required for MODE: remote")
             if not config.api_key:
                 raise ValueError("API_KEY is required for MODE: remote")
-            client=AuthClient(api_key=config.api_key,sandbox_id=config.sandbox_id)
+            client = AuthClient(api_key=config.api_key, sandbox_id=config.sandbox_id)
             client.authenticate()
-            backend=StreamableHttpTransport(url=client.proxy_url,headers=client.proxy_headers)
-            proxy_mcp=FastMCP.as_proxy(ProxyClient(backend),name="windows-mcp")
+            backend = StreamableHttpTransport(url=client.proxy_url, headers=client.proxy_headers)
+            proxy_mcp = FastMCP.as_proxy(ProxyClient(backend), name="windows-mcp")
             match transport:
                 case Transport.STDIO.value:
-                    proxy_mcp.run(transport=Transport.STDIO.value,show_banner=False)
-                case Transport.SSE.value|Transport.STREAMABLE_HTTP.value:
-                    proxy_mcp.run(transport=transport,host=host,port=port,show_banner=False)
+                    proxy_mcp.run(transport=Transport.STDIO.value, show_banner=False)
+                case Transport.SSE.value | Transport.STREAMABLE_HTTP.value:
+                    proxy_mcp.run(transport=transport, host=host, port=port, show_banner=False)
                 case _:
                     raise ValueError(f"Invalid transport: {transport}")
         case _:

@@ -34,37 +34,81 @@ class TestPsQuote:
         assert result == "'HKCU:\\Software\\Test'"
 
 
+class TestParseRegPath:
+    def test_hkcu_abbreviation(self, desktop):
+        with patch("windows_mcp.desktop.service.winreg") as mock_winreg:
+            mock_winreg.HKEY_CURRENT_USER = 0x80000001
+            hive, subkey = desktop._parse_reg_path("HKCU:\\Software\\Test")
+            assert hive == 0x80000001
+            assert subkey == "Software\\Test"
+
+    def test_hklm_full_name(self, desktop):
+        with patch("windows_mcp.desktop.service.winreg") as mock_winreg:
+            mock_winreg.HKEY_LOCAL_MACHINE = 0x80000002
+            hive, subkey = desktop._parse_reg_path("HKEY_LOCAL_MACHINE\\SOFTWARE\\Test")
+            assert hive == 0x80000002
+            assert subkey == "SOFTWARE\\Test"
+
+    def test_unknown_hive_raises(self, desktop):
+        with pytest.raises(ValueError, match="Unknown registry hive"):
+            desktop._parse_reg_path("HKBOGUS:\\Software\\Test")
+
+    def test_no_subkey(self, desktop):
+        with patch("windows_mcp.desktop.service.winreg") as mock_winreg:
+            mock_winreg.HKEY_CURRENT_USER = 0x80000001
+            hive, subkey = desktop._parse_reg_path("HKCU:")
+            assert subkey == ""
+
+
 class TestRegistryGet:
-    def test_success(self, desktop):
-        desktop.execute_command.return_value = ("42\n", 0)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_success(self, mock_winreg, desktop):
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+        mock_key = MagicMock()
+        mock_winreg.OpenKey.return_value.__enter__ = MagicMock(return_value=mock_key)
+        mock_winreg.OpenKey.return_value.__exit__ = MagicMock(return_value=False)
+        mock_winreg.QueryValueEx.return_value = (42, 1)
+
         result = desktop.registry_get(path="HKCU:\\Software\\Test", name="MyValue")
         assert 'MyValue' in result
         assert '42' in result
         assert 'Error' not in result
 
-    def test_failure(self, desktop):
-        desktop.execute_command.return_value = ("Property not found", 1)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_failure(self, mock_winreg, desktop):
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+        mock_winreg.OpenKey.side_effect = OSError("Property not found")
+
         result = desktop.registry_get(path="HKCU:\\Software\\Test", name="Missing")
         assert 'Error reading registry' in result
-        assert 'Property not found' in result
 
-    def test_command_uses_ps_quote(self, desktop):
-        desktop.execute_command.return_value = ("val", 0)
-        desktop.registry_get(path="HKCU:\\Software\\O'Reilly", name="key's")
-        cmd = desktop.execute_command.call_args[0][0]
-        assert "HKCU:\\Software\\O''Reilly" in cmd
-        assert "key''s" in cmd
+    def test_invalid_hive(self, desktop):
+        result = desktop.registry_get(path="HKBOGUS:\\Software\\Test", name="Key")
+        assert 'Error reading registry' in result
 
 
 class TestRegistrySet:
-    def test_success(self, desktop):
-        desktop.execute_command.return_value = ("", 0)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_success(self, mock_winreg, desktop):
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+        mock_winreg.KEY_SET_VALUE = 0x0002
+        mock_winreg.REG_SZ = 1
+        mock_key = MagicMock()
+        mock_winreg.OpenKey.return_value.__enter__ = MagicMock(return_value=mock_key)
+        mock_winreg.OpenKey.return_value.__exit__ = MagicMock(return_value=False)
+
         result = desktop.registry_set(path="HKCU:\\Software\\Test", name="MyKey", value="hello")
         assert 'set to' in result
         assert '"hello"' in result
 
-    def test_failure(self, desktop):
-        desktop.execute_command.return_value = ("Access denied", 1)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_failure(self, mock_winreg, desktop):
+        mock_winreg.HKEY_LOCAL_MACHINE = 0x80000002
+        mock_winreg.KEY_SET_VALUE = 0x0002
+        mock_winreg.REG_SZ = 1
+        mock_winreg.CreateKey.return_value = None
+        mock_winreg.OpenKey.side_effect = OSError("Access denied")
+
         result = desktop.registry_set(path="HKLM:\\Software\\Test", name="Key", value="val")
         assert 'Error writing registry' in result
 
@@ -72,65 +116,120 @@ class TestRegistrySet:
         result = desktop.registry_set(path="HKCU:\\Test", name="Key", value="val", reg_type="Invalid")
         assert 'Error: invalid registry type' in result
         assert 'Invalid' in result
-        desktop.execute_command.assert_not_called()
 
-    def test_all_valid_types(self, desktop):
-        desktop.execute_command.return_value = ("", 0)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_all_valid_types(self, mock_winreg, desktop):
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+        mock_winreg.KEY_SET_VALUE = 0x0002
+        mock_winreg.REG_SZ = 1
+        mock_winreg.REG_EXPAND_SZ = 2
+        mock_winreg.REG_BINARY = 3
+        mock_winreg.REG_DWORD = 4
+        mock_winreg.REG_MULTI_SZ = 7
+        mock_winreg.REG_QWORD = 11
+        mock_key = MagicMock()
+        mock_winreg.OpenKey.return_value.__enter__ = MagicMock(return_value=mock_key)
+        mock_winreg.OpenKey.return_value.__exit__ = MagicMock(return_value=False)
+
         for reg_type in ("String", "ExpandString", "Binary", "DWord", "MultiString", "QWord"):
-            result = desktop.registry_set(path="HKCU:\\Test", name="K", value="V", reg_type=reg_type)
-            assert 'Error' not in result
+            # Use valid values for each type
+            value = "0" if reg_type in ("DWord", "QWord") else "00" if reg_type == "Binary" else "V"
+            result = desktop.registry_set(
+                path="HKCU:\\Test", name="K", value=value, reg_type=reg_type
+            )
+            assert 'Error' not in result, f"Failed for type {reg_type}: {result}"
 
-    def test_creates_key_if_missing(self, desktop):
-        desktop.execute_command.return_value = ("", 0)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_creates_key(self, mock_winreg, desktop):
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+        mock_winreg.KEY_SET_VALUE = 0x0002
+        mock_winreg.REG_SZ = 1
+        mock_key = MagicMock()
+        mock_winreg.OpenKey.return_value.__enter__ = MagicMock(return_value=mock_key)
+        mock_winreg.OpenKey.return_value.__exit__ = MagicMock(return_value=False)
+
         desktop.registry_set(path="HKCU:\\Software\\NewKey", name="Val", value="1")
-        cmd = desktop.execute_command.call_args[0][0]
-        assert "New-Item" in cmd
-        assert "Test-Path" in cmd
+        mock_winreg.CreateKey.assert_called_once()
 
 
 class TestRegistryDelete:
-    def test_delete_value(self, desktop):
-        desktop.execute_command.return_value = ("", 0)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_delete_value(self, mock_winreg, desktop):
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+        mock_winreg.KEY_SET_VALUE = 0x0002
+        mock_key = MagicMock()
+        mock_winreg.OpenKey.return_value.__enter__ = MagicMock(return_value=mock_key)
+        mock_winreg.OpenKey.return_value.__exit__ = MagicMock(return_value=False)
+
         result = desktop.registry_delete(path="HKCU:\\Software\\Test", name="MyValue")
         assert 'deleted' in result
         assert '"MyValue"' in result
-        cmd = desktop.execute_command.call_args[0][0]
-        assert "Remove-ItemProperty" in cmd
 
-    def test_delete_key(self, desktop):
-        desktop.execute_command.return_value = ("", 0)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_delete_key(self, mock_winreg, desktop):
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+
         result = desktop.registry_delete(path="HKCU:\\Software\\Test", name=None)
         assert 'key' in result.lower()
         assert 'deleted' in result
-        cmd = desktop.execute_command.call_args[0][0]
-        assert "Remove-Item" in cmd
-        assert "-Recurse" in cmd
+        mock_winreg.DeleteKey.assert_called_once()
 
-    def test_delete_value_failure(self, desktop):
-        desktop.execute_command.return_value = ("Not found", 1)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_delete_value_failure(self, mock_winreg, desktop):
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+        mock_winreg.KEY_SET_VALUE = 0x0002
+        mock_winreg.OpenKey.side_effect = OSError("Not found")
+
         result = desktop.registry_delete(path="HKCU:\\Software\\Test", name="Missing")
         assert 'Error deleting registry value' in result
 
-    def test_delete_key_failure(self, desktop):
-        desktop.execute_command.return_value = ("Access denied", 1)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_delete_key_failure(self, mock_winreg, desktop):
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+        mock_winreg.DeleteKey.side_effect = OSError("Access denied")
+
         result = desktop.registry_delete(path="HKCU:\\Software\\Protected")
         assert 'Error deleting registry key' in result
 
 
 class TestRegistryList:
-    def test_success(self, desktop):
-        desktop.execute_command.return_value = ("Values:\nMyKey : hello\n\nSub-Keys:\nChild1", 0)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_success(self, mock_winreg, desktop):
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+        mock_key = MagicMock()
+        mock_winreg.OpenKey.return_value.__enter__ = MagicMock(return_value=mock_key)
+        mock_winreg.OpenKey.return_value.__exit__ = MagicMock(return_value=False)
+        # EnumValue returns (name, data, type) then raises OSError
+        mock_winreg.EnumValue.side_effect = [
+            ("MyKey", "hello", 1),
+            OSError("no more"),
+        ]
+        mock_winreg.EnumKey.side_effect = [
+            "Child1",
+            OSError("no more"),
+        ]
+
         result = desktop.registry_list(path="HKCU:\\Software\\Test")
         assert 'MyKey' in result
         assert 'hello' in result
         assert 'Child1' in result
 
-    def test_failure(self, desktop):
-        desktop.execute_command.return_value = ("Path not found", 1)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_failure(self, mock_winreg, desktop):
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+        mock_winreg.OpenKey.side_effect = OSError("Path not found")
+
         result = desktop.registry_list(path="HKCU:\\Software\\Missing")
         assert 'Error listing registry' in result
 
-    def test_empty(self, desktop):
-        desktop.execute_command.return_value = ("No values or sub-keys found.", 0)
+    @patch("windows_mcp.desktop.service.winreg")
+    def test_empty(self, mock_winreg, desktop):
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+        mock_key = MagicMock()
+        mock_winreg.OpenKey.return_value.__enter__ = MagicMock(return_value=mock_key)
+        mock_winreg.OpenKey.return_value.__exit__ = MagicMock(return_value=False)
+        mock_winreg.EnumValue.side_effect = OSError("no more")
+        mock_winreg.EnumKey.side_effect = OSError("no more")
+
         result = desktop.registry_list(path="HKCU:\\Software\\Empty")
         assert 'No values or sub-keys found' in result

@@ -6,7 +6,6 @@ from windows_mcp.vdm.core import (
 from windows_mcp.desktop.views import DesktopState, Window, Browser, Status, Size
 from windows_mcp.desktop.config import PROCESS_PER_MONITOR_DPI_AWARE
 from windows_mcp.tree.views import BoundingBox, TreeElementNode
-from concurrent.futures import ThreadPoolExecutor
 from PIL import ImageGrab, ImageFont, ImageDraw, Image
 from windows_mcp.tree.service import Tree
 from locale import getpreferredencoding
@@ -22,6 +21,7 @@ import win32gui
 import win32con
 import requests
 import logging
+import winreg
 import base64
 import ctypes
 import csv
@@ -42,7 +42,7 @@ import windows_mcp.uia as uia  # noqa: E402
 import pyautogui as pg  # noqa: E402
 
 pg.FAILSAFE = False
-pg.PAUSE = 1.0
+pg.PAUSE = 0.05
 
 
 class Desktop:
@@ -245,10 +245,16 @@ class Desktop:
             return False
 
     def get_default_language(self) -> str:
-        command = "Get-Culture | Select-Object Name,DisplayName | ConvertTo-Csv -NoTypeInformation"
-        response, _ = self.execute_command(command)
-        reader = csv.DictReader(io.StringIO(response))
-        return "".join([row.get("DisplayName") for row in reader])
+        import locale
+
+        try:
+            # Returns e.g. ('en_US', 'UTF-8') or ('English_United States', '1252')
+            lang, _ = locale.getlocale()
+            if lang:
+                return lang.replace("_", " ")
+        except Exception:
+            pass
+        return "Unknown"
 
     def resize_app(
         self, size: tuple[int, int] = None, loc: tuple[int, int] = None
@@ -778,22 +784,31 @@ class Desktop:
         return element
 
     def get_windows_version(self) -> str:
-        response, status = self.execute_command("(Get-CimInstance Win32_OperatingSystem).Caption")
-        if status == 0:
-            return response.strip()
-        return "Windows"
+        import platform
+
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+            ) as key:
+                product_name = winreg.QueryValueEx(key, "ProductName")[0]
+                return product_name
+        except OSError:
+            return f"Windows {platform.release()}"
 
     def get_user_account_type(self) -> str:
-        response, status = self.execute_command(
-            "(Get-LocalUser -Name $env:USERNAME).PrincipalSource"
-        )
-        return (
-            "Local Account"
-            if response.strip() == "Local"
-            else "Microsoft Account"
-            if status == 0
-            else "Local Account"
-        )
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI",
+            ) as key:
+                last_user = winreg.QueryValueEx(key, "LastLoggedOnDisplayName")[0]
+                # Microsoft accounts typically show email-style display
+                if "@" in last_user:
+                    return "Microsoft Account"
+        except OSError:
+            pass
+        return "Local Account"
 
     def get_dpi_scaling(self):
         try:
@@ -871,9 +886,8 @@ class Desktop:
                 font=font,
             )
 
-        # Draw annotations in parallel
-        with ThreadPoolExecutor() as executor:
-            executor.map(draw_annotation, range(len(nodes)), nodes)
+        for label, node in enumerate(nodes):
+            draw_annotation(label, node)
         return padded_screenshot
 
     def send_notification(self, title: str, message: str) -> str:
@@ -1019,62 +1033,146 @@ class Desktop:
   Network: ↑ {round(net.bytes_sent / 1024**2, 1)} MB sent, ↓ {round(net.bytes_recv / 1024**2, 1)} MB received
   Uptime: {uptime_str} (booted {boot.strftime("%Y-%m-%d %H:%M")})""")
 
+    _REG_HIVE_MAP = {
+        "HKCU": "HKEY_CURRENT_USER",
+        "HKEY_CURRENT_USER": "HKEY_CURRENT_USER",
+        "HKLM": "HKEY_LOCAL_MACHINE",
+        "HKEY_LOCAL_MACHINE": "HKEY_LOCAL_MACHINE",
+        "HKCR": "HKEY_CLASSES_ROOT",
+        "HKEY_CLASSES_ROOT": "HKEY_CLASSES_ROOT",
+        "HKU": "HKEY_USERS",
+        "HKEY_USERS": "HKEY_USERS",
+        "HKCC": "HKEY_CURRENT_CONFIG",
+        "HKEY_CURRENT_CONFIG": "HKEY_CURRENT_CONFIG",
+    }
+
+    _REG_TYPE_MAP = {
+        "String": "REG_SZ",
+        "ExpandString": "REG_EXPAND_SZ",
+        "Binary": "REG_BINARY",
+        "DWord": "REG_DWORD",
+        "QWord": "REG_QWORD",
+        "MultiString": "REG_MULTI_SZ",
+    }
+
+    def _parse_reg_path(self, path: str) -> tuple:
+        """Parse a PowerShell-style registry path into (hive_key, subkey).
+
+        Accepts paths like 'HKCU:\\Software\\MyApp' or 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Key'.
+        """
+
+        # Normalize separators: remove trailing colon from hive abbreviation
+        normalized = path.replace(":/", "\\").replace(":\\", "\\").replace("/", "\\")
+        # Handle bare hive with trailing colon (e.g., "HKCU:")
+        normalized = normalized.rstrip(":")
+        parts = normalized.split("\\", 1)
+        hive_name = parts[0].upper()
+        subkey = parts[1] if len(parts) > 1 else ""
+
+        hive_full = self._REG_HIVE_MAP.get(hive_name)
+        if not hive_full:
+            raise ValueError(f"Unknown registry hive: {parts[0]}")
+
+        hive_key = getattr(winreg, hive_full)
+        return hive_key, subkey
+
     def registry_get(self, path: str, name: str) -> str:
-        q_path = self._ps_quote(path)
-        q_name = self._ps_quote(name)
-        command = f"Get-ItemProperty -Path {q_path} -Name {q_name} | Select-Object -ExpandProperty {q_name}"
-        response, status = self.execute_command(command)
-        if status != 0:
-            return f'Error reading registry: {response.strip()}'
-        return f'Registry value [{path}] "{name}" = {response.strip()}'
+
+        try:
+            hive, subkey = self._parse_reg_path(path)
+            with winreg.OpenKey(hive, subkey) as key:
+                value, _ = winreg.QueryValueEx(key, name)
+                return f'Registry value [{path}] "{name}" = {value}'
+        except OSError as e:
+            return f"Error reading registry: {e}"
+        except ValueError as e:
+            return f"Error reading registry: {e}"
 
     def registry_set(self, path: str, name: str, value: str, reg_type: str = 'String') -> str:
-        q_path = self._ps_quote(path)
-        q_name = self._ps_quote(name)
-        q_value = self._ps_quote(value)
+
         allowed_types = {"String", "ExpandString", "Binary", "DWord", "MultiString", "QWord"}
         if reg_type not in allowed_types:
             return f"Error: invalid registry type '{reg_type}'. Allowed: {', '.join(sorted(allowed_types))}"
-        command = (
-            f"if (-not (Test-Path {q_path})) {{ New-Item -Path {q_path} -Force | Out-Null }}; "
-            f"Set-ItemProperty -Path {q_path} -Name {q_name} -Value {q_value} -Type {reg_type} -Force"
-        )
-        response, status = self.execute_command(command)
-        if status != 0:
-            return f'Error writing registry: {response.strip()}'
-        return f'Registry value [{path}] "{name}" set to "{value}" (type: {reg_type}).'
+
+        type_const_name = self._REG_TYPE_MAP[reg_type]
+        reg_type_const = getattr(winreg, type_const_name)
+
+        # Convert value based on type
+        if reg_type in ("DWord", "QWord"):
+            typed_value = int(value)
+        elif reg_type == "Binary":
+            typed_value = bytes.fromhex(value)
+        elif reg_type == "MultiString":
+            typed_value = value.split("\\0")
+        else:
+            typed_value = value
+
+        try:
+            hive, subkey = self._parse_reg_path(path)
+            winreg.CreateKey(hive, subkey)
+            with winreg.OpenKey(hive, subkey, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, name, 0, reg_type_const, typed_value)
+            return f'Registry value [{path}] "{name}" set to "{value}" (type: {reg_type}).'
+        except OSError as e:
+            return f"Error writing registry: {e}"
+        except ValueError as e:
+            return f"Error writing registry: {e}"
 
     def registry_delete(self, path: str, name: str | None = None) -> str:
-        q_path = self._ps_quote(path)
-        if name:
-            q_name = self._ps_quote(name)
-            command = f"Remove-ItemProperty -Path {q_path} -Name {q_name} -Force"
-            response, status = self.execute_command(command)
-            if status != 0:
-                return f'Error deleting registry value: {response.strip()}'
-            return f'Registry value [{path}] "{name}" deleted.'
-        else:
-            command = f"Remove-Item -Path {q_path} -Recurse -Force"
-            response, status = self.execute_command(command)
-            if status != 0:
-                return f'Error deleting registry key: {response.strip()}'
-            return f'Registry key [{path}] deleted.'
+
+        try:
+            hive, subkey = self._parse_reg_path(path)
+            if name:
+                with winreg.OpenKey(hive, subkey, 0, winreg.KEY_SET_VALUE) as key:
+                    winreg.DeleteValue(key, name)
+                return f'Registry value [{path}] "{name}" deleted.'
+            else:
+                winreg.DeleteKey(hive, subkey)
+                return f'Registry key [{path}] deleted.'
+        except OSError as e:
+            return f"Error deleting registry {'value' if name else 'key'}: {e}"
+        except ValueError as e:
+            return f"Error deleting registry: {e}"
 
     def registry_list(self, path: str) -> str:
-        q_path = self._ps_quote(path)
-        command = (
-            f"$values = (Get-ItemProperty -Path {q_path} -ErrorAction Stop | "
-            f"Select-Object * -ExcludeProperty PS* | Format-List | Out-String).Trim(); "
-            f"$subkeys = (Get-ChildItem -Path {q_path} -ErrorAction SilentlyContinue | "
-            f"Select-Object -ExpandProperty PSChildName) -join \"`n\"; "
-            f"if ($values) {{ Write-Output \"Values:`n$values\" }}; "
-            f"if ($subkeys) {{ Write-Output \"`nSub-Keys:`n$subkeys\" }}; "
-            f"if (-not $values -and -not $subkeys) {{ Write-Output 'No values or sub-keys found.' }}"
-        )
-        response, status = self.execute_command(command)
-        if status != 0:
-            return f'Error listing registry: {response.strip()}'
-        return f'Registry key [{path}]:\n{response.strip()}'
+
+        try:
+            hive, subkey = self._parse_reg_path(path)
+            with winreg.OpenKey(hive, subkey) as key:
+                # Enumerate values
+                values = []
+                i = 0
+                while True:
+                    try:
+                        vname, vdata, vtype = winreg.EnumValue(key, i)
+                        values.append(f"  {vname} = {vdata}")
+                        i += 1
+                    except OSError:
+                        break
+
+                # Enumerate sub-keys
+                subkeys = []
+                i = 0
+                while True:
+                    try:
+                        sk_name = winreg.EnumKey(key, i)
+                        subkeys.append(sk_name)
+                        i += 1
+                    except OSError:
+                        break
+
+            parts = []
+            if values:
+                parts.append("Values:\n" + "\n".join(values))
+            if subkeys:
+                parts.append("Sub-Keys:\n" + "\n".join(f"  {sk}" for sk in subkeys))
+            if not parts:
+                parts.append("No values or sub-keys found.")
+            return f"Registry key [{path}]:\n" + "\n\n".join(parts)
+        except OSError as e:
+            return f"Error listing registry: {e}"
+        except ValueError as e:
+            return f"Error listing registry: {e}"
 
     @contextmanager
     def auto_minimize(self):
