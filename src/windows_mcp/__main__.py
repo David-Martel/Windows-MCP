@@ -53,6 +53,21 @@ def _coerce_bool(value: bool | str, default: bool = False) -> bool:
         return value.lower() == "true"
     return default
 
+
+def _validate_loc(loc: list, *, label: str = "loc") -> tuple[int, int]:
+    """Validate and extract (x, y) integer coordinates from a list.
+
+    MCP clients may send floats (from JSON) or strings; this coerces
+    to int and validates the list length.
+    """
+    if not isinstance(loc, (list, tuple)) or len(loc) != 2:
+        raise ValueError(f"{label} must be [x, y], got {loc!r}")
+    try:
+        return int(loc[0]), int(loc[1])
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"{label} values must be numeric, got {loc!r}") from e
+
+
 desktop: Desktop | None = None
 watchdog: WatchDog | None = None
 analytics: PostHogAnalytics | None = None
@@ -231,9 +246,7 @@ def state_tool(use_vision: bool | str = False, use_dom: bool | str = False, ctx:
         # Calculate scale factor to cap resolution at 1080p (1920x1080)
         if screen_size is not None:
             scale_width = (
-                MAX_IMAGE_WIDTH / screen_size.width
-                if screen_size.width > MAX_IMAGE_WIDTH
-                else 1.0
+                MAX_IMAGE_WIDTH / screen_size.width if screen_size.width > MAX_IMAGE_WIDTH else 1.0
             )
             scale_height = (
                 MAX_IMAGE_HEIGHT / screen_size.height
@@ -305,10 +318,8 @@ def click_tool(
     clicks: int = 1,
     ctx: Context = None,
 ) -> str:
-    if len(loc) != 2:
-        raise ValueError("Location must be a list of exactly 2 integers [x, y]")
-    x, y = loc[0], loc[1]
-    desktop.click(loc=loc, button=button, clicks=clicks)
+    x, y = _validate_loc(loc)
+    desktop.click(loc=(x, y), button=button, clicks=clicks)
     num_clicks = {0: "Hover", 1: "Single", 2: "Double"}
     return f"{num_clicks.get(clicks, clicks)} {button} clicked at ({x},{y})."
 
@@ -333,13 +344,11 @@ def type_tool(
     press_enter: bool | str = False,
     ctx: Context = None,
 ) -> str:
-    if len(loc) != 2:
-        raise ValueError("Location must be a list of exactly 2 integers [x, y]")
     clear = _coerce_bool(clear)
     press_enter = _coerce_bool(press_enter)
-    x, y = loc[0], loc[1]
+    x, y = _validate_loc(loc)
     desktop.type(
-        loc=loc,
+        loc=(x, y),
         text=text,
         caret_position=caret_position,
         clear=clear,
@@ -367,14 +376,16 @@ def scroll_tool(
     wheel_times: int = 1,
     ctx: Context = None,
 ) -> str:
-    if loc and len(loc) != 2:
-        raise ValueError("Location must be a list of exactly 2 integers [x, y]")
-    response = desktop.scroll(loc, type, direction, wheel_times)
+    validated_loc = None
+    if loc is not None:
+        x, y = _validate_loc(loc)
+        validated_loc = (x, y)
+    response = desktop.scroll(validated_loc, type, direction, wheel_times)
     if response:
         return response
     msg = f"Scrolled {type} {direction} by {wheel_times} wheel times"
-    if loc:
-        msg += f" at ({loc[0]},{loc[1]})"
+    if validated_loc:
+        msg += f" at ({validated_loc[0]},{validated_loc[1]})"
     return msg + "."
 
 
@@ -392,14 +403,12 @@ def scroll_tool(
 @with_analytics(lambda: analytics, "Move-Tool")
 def move_tool(loc: list[int], drag: bool | str = False, ctx: Context = None) -> str:
     drag = _coerce_bool(drag)
-    if len(loc) != 2:
-        raise ValueError("loc must be a list of exactly 2 integers [x, y]")
-    x, y = loc[0], loc[1]
+    x, y = _validate_loc(loc)
     if drag:
-        desktop.drag(loc)
+        desktop.drag((x, y))
         return f"Dragged to ({x},{y})."
     else:
-        desktop.move(loc)
+        desktop.move((x, y))
         return f"Moved the mouse pointer to ({x},{y})."
 
 
@@ -490,11 +499,9 @@ def multi_select_tool(
     press_ctrl = _coerce_bool(press_ctrl, default=True)
     if not locs:
         return "Error: at least one location is required."
-    for i, loc in enumerate(locs):
-        if not isinstance(loc, (list, tuple)) or len(loc) != 2:
-            raise ValueError(f"locs[{i}] must be [x, y], got {loc!r}")
-    desktop.multi_select(press_ctrl, locs)
-    elements_str = "\n".join([f"({loc[0]},{loc[1]})" for loc in locs])
+    validated = [_validate_loc(loc, label=f"locs[{i}]") for i, loc in enumerate(locs)]
+    desktop.multi_select(press_ctrl, validated)
+    elements_str = "\n".join([f"({x},{y})" for x, y in validated])
     return f"Multi-selected elements at:\n{elements_str}"
 
 
@@ -513,11 +520,14 @@ def multi_select_tool(
 def multi_edit_tool(locs: list[list], ctx: Context = None) -> str:
     if not locs:
         return "Error: at least one location is required."
+    validated = []
     for i, entry in enumerate(locs):
         if not isinstance(entry, (list, tuple)) or len(entry) < 3:
             raise ValueError(f"locs[{i}] must be [x, y, text], got {entry!r}")
-    desktop.multi_edit(locs)
-    elements_str = ", ".join([f"({e[0]},{e[1]}) with text '{e[2]}'" for e in locs])
+        x, y = _validate_loc(entry[:2], label=f"locs[{i}]")
+        validated.append((x, y, str(entry[2])))
+    desktop.multi_edit(validated)
+    elements_str = ", ".join([f"({x},{y}) with text '{text}'" for x, y, text in validated])
     return f"Multi-edited elements at: {elements_str}"
 
 
@@ -844,9 +854,10 @@ def invoke_tool(
 ) -> str:
     from windows_mcp.uia import ControlFromPoint, PatternId
 
-    if len(loc) != 2:
-        return "Error: loc must be [x, y]."
-    x, y = loc[0], loc[1]
+    try:
+        x, y = _validate_loc(loc)
+    except ValueError:
+        return "Error: loc must be [x, y] with integer coordinates."
 
     element = ControlFromPoint(x, y)
     if not element:

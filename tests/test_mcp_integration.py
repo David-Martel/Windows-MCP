@@ -505,7 +505,7 @@ class TestClickToolDispatch:
     async def test_click_calls_desktop_click(self, patched_desktop):
         tools = await _get_tools()
         await tools["Click"].fn(loc=[300, 400], button="right", clicks=2)
-        patched_desktop.click.assert_called_once_with(loc=[300, 400], button="right", clicks=2)
+        patched_desktop.click.assert_called_once_with(loc=(300, 400), button="right", clicks=2)
 
     async def test_click_hover_uses_zero_clicks(self, patched_desktop):
         tools = await _get_tools()
@@ -523,7 +523,7 @@ class TestTypeToolDispatch:
         tools = await _get_tools()
         await tools["Type"].fn(loc=[50, 75], text="test", clear=True, press_enter=True)
         patched_desktop.type.assert_called_once_with(
-            loc=[50, 75],
+            loc=(50, 75),
             text="test",
             caret_position="idle",
             clear=True,
@@ -542,7 +542,7 @@ class TestScrollToolDispatch:
     async def test_scroll_calls_desktop_scroll(self, patched_desktop):
         tools = await _get_tools()
         await tools["Scroll"].fn(loc=[100, 200], direction="down", wheel_times=3)
-        patched_desktop.scroll.assert_called_once_with([100, 200], "vertical", "down", 3)
+        patched_desktop.scroll.assert_called_once_with((100, 200), "vertical", "down", 3)
 
     async def test_scroll_desktop_response_overrides_default_message(self, patched_desktop):
         patched_desktop.scroll.return_value = "Scrolled to bottom."
@@ -561,12 +561,12 @@ class TestMoveToolDispatch:
         tools = await _get_tools()
         result = await tools["Move"].fn(loc=[300, 400], drag=True)
         assert "Dragged to (300,400)" in result
-        patched_desktop.drag.assert_called_once_with([300, 400])
+        patched_desktop.drag.assert_called_once_with((300, 400))
 
     async def test_move_calls_desktop_move_when_not_drag(self, patched_desktop):
         tools = await _get_tools()
         await tools["Move"].fn(loc=[100, 200], drag=False)
-        patched_desktop.move.assert_called_once_with([100, 200])
+        patched_desktop.move.assert_called_once_with((100, 200))
 
 
 class TestShortcutToolDispatch:
@@ -744,7 +744,7 @@ class TestMultiSelectToolDispatch:
     async def test_multiselect_calls_desktop_multi_select(self, patched_desktop):
         tools = await _get_tools()
         await tools["MultiSelect"].fn(locs=[[100, 200], [300, 400]], press_ctrl=True)
-        patched_desktop.multi_select.assert_called_once_with(True, [[100, 200], [300, 400]])
+        patched_desktop.multi_select.assert_called_once_with(True, [(100, 200), (300, 400)])
 
 
 class TestMultiEditToolDispatch:
@@ -760,7 +760,9 @@ class TestMultiEditToolDispatch:
         locs = [[100, 200, "alpha"], [500, 600, "beta"]]
         tools = await _get_tools()
         await tools["MultiEdit"].fn(locs=locs)
-        patched_desktop.multi_edit.assert_called_once_with(locs)
+        patched_desktop.multi_edit.assert_called_once_with(
+            [(100, 200, "alpha"), (500, 600, "beta")]
+        )
 
 
 class TestWaitForToolDispatch:
@@ -1008,9 +1010,7 @@ class TestVisionAnalyzeToolDispatch:
         with patch("windows_mcp.vision.service.requests.post") as mock_post:
             mock_resp = MagicMock()
             mock_resp.raise_for_status = MagicMock()
-            mock_resp.json.return_value = {
-                "choices": [{"message": {"content": "[]"}}]
-            }
+            mock_resp.json.return_value = {"choices": [{"message": {"content": "[]"}}]}
             mock_post.return_value = mock_resp
             with patch.dict("os.environ", {"VISION_API_URL": "http://test:8080/v1"}):
                 tools = await _get_tools()
@@ -1032,7 +1032,9 @@ class TestVisionAnalyzeToolDispatch:
             mock_post.return_value = mock_resp
             with patch.dict("os.environ", {"VISION_API_URL": "http://test:8080/v1"}):
                 tools = await _get_tools()
-                result = await tools["VisionAnalyze"].fn(mode="query", query="What does the dialog say?")
+                result = await tools["VisionAnalyze"].fn(
+                    mode="query", query="What does the dialog say?"
+                )
         assert "Save changes" in result
 
     async def test_vision_query_mode_requires_query(self, patched_desktop):
@@ -1065,22 +1067,22 @@ class TestLocationValidation:
 
     async def test_click_wrong_loc_length_raises_value_error(self, patched_desktop):
         tools = await _get_tools()
-        with pytest.raises(ValueError, match="exactly 2 integers"):
+        with pytest.raises(ValueError, match=r"must be \[x, y\]"):
             await tools["Click"].fn(loc=[100, 200, 300])
 
     async def test_type_wrong_loc_length_raises_value_error(self, patched_desktop):
         tools = await _get_tools()
-        with pytest.raises(ValueError, match="exactly 2 integers"):
+        with pytest.raises(ValueError, match=r"must be \[x, y\]"):
             await tools["Type"].fn(loc=[100], text="hello")
 
     async def test_move_wrong_loc_length_raises_value_error(self, patched_desktop):
         tools = await _get_tools()
-        with pytest.raises(ValueError, match="exactly 2 integers"):
+        with pytest.raises(ValueError, match=r"must be \[x, y\]"):
             await tools["Move"].fn(loc=[100])
 
     async def test_scroll_wrong_loc_length_raises_value_error(self, patched_desktop):
         tools = await _get_tools()
-        with pytest.raises(ValueError, match="exactly 2 integers"):
+        with pytest.raises(ValueError, match=r"must be \[x, y\]"):
             await tools["Scroll"].fn(loc=[100])
 
     async def test_invoke_single_element_loc_returns_error_string(self, patched_desktop):
@@ -1239,23 +1241,23 @@ class TestBoolStringCoercion:
         tools = await _get_tools()
         result = await tools["Move"].fn(loc=[100, 200], drag="true")
         assert "Dragged" in result
-        patched_desktop.drag.assert_called_once_with([100, 200])
+        patched_desktop.drag.assert_called_once_with((100, 200))
 
     async def test_move_drag_string_false_calls_move(self, patched_desktop):
         tools = await _get_tools()
         result = await tools["Move"].fn(loc=[100, 200], drag="false")
         assert "Moved the mouse pointer" in result
-        patched_desktop.move.assert_called_once_with([100, 200])
+        patched_desktop.move.assert_called_once_with((100, 200))
 
     async def test_multiselect_press_ctrl_string_false_passes_false(self, patched_desktop):
         tools = await _get_tools()
         await tools["MultiSelect"].fn(locs=[[100, 200]], press_ctrl="false")
-        patched_desktop.multi_select.assert_called_once_with(False, [[100, 200]])
+        patched_desktop.multi_select.assert_called_once_with(False, [(100, 200)])
 
     async def test_multiselect_press_ctrl_string_true_passes_true(self, patched_desktop):
         tools = await _get_tools()
         await tools["MultiSelect"].fn(locs=[[100, 200]], press_ctrl="true")
-        patched_desktop.multi_select.assert_called_once_with(True, [[100, 200]])
+        patched_desktop.multi_select.assert_called_once_with(True, [(100, 200)])
 
     async def test_process_kill_force_string_true_passes_force(self, patched_desktop):
         tools = await _get_tools()
