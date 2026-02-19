@@ -43,7 +43,7 @@
 - [ ] **[A3] Replace module globals with dependency injection** -- Use FastMCP's lifespan context to pass `desktop`, `watchdog`, `analytics` via `ctx.request_context.lifespan_context`.
 - [x] **[A2] Decompose __main__.py** -- Extracted 23 tool registrations into `tools/` package: `input_tools.py` (9), `state_tools.py` (4), `system_tools.py` (10). Shared state via `tools/_state.py`. Reduced __main__.py from 1122 to 207 lines (81%).
 - [x] **[P5] Parallelize get_state** -- VDM desktop query runs in parallel with window enumeration chain via ThreadPoolExecutor. Saves ~100-200ms per get_state call.
-- [ ] **[Q1] Deduplicate UIA constants** -- Extract 13 shared constants from `uia/core.py`, `uia/controls.py`, `uia/patterns.py` into `uia/constants.py`.
+- [x] **[Q1] Deduplicate UIA constants** -- Extracted 14 shared constants from `uia/core.py`, `uia/controls.py`, `uia/patterns.py`, `uia/enums.py` into `uia/constants.py`. Removed unused imports.
 - [x] **[Q2] Extract boolean coercion utility** -- `_coerce_bool()` in `tools/_helpers.py` used by all 23 tool handlers. Service layer callers (input, desktop) use simplified checks since tool layer already coerces.
 
 ---
