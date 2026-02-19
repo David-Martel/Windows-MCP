@@ -522,7 +522,7 @@ class Desktop:
             control_type, index = match.groups()
             index = int(index) if index else None
             children = element.GetChildren()
-            same_type_children = list(filter(lambda x: x.ControlTypeName == control_type, children))
+            same_type_children = [c for c in children if c.ControlTypeName == control_type]
             if not same_type_children:
                 raise ValueError(
                     f"XPath resolution failed: no children of type '{control_type}' found. "
