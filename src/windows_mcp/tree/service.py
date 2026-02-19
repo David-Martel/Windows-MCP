@@ -32,6 +32,7 @@ from time import time
 import logging
 import weakref
 import comtypes
+import os
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -149,7 +150,7 @@ class Tree:
                 pass
             task_inputs.append((handle, is_browser))
 
-        with ThreadPoolExecutor() as executor:
+        with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as executor:
             retry_counts = {handle: 0 for handle in windows_handles}
             future_to_handle = {
                 executor.submit(self.get_nodes, handle, is_browser, use_dom): handle
