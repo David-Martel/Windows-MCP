@@ -10,13 +10,13 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | [`errors`] | [`WindowsMcpError`] enum and `From<> for PyErr` impl |
+//! | [`input`] | `SendInput` keyboard/mouse simulation (replaces pyautogui) |
 //! | [`system_info`] | Replace PowerShell subprocess calls with `sysinfo` |
 //! | [`tree`] | UIA accessibility tree traversal via `windows-rs` + Rayon |
 //!
 //! # Planned modules
 //!
 //! - `screenshot` -- DXGI Output Duplication capture
-//! - `input` -- `SendInput` (keyboard/mouse) replacing pyautogui
 //!
 //! # Building
 //!
@@ -43,6 +43,7 @@
 //! ```
 
 pub mod errors;
+pub mod input;
 pub mod system_info;
 pub mod tree;
 
@@ -72,6 +73,13 @@ fn windows_mcp_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // capture_tree: single-RPC UIA subtree capture with Rayon parallelism.
     // Replaces the Python comtypes per-node BuildUpdatedCache loop.
     m.add_function(wrap_pyfunction!(tree::capture_tree, m)?)?;
+
+    // input: SendInput-based keyboard/mouse simulation (replaces pyautogui).
+    m.add_function(wrap_pyfunction!(input::send_text, m)?)?;
+    m.add_function(wrap_pyfunction!(input::send_key, m)?)?;
+    m.add_function(wrap_pyfunction!(input::send_click, m)?)?;
+    m.add_function(wrap_pyfunction!(input::send_mouse_move, m)?)?;
+    m.add_function(wrap_pyfunction!(input::send_hotkey, m)?)?;
 
     // -----------------------------------------------------------------------
     // Module metadata

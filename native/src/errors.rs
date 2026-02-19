@@ -37,6 +37,12 @@ pub enum WindowsMcpError {
 
     /// Accessibility tree traversal or element lookup failure.
     TreeError(String),
+
+    /// Input simulation failure (SendInput / keyboard / mouse).
+    InputError(String),
+
+    /// Screenshot capture failure (GDI / DXGI).
+    ScreenshotError(String),
 }
 
 impl std::fmt::Display for WindowsMcpError {
@@ -45,6 +51,8 @@ impl std::fmt::Display for WindowsMcpError {
             Self::SystemInfoError(msg) => write!(f, "SystemInfoError: {msg}"),
             Self::ComError(msg) => write!(f, "ComError: {msg}"),
             Self::TreeError(msg) => write!(f, "TreeError: {msg}"),
+            Self::InputError(msg) => write!(f, "InputError: {msg}"),
+            Self::ScreenshotError(msg) => write!(f, "ScreenshotError: {msg}"),
         }
     }
 }

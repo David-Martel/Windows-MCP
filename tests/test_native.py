@@ -107,6 +107,38 @@ class TestNativeCaptureTree:
         assert len(elem["bounding_rect"]) == 4
 
 
+class TestNativeInputModule:
+    """Test the Rust input simulation functions."""
+
+    def test_send_text_callable(self):
+        assert hasattr(windows_mcp_core, "send_text")
+        assert callable(windows_mcp_core.send_text)
+
+    def test_send_text_empty_returns_zero(self):
+        result = windows_mcp_core.send_text("")
+        assert result == 0
+
+    def test_send_key_callable(self):
+        assert hasattr(windows_mcp_core, "send_key")
+        assert callable(windows_mcp_core.send_key)
+
+    def test_send_click_callable(self):
+        assert hasattr(windows_mcp_core, "send_click")
+        assert callable(windows_mcp_core.send_click)
+
+    def test_send_mouse_move_callable(self):
+        assert hasattr(windows_mcp_core, "send_mouse_move")
+        assert callable(windows_mcp_core.send_mouse_move)
+
+    def test_send_hotkey_callable(self):
+        assert hasattr(windows_mcp_core, "send_hotkey")
+        assert callable(windows_mcp_core.send_hotkey)
+
+    def test_send_hotkey_empty_returns_zero(self):
+        result = windows_mcp_core.send_hotkey([])
+        assert result == 0
+
+
 class TestNativeModuleStructure:
     """Verify the module exports expected symbols."""
 
@@ -117,6 +149,11 @@ class TestNativeModuleStructure:
     def test_has_capture_tree(self):
         assert hasattr(windows_mcp_core, "capture_tree")
         assert callable(windows_mcp_core.capture_tree)
+
+    def test_has_input_functions(self):
+        for fn_name in ("send_text", "send_key", "send_click", "send_mouse_move", "send_hotkey"):
+            assert hasattr(windows_mcp_core, fn_name), f"Missing: {fn_name}"
+            assert callable(getattr(windows_mcp_core, fn_name))
 
     def test_has_version(self):
         assert hasattr(windows_mcp_core, "__version__")
