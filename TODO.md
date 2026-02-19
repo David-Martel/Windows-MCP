@@ -64,10 +64,10 @@
 ## P4 -- Test Coverage
 
 - [x] **[A7] Add MCP tool handler integration tests** -- Done. 145 headless integration tests in `test_mcp_integration.py` covering all 23 tools via `tool.fn()`. 4 tiers: server structure, tool dispatch, error handling, transport+auth.
-- [ ] **Add WatchDog service tests** -- Test threading, COM event handling, callback dispatch.
+- [x] **Add WatchDog service tests** -- 52 tests in `test_watchdog.py` covering init, event handlers (focus/structure/property), run loop, registrations, and cleanup. 100% coverage on `watchdog/service.py` and `watchdog/event_handlers.py`.
 - [x] **Add Desktop.get_state orchestration tests** -- 60 tests across 9 classes covering structure, no-windows, screenshot/tree failure, VDM info, thread safety, multi-window, vision paths, bool coercion.
 - [x] **Add tree_traversal unit tests** -- 54 tests covering tree_traversal (28), focus debounce (6), DOM correction (14), plus mock infrastructure. `test_tree_service.py` up from 4 to 58 tests.
-- [ ] **Achieve 85% overall test coverage** -- Currently at 64% overall (1671 tests). Testable modules at 82-100%. COM/UIA modules at 14-42% (require live desktop).
+- [ ] **Achieve 85% overall test coverage** -- Currently at 69% overall (2099 tests). Testable modules at 95-100%. COM/UIA modules at 27-41% (require live desktop, ~2270 uncovered lines). Reaching 85% requires excluding untestable COM modules or live integration tests.
 
 ---
 
