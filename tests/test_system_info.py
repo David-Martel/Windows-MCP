@@ -1,5 +1,5 @@
-from unittest.mock import patch, MagicMock
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -8,7 +8,7 @@ from windows_mcp.desktop.service import Desktop
 
 @pytest.fixture
 def desktop():
-    with patch.object(Desktop, '__init__', lambda self: None):
+    with patch.object(Desktop, "__init__", lambda self: None):
         return Desktop()
 
 
@@ -35,6 +35,7 @@ class TestGetSystemInfo:
         mock_platform.machine.return_value = "AMD64"
 
         import builtins
+
         _real_import = builtins.__import__
 
         def patched_import(name, *args, **kwargs):

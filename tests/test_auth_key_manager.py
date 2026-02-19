@@ -1,7 +1,9 @@
 """Tests for AuthKeyManager -- DPAPI key generation, storage, and validation."""
 
-from unittest.mock import patch, MagicMock
 import secrets
+import sys
+from types import ModuleType
+from unittest.mock import MagicMock, patch
 
 from windows_mcp.auth.key_manager import AuthKeyManager
 
@@ -112,3 +114,85 @@ class TestRotateKey:
         key = AuthKeyManager.rotate_key()
         assert len(key) == 64
         int(key, 16)  # Valid hex
+
+
+class TestDpapiEncrypt:
+    """Test the _dpapi_encrypt function directly via a mocked win32crypt module."""
+
+    def test_encrypt_calls_crypt_protect_data(self):
+        """_dpapi_encrypt should call CryptProtectData with expected arguments."""
+        from windows_mcp.auth import key_manager
+
+        mock_win32crypt = ModuleType("win32crypt")
+        mock_win32crypt.CryptProtectData = MagicMock(return_value=b"encrypted_output")
+
+        with patch.dict(sys.modules, {"win32crypt": mock_win32crypt}):
+            result = key_manager._dpapi_encrypt(b"plaintext")
+
+        mock_win32crypt.CryptProtectData.assert_called_once_with(
+            b"plaintext", "windows-mcp-auth", None, None, None, 0
+        )
+        assert result == b"encrypted_output"
+
+    def test_encrypt_propagates_win32crypt_error(self):
+        """_dpapi_encrypt should let win32crypt exceptions bubble up."""
+        from windows_mcp.auth import key_manager
+
+        mock_win32crypt = ModuleType("win32crypt")
+        mock_win32crypt.CryptProtectData = MagicMock(side_effect=OSError("DPAPI unavailable"))
+
+        with patch.dict(sys.modules, {"win32crypt": mock_win32crypt}):
+            try:
+                key_manager._dpapi_encrypt(b"data")
+                assert False, "Expected OSError to be raised"
+            except OSError as exc:
+                assert "DPAPI unavailable" in str(exc)
+
+
+class TestDpapiDecrypt:
+    """Test the _dpapi_decrypt function directly via a mocked win32crypt module."""
+
+    def test_decrypt_calls_crypt_unprotect_data(self):
+        """_dpapi_decrypt should call CryptUnprotectData and return the second tuple element."""
+        from windows_mcp.auth import key_manager
+
+        mock_win32crypt = ModuleType("win32crypt")
+        mock_win32crypt.CryptUnprotectData = MagicMock(return_value=(None, b"decrypted_bytes"))
+
+        with patch.dict(sys.modules, {"win32crypt": mock_win32crypt}):
+            result = key_manager._dpapi_decrypt(b"ciphertext")
+
+        mock_win32crypt.CryptUnprotectData.assert_called_once_with(
+            b"ciphertext", None, None, None, 0
+        )
+        assert result == b"decrypted_bytes"
+
+    def test_decrypt_propagates_win32crypt_error(self):
+        """_dpapi_decrypt should let win32crypt exceptions bubble up to the caller."""
+        from windows_mcp.auth import key_manager
+
+        mock_win32crypt = ModuleType("win32crypt")
+        mock_win32crypt.CryptUnprotectData = MagicMock(
+            side_effect=OSError("Decryption failed: wrong user")
+        )
+
+        with patch.dict(sys.modules, {"win32crypt": mock_win32crypt}):
+            try:
+                key_manager._dpapi_decrypt(b"bad_cipher")
+                assert False, "Expected OSError to be raised"
+            except OSError as exc:
+                assert "Decryption failed" in str(exc)
+
+    def test_load_key_returns_none_when_decrypt_raises_os_error(self):
+        """load_key wraps _dpapi_decrypt errors and returns None instead of raising."""
+        mock_win32crypt = ModuleType("win32crypt")
+        mock_win32crypt.CryptUnprotectData = MagicMock(side_effect=OSError("DPAPI error"))
+
+        with patch("windows_mcp.auth.key_manager._KEY_FILE") as mock_file:
+            mock_file.exists.return_value = True
+            mock_file.read_bytes.return_value = b"garbage"
+
+            with patch.dict(sys.modules, {"win32crypt": mock_win32crypt}):
+                result = AuthKeyManager.load_key()
+
+        assert result is None

@@ -17,9 +17,17 @@
       "project": "windows-mcp",
       "agents_involved": ["python-pro", "security-auditor", "architect-reviewer", "rust-pro", "performance-engineer"],
       "summary": "Implementation session: MCP configs, Python perf fixes (pg.PAUSE, ImageDraw, print, ThreadPool bound), PowerShell->stdlib (winreg/locale/platform), Bearer auth with DPAPI, PyO3 Rust scaffold (system_info), Build.ps1 with CargoTools. 140->184 tests."
+    },
+    {
+      "id": "ctx-windows-mcp-20260219b",
+      "file": "windows-mcp-context-20260219b.md",
+      "created": "2026-02-19T06:30:00Z",
+      "project": "windows-mcp",
+      "agents_involved": ["rust-pro", "code-reviewer", "architect-reviewer", "test-automator", "security-auditor"],
+      "summary": "Rust capture_tree module, COMGuard fixes, SSRF+shell security, review findings (C3/H5) fixed, import cleanup (isort/F401), 157 new tests (235->392), zero-warning build enforcement."
     }
   ],
-  "latest": "ctx-windows-mcp-20260219",
+  "latest": "ctx-windows-mcp-20260219b",
   "slices": [
     "slices/python-slice.md",
     "slices/security-slice.md",

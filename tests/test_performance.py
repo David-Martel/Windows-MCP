@@ -13,7 +13,7 @@ from windows_mcp.desktop.service import Desktop
 
 @pytest.fixture
 def desktop():
-    with patch.object(Desktop, '__init__', lambda self: None):
+    with patch.object(Desktop, "__init__", lambda self: None):
         return Desktop()
 
 
@@ -37,6 +37,7 @@ class TestImageDrawSequential:
 
     def test_no_thread_pool_in_annotation(self):
         import inspect
+
         source = inspect.getsource(Desktop.get_annotated_screenshot)
         assert "ThreadPoolExecutor" not in source
         assert "executor" not in source
@@ -47,7 +48,9 @@ class TestThreadPoolBounded:
 
     def test_max_workers_in_source(self):
         import inspect
+
         from windows_mcp.tree.service import Tree
+
         source = inspect.getsource(Tree.get_window_wise_nodes)
         assert "max_workers" in source
         assert "min(8" in source
@@ -58,13 +61,15 @@ class TestAnalyticsNoPrint:
 
     def test_no_print_in_analytics(self):
         import inspect
+
         import windows_mcp.analytics as analytics_mod
+
         source = inspect.getsource(analytics_mod)
         # Allow print in comments/strings but not as a function call
-        lines = source.split('\n')
+        lines = source.split("\n")
         for i, line in enumerate(lines, 1):
             stripped = line.lstrip()
-            if stripped.startswith('#') or stripped.startswith('"') or stripped.startswith("'"):
+            if stripped.startswith("#") or stripped.startswith('"') or stripped.startswith("'"):
                 continue
             assert "print(" not in stripped, (
                 f"analytics.py line {i}: found print() call that corrupts MCP stdout"
@@ -76,12 +81,14 @@ class TestWatchdogNoPrint:
 
     def test_no_print_in_event_handlers(self):
         import inspect
+
         from windows_mcp.watchdog import event_handlers
+
         source = inspect.getsource(event_handlers)
-        lines = source.split('\n')
+        lines = source.split("\n")
         for i, line in enumerate(lines, 1):
             stripped = line.lstrip()
-            if stripped.startswith('#') or stripped.startswith('"') or stripped.startswith("'"):
+            if stripped.startswith("#") or stripped.startswith('"') or stripped.startswith("'"):
                 continue
             assert "print(" not in stripped, (
                 f"event_handlers.py line {i}: found print() call that corrupts MCP stdout"
@@ -93,22 +100,26 @@ class TestRegistryUsesWinreg:
 
     def test_registry_get_no_subprocess(self):
         import inspect
+
         source = inspect.getsource(Desktop.registry_get)
         assert "execute_command" not in source
         assert "powershell" not in source.lower()
 
     def test_registry_set_no_subprocess(self):
         import inspect
+
         source = inspect.getsource(Desktop.registry_set)
         assert "execute_command" not in source
 
     def test_registry_delete_no_subprocess(self):
         import inspect
+
         source = inspect.getsource(Desktop.registry_delete)
         assert "execute_command" not in source
 
     def test_registry_list_no_subprocess(self):
         import inspect
+
         source = inspect.getsource(Desktop.registry_list)
         assert "execute_command" not in source
 
@@ -118,6 +129,7 @@ class TestGetWindowsVersionNoSubprocess:
 
     def test_no_execute_command(self):
         import inspect
+
         source = inspect.getsource(Desktop.get_windows_version)
         assert "execute_command" not in source
         assert "winreg" in source
@@ -128,6 +140,7 @@ class TestGetDefaultLanguageNoSubprocess:
 
     def test_no_execute_command(self):
         import inspect
+
         source = inspect.getsource(Desktop.get_default_language)
         assert "execute_command" not in source
         assert "locale" in source
@@ -149,7 +162,9 @@ class TestKnownBottlenecks:
         Impact: ~2x reduction in COM round-trips during tree traversal
         """
         import inspect
+
         from windows_mcp.tree.service import Tree
+
         source = inspect.getsource(Tree)
         # When this assertion fails, the optimization has been applied
         assert "BuildUpdatedCache" in source or "TreeScope_Subtree" not in source
@@ -161,6 +176,7 @@ class TestKnownBottlenecks:
         Impact: ~1000ms saved per Snapshot (10,000 calls * 100us each)
         """
         import comtypes
+
         # Just verify comtypes is still in use (not yet replaced by Rust)
         assert comtypes is not None
 
@@ -171,4 +187,5 @@ class TestKnownBottlenecks:
         Impact: More reliable input simulation, lower latency
         """
         import pyautogui
+
         assert pyautogui is not None

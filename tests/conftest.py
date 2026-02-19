@@ -1,7 +1,7 @@
 import pytest
 
-from windows_mcp.tree.views import BoundingBox, Center, TreeElementNode, ScrollElementNode
-from windows_mcp.desktop.views import Window, Status, DesktopState
+from windows_mcp.desktop.views import DesktopState, Status, Window
+from windows_mcp.tree.views import BoundingBox, Center, ScrollElementNode, TreeElementNode
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-from windows_mcp.desktop.views import Browser, Status, Size, DesktopState
+from windows_mcp.desktop.views import Browser, DesktopState, Size, Status
 
 
 class TestBrowser:

@@ -1,9 +1,9 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
-from windows_mcp.auth.service import AuthClient, AuthError, MAX_RETRIES, RETRY_BACKOFF
+from windows_mcp.auth.service import MAX_RETRIES, RETRY_BACKOFF, AuthClient, AuthError
 
 
 class TestAuthError:
@@ -176,3 +176,40 @@ class TestAuthenticate:
         assert mock_sleep.call_count == MAX_RETRIES - 1
         mock_sleep.assert_any_call(RETRY_BACKOFF)
         mock_sleep.assert_any_call(RETRY_BACKOFF * 2)
+
+    @patch("windows_mcp.auth.service.time.sleep")
+    @patch("windows_mcp.auth.service.requests.post")
+    def test_generic_request_exception_retries(self, mock_post, mock_sleep):
+        """A requests.RequestException (not Timeout/ConnectionError) triggers retry."""
+        mock_post.side_effect = requests.RequestException("generic network error")
+
+        client = AuthClient(api_key="key", sandbox_id="sb-1")
+        with pytest.raises(AuthError, match="Request failed"):
+            client.authenticate()
+
+        assert mock_post.call_count == MAX_RETRIES
+
+    @patch("windows_mcp.auth.service.time.sleep")
+    @patch("windows_mcp.auth.service.requests.post")
+    def test_generic_request_exception_message_includes_original(self, mock_post, mock_sleep):
+        """The AuthError message wraps the original RequestException text."""
+        mock_post.side_effect = requests.RequestException("ssl handshake failed")
+
+        client = AuthClient(api_key="key", sandbox_id="sb-1")
+        with pytest.raises(AuthError) as exc_info:
+            client.authenticate()
+
+        assert "ssl handshake failed" in exc_info.value.message
+
+    @patch("windows_mcp.auth.service.time.sleep")
+    @patch("windows_mcp.auth.service.requests.post")
+    def test_last_attempt_no_backoff_sleep(self, mock_post, mock_sleep):
+        """_backoff must NOT sleep after the final attempt (attempt == MAX_RETRIES)."""
+        mock_post.side_effect = requests.RequestException("err")
+
+        client = AuthClient(api_key="key", sandbox_id="sb-1")
+        with pytest.raises(AuthError):
+            client.authenticate()
+
+        # Only MAX_RETRIES - 1 sleeps should occur (no sleep after last attempt)
+        assert mock_sleep.call_count == MAX_RETRIES - 1
