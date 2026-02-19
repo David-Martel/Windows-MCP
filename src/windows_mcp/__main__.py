@@ -26,6 +26,8 @@ from windows_mcp.watchdog.service import WatchDog
 
 load_dotenv()
 
+logger = logging.getLogger("windows_mcp")
+
 
 @dataclass
 class Config:
@@ -723,7 +725,7 @@ async def waitfor_tool(
                                 f"({node.control_type}) at ({center.x},{center.y})"
                             )
         except Exception:
-            pass
+            logger.debug("WaitFor poll error", exc_info=True)
         await asyncio.sleep(poll_interval)
 
     return f"Timeout: '{name}' {mode} not found within {timeout}s."

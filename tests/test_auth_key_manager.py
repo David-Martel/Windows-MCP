@@ -5,6 +5,8 @@ import sys
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from windows_mcp.auth.key_manager import AuthKeyManager
 
 
@@ -142,11 +144,8 @@ class TestDpapiEncrypt:
         mock_win32crypt.CryptProtectData = MagicMock(side_effect=OSError("DPAPI unavailable"))
 
         with patch.dict(sys.modules, {"win32crypt": mock_win32crypt}):
-            try:
+            with pytest.raises(OSError, match="DPAPI unavailable"):
                 key_manager._dpapi_encrypt(b"data")
-                assert False, "Expected OSError to be raised"
-            except OSError as exc:
-                assert "DPAPI unavailable" in str(exc)
 
 
 class TestDpapiDecrypt:
@@ -177,11 +176,8 @@ class TestDpapiDecrypt:
         )
 
         with patch.dict(sys.modules, {"win32crypt": mock_win32crypt}):
-            try:
+            with pytest.raises(OSError, match="Decryption failed"):
                 key_manager._dpapi_decrypt(b"bad_cipher")
-                assert False, "Expected OSError to be raised"
-            except OSError as exc:
-                assert "Decryption failed" in str(exc)
 
     def test_load_key_returns_none_when_decrypt_raises_os_error(self):
         """load_key wraps _dpapi_decrypt errors and returns None instead of raising."""

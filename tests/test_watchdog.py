@@ -5,6 +5,7 @@ run without a live Windows UI Automation environment.
 """
 
 import sys
+import weakref
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
@@ -104,7 +105,7 @@ class TestFocusChangedEventHandler:
         parent._focus_callback = callback
 
         handler = FocusChangedEventHandler.__new__(FocusChangedEventHandler)
-        import weakref
+
 
         handler._parent = weakref.ref(parent)
 
@@ -141,7 +142,7 @@ class TestFocusChangedEventHandler:
         parent._focus_callback = None
 
         handler = FocusChangedEventHandler.__new__(FocusChangedEventHandler)
-        import weakref
+
 
         handler._parent = weakref.ref(parent)
 
@@ -161,7 +162,7 @@ class TestFocusChangedEventHandler:
         parent._focus_callback = callback
 
         handler = FocusChangedEventHandler.__new__(FocusChangedEventHandler)
-        import weakref
+
 
         handler._parent = weakref.ref(parent)
 
@@ -192,7 +193,7 @@ class TestStructureChangedEventHandler:
         parent._structure_callback = callback
 
         handler = StructureChangedEventHandler.__new__(StructureChangedEventHandler)
-        import weakref
+
 
         handler._parent = weakref.ref(parent)
 
@@ -216,7 +217,7 @@ class TestStructureChangedEventHandler:
         parent._structure_callback = callback
 
         handler = StructureChangedEventHandler.__new__(StructureChangedEventHandler)
-        import weakref
+
 
         handler._parent = weakref.ref(parent)
 
@@ -260,7 +261,7 @@ class TestPropertyChangedEventHandler:
         parent._property_callback = callback
 
         handler = PropertyChangedEventHandler.__new__(PropertyChangedEventHandler)
-        import weakref
+
 
         handler._parent = weakref.ref(parent)
 
@@ -284,7 +285,7 @@ class TestPropertyChangedEventHandler:
         parent._property_callback = callback
 
         handler = PropertyChangedEventHandler.__new__(PropertyChangedEventHandler)
-        import weakref
+
 
         handler._parent = weakref.ref(parent)
 
@@ -302,7 +303,7 @@ class TestPropertyChangedEventHandler:
         parent._property_callback = None
 
         handler = PropertyChangedEventHandler.__new__(PropertyChangedEventHandler)
-        import weakref
+
 
         handler._parent = weakref.ref(parent)
 

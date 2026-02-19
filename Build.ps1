@@ -178,22 +178,27 @@ function Step-NativeBuild {
     }
 
     Invoke-Step 'Native Build (Rust/PyO3 -- warnings=deny)' {
-        if ($CargoToolsAvailable) {
-            # Use CargoTools for sccache lifecycle and environment setup
-            Write-Host "  Using CargoTools Invoke-CargoWrapper" -ForegroundColor Cyan
-            $env:RUSTFLAGS = '-D warnings'
-            Invoke-CargoWrapper -Command 'build' `
-                -AdditionalArgs @('--release') `
-                -WorkingDirectory $NativeDir
-        } else {
-            # Fallback: direct cargo build (no sccache)
-            Write-Host "  Using direct cargo build (warnings=deny)" -ForegroundColor Yellow
-            Push-Location $NativeDir
-            try {
-                $env:RUSTC_WRAPPER = ''
+        $savedRustFlags = $env:RUSTFLAGS
+        try {
+            if ($CargoToolsAvailable) {
+                # Use CargoTools for sccache lifecycle and environment setup
+                Write-Host "  Using CargoTools Invoke-CargoWrapper" -ForegroundColor Cyan
                 $env:RUSTFLAGS = '-D warnings'
-                cargo build --release
-            } finally { Pop-Location }
+                Invoke-CargoWrapper -Command 'build' `
+                    -AdditionalArgs @('--release') `
+                    -WorkingDirectory $NativeDir
+            } else {
+                # Fallback: direct cargo build (no sccache)
+                Write-Host "  Using direct cargo build (warnings=deny)" -ForegroundColor Yellow
+                Push-Location $NativeDir
+                try {
+                    $env:RUSTC_WRAPPER = ''
+                    $env:RUSTFLAGS = '-D warnings'
+                    cargo build --release
+                } finally { Pop-Location }
+            }
+        } finally {
+            $env:RUSTFLAGS = $savedRustFlags
         }
     }
 }
