@@ -980,12 +980,79 @@ class TestVisionAnalyzeToolDispatch:
                 result = await tools["VisionAnalyze"].fn(mode="describe")
         assert "Notepad" in result
 
+    async def test_vision_elements_mode_returns_json(self, patched_desktop):
+        """VisionAnalyze elements mode returns JSON array of detected elements."""
+        mock_img = MagicMock()
+        mock_img.save = MagicMock(side_effect=lambda buf, format: buf.write(b"\x89PNG"))
+        patched_desktop.get_screenshot.return_value = mock_img
+
+        with patch("windows_mcp.vision.service.requests.post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {
+                "choices": [{"message": {"content": '[{"type":"button","label":"OK"}]'}}]
+            }
+            mock_post.return_value = mock_resp
+            with patch.dict("os.environ", {"VISION_API_URL": "http://test:8080/v1"}):
+                tools = await _get_tools()
+                result = await tools["VisionAnalyze"].fn(mode="elements")
+        assert "button" in result
+        assert "OK" in result
+
+    async def test_vision_elements_mode_empty_returns_message(self, patched_desktop):
+        """VisionAnalyze elements mode returns message when no elements found."""
+        mock_img = MagicMock()
+        mock_img.save = MagicMock(side_effect=lambda buf, format: buf.write(b"\x89PNG"))
+        patched_desktop.get_screenshot.return_value = mock_img
+
+        with patch("windows_mcp.vision.service.requests.post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {
+                "choices": [{"message": {"content": "[]"}}]
+            }
+            mock_post.return_value = mock_resp
+            with patch.dict("os.environ", {"VISION_API_URL": "http://test:8080/v1"}):
+                tools = await _get_tools()
+                result = await tools["VisionAnalyze"].fn(mode="elements")
+        assert "No UI elements" in result
+
+    async def test_vision_query_mode_with_query(self, patched_desktop):
+        """VisionAnalyze query mode with a query calls vision API."""
+        mock_img = MagicMock()
+        mock_img.save = MagicMock(side_effect=lambda buf, format: buf.write(b"\x89PNG"))
+        patched_desktop.get_screenshot.return_value = mock_img
+
+        with patch("windows_mcp.vision.service.requests.post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {
+                "choices": [{"message": {"content": "The dialog says 'Save changes?'"}}]
+            }
+            mock_post.return_value = mock_resp
+            with patch.dict("os.environ", {"VISION_API_URL": "http://test:8080/v1"}):
+                tools = await _get_tools()
+                result = await tools["VisionAnalyze"].fn(mode="query", query="What does the dialog say?")
+        assert "Save changes" in result
+
     async def test_vision_query_mode_requires_query(self, patched_desktop):
         """VisionAnalyze query mode requires a query parameter."""
         with patch.dict("os.environ", {"VISION_API_URL": "http://test:8080/v1"}):
             tools = await _get_tools()
             result = await tools["VisionAnalyze"].fn(mode="query", query="")
         assert "Error" in result
+
+    async def test_vision_unknown_mode_returns_error(self, patched_desktop):
+        """VisionAnalyze with invalid mode returns clear error."""
+        mock_img = MagicMock()
+        mock_img.save = MagicMock(side_effect=lambda buf, format: buf.write(b"\x89PNG"))
+        patched_desktop.get_screenshot.return_value = mock_img
+
+        with patch.dict("os.environ", {"VISION_API_URL": "http://test:8080/v1"}):
+            tools = await _get_tools()
+            result = await tools["VisionAnalyze"].fn(mode="invalid_mode")
+        assert "unknown mode" in result
+        assert "invalid_mode" in result
 
 
 # ---------------------------------------------------------------------------
