@@ -233,3 +233,43 @@ class TestRegistryList:
 
         result = registry.registry_list(path="HKCU:\\Software\\Empty")
         assert "No values or sub-keys found" in result
+
+
+class TestRegistryValueErrorPaths:
+    """Cover ValueError catch blocks in set, delete, and list (lines 92-93, 107-108, 144-145)."""
+
+    def test_set_value_error_on_bad_dword(self, registry):
+        """DWord with non-numeric value triggers ValueError in int() conversion."""
+        result = registry.registry_set(
+            path="HKCU:\\Software\\Test", name="Key", value="not-a-number", reg_type="DWord"
+        )
+        assert "Error writing registry" in result
+
+    def test_set_value_error_on_bad_qword(self, registry):
+        """QWord with non-numeric value triggers ValueError."""
+        result = registry.registry_set(
+            path="HKCU:\\Software\\Test", name="Key", value="xyz", reg_type="QWord"
+        )
+        assert "Error writing registry" in result
+
+    def test_set_value_error_on_bad_binary(self, registry):
+        """Binary with non-hex string triggers ValueError in bytes.fromhex()."""
+        result = registry.registry_set(
+            path="HKCU:\\Software\\Test", name="Key", value="not-hex", reg_type="Binary"
+        )
+        assert "Error writing registry" in result
+
+    def test_delete_value_error_on_invalid_hive(self, registry):
+        """Invalid hive in delete path triggers ValueError."""
+        result = registry.registry_delete(path="INVALID:\\Key", name="Val")
+        assert "Error deleting registry" in result
+
+    def test_delete_key_value_error_on_invalid_hive(self, registry):
+        """Invalid hive in delete key path triggers ValueError."""
+        result = registry.registry_delete(path="BOGUS:\\Key")
+        assert "Error deleting registry" in result
+
+    def test_list_value_error_on_invalid_hive(self, registry):
+        """Invalid hive in list path triggers ValueError."""
+        result = registry.registry_list(path="UNKNOWN:\\Key")
+        assert "Error listing registry" in result

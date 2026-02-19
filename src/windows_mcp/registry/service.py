@@ -72,16 +72,16 @@ class RegistryService:
         type_const_name = self._REG_TYPE_MAP[reg_type]
         reg_type_const = getattr(winreg, type_const_name)
 
-        if reg_type in ("DWord", "QWord"):
-            typed_value = int(value)
-        elif reg_type == "Binary":
-            typed_value = bytes.fromhex(value)
-        elif reg_type == "MultiString":
-            typed_value = value.split("\\0")
-        else:
-            typed_value = value
-
         try:
+            if reg_type in ("DWord", "QWord"):
+                typed_value = int(value)
+            elif reg_type == "Binary":
+                typed_value = bytes.fromhex(value)
+            elif reg_type == "MultiString":
+                typed_value = value.split("\\0")
+            else:
+                typed_value = value
+
             hive, subkey = self._parse_reg_path(path)
             winreg.CreateKey(hive, subkey)
             with winreg.OpenKey(hive, subkey, 0, winreg.KEY_SET_VALUE) as key:

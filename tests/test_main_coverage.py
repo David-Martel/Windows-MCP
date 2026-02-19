@@ -315,7 +315,9 @@ class TestMultiSelectValidation:
         with pytest.raises(ValueError, match=r"locs\[0\] must be \[x, y\]"):
             await tools["MultiSelect"].fn(locs=["100,200"])
 
-    async def test_multiselect_second_invalid_entry_raises_with_correct_index(self, patched_desktop):
+    async def test_multiselect_second_invalid_entry_raises_with_correct_index(
+        self, patched_desktop
+    ):
         """Validation error message includes the correct index of the bad entry."""
         tools = await _get_tools()
         with pytest.raises(ValueError, match=r"locs\[1\] must be \[x, y\]"):
@@ -385,9 +387,7 @@ class TestWaitForNullTreeState:
         with patch.object(main_module, "desktop", mock_desktop):
             with patch.object(main_module, "screen_size", SCREEN_SIZE):
                 tools = await _get_tools()
-                result = await tools["WaitFor"].fn(
-                    mode="element", name="SomeButton", timeout=1
-                )
+                result = await tools["WaitFor"].fn(mode="element", name="SomeButton", timeout=1)
         assert "Timeout" in result
         assert "SomeButton" in result
 
@@ -407,9 +407,7 @@ class TestWaitForNullTreeState:
         with patch.object(main_module, "desktop", mock_desktop):
             with patch.object(main_module, "screen_size", SCREEN_SIZE):
                 tools = await _get_tools()
-                result = await tools["WaitFor"].fn(
-                    mode="element", name="Submit", timeout=5
-                )
+                result = await tools["WaitFor"].fn(mode="element", name="Submit", timeout=5)
         assert "Element found" in result
         assert "Submit Button" in result
 
@@ -472,9 +470,7 @@ class TestInvokeToolPatternVariants:
         with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
             with patch("windows_mcp.uia.PatternId"):
                 tools = await _get_tools()
-                result = await tools["Invoke"].fn(
-                    loc=[100, 200], action="set_value", value="hello"
-                )
+                result = await tools["Invoke"].fn(loc=[100, 200], action="set_value", value="hello")
         assert "does not support ValuePattern" in result
         assert "ReadOnlyField" in result
 
@@ -562,9 +558,7 @@ class TestScrapeToolNullTreeState:
         assert "No DOM information found" in result
         assert "https://example.com" in result
 
-    async def test_scrape_dom_mode_tree_state_without_dom_node_returns_error(
-        self, patched_desktop
-    ):
+    async def test_scrape_dom_mode_tree_state_without_dom_node_returns_error(self, patched_desktop):
         """use_dom=True when tree_state.dom_node is None also returns the 'No DOM' message."""
         ts = TreeState(dom_node=None, interactive_nodes=[])
         ds = DesktopState(
@@ -587,3 +581,140 @@ class TestScrapeToolNullTreeState:
         result = await tools["Scrape"].fn(url="https://example.com", use_dom=False)
         assert "https://example.com" in result
         patched_desktop.scrape.assert_called_once_with("https://example.com")
+
+
+# ---------------------------------------------------------------------------
+# Cluster 10 - main() mode/transport validation paths
+# ---------------------------------------------------------------------------
+
+
+class TestMainFunctionValidation:
+    """Cover lines 1088-1089, 1104-1105, 1106-1107 in main()."""
+
+    def test_invalid_transport_local_mode(self):
+        """Invalid transport in local mode raises ValueError (lines 1088-1089)."""
+        with patch.dict(os.environ, {"MODE": "local"}, clear=False):
+            with patch.object(main_module, "mcp"):
+                # Simulate calling main with invalid transport
+                with pytest.raises(ValueError, match="Invalid transport"):
+                    main_module.main.callback(
+                        transport="invalid-transport",
+                        host="localhost",
+                        port=8000,
+                        api_key=None,
+                        generate_key=False,
+                        rotate_key=False,
+                    )
+
+    def test_invalid_mode_raises(self):
+        """Invalid mode raises ValueError (lines 1106-1107)."""
+        with patch.dict(os.environ, {"MODE": "bogus-mode"}, clear=False):
+            with pytest.raises(ValueError, match="Invalid mode"):
+                main_module.main.callback(
+                    transport="stdio",
+                    host="localhost",
+                    port=8000,
+                    api_key=None,
+                    generate_key=False,
+                    rotate_key=False,
+                )
+
+    def test_remote_mode_missing_sandbox_id(self):
+        """Remote mode without SANDBOX_ID raises ValueError (line 1092)."""
+        with patch.dict(
+            os.environ, {"MODE": "remote", "SANDBOX_ID": "", "API_KEY": "k"}, clear=False
+        ):
+            with pytest.raises(ValueError, match="SANDBOX_ID is required"):
+                main_module.main.callback(
+                    transport="stdio",
+                    host="localhost",
+                    port=8000,
+                    api_key=None,
+                    generate_key=False,
+                    rotate_key=False,
+                )
+
+    def test_remote_mode_missing_api_key(self):
+        """Remote mode without API_KEY raises ValueError (lines 1093-1094)."""
+        with patch.dict(
+            os.environ, {"MODE": "remote", "SANDBOX_ID": "sb123", "API_KEY": ""}, clear=False
+        ):
+            with pytest.raises(ValueError, match="API_KEY is required"):
+                main_module.main.callback(
+                    transport="stdio",
+                    host="localhost",
+                    port=8000,
+                    api_key=None,
+                    generate_key=False,
+                    rotate_key=False,
+                )
+
+    def test_generate_key_exits(self):
+        """--generate-key flag generates key and exits (lines 1038-1043)."""
+        with patch.object(main_module.AuthKeyManager, "generate_key", return_value="test-key-123"):
+            with pytest.raises(SystemExit) as exc_info:
+                main_module.main.callback(
+                    transport="stdio",
+                    host="localhost",
+                    port=8000,
+                    api_key=None,
+                    generate_key=True,
+                    rotate_key=False,
+                )
+            assert exc_info.value.code == 0
+
+    def test_rotate_key_exits(self):
+        """--rotate-key flag rotates key and exits (lines 1045-1049)."""
+        with patch.object(main_module.AuthKeyManager, "rotate_key", return_value="new-key-456"):
+            with pytest.raises(SystemExit) as exc_info:
+                main_module.main.callback(
+                    transport="stdio",
+                    host="localhost",
+                    port=8000,
+                    api_key=None,
+                    generate_key=False,
+                    rotate_key=True,
+                )
+            assert exc_info.value.code == 0
+
+    def test_sse_without_auth_non_localhost_exits(self):
+        """SSE on non-localhost without auth exits with code 1 (lines 1062-1073)."""
+        with patch.object(main_module.AuthKeyManager, "load_key", return_value=None):
+            with pytest.raises(SystemExit) as exc_info:
+                main_module.main.callback(
+                    transport="sse",
+                    host="0.0.0.0",
+                    port=8000,
+                    api_key=None,
+                    generate_key=False,
+                    rotate_key=False,
+                )
+            assert exc_info.value.code == 1
+
+    def test_sse_localhost_no_auth_warns_but_runs(self):
+        """SSE on localhost without auth logs warning but starts server (line 1074)."""
+        with patch.object(main_module.AuthKeyManager, "load_key", return_value=None):
+            with patch.object(main_module, "mcp") as mock_mcp:
+                main_module.main.callback(
+                    transport="sse",
+                    host="localhost",
+                    port=8000,
+                    api_key=None,
+                    generate_key=False,
+                    rotate_key=False,
+                )
+                mock_mcp.run.assert_called_once()
+
+    def test_sse_with_api_key_adds_middleware(self):
+        """SSE with --api-key adds BearerAuthMiddleware (lines 1057-1059)."""
+        with patch.object(main_module, "mcp") as mock_mcp:
+            main_module.main.callback(
+                transport="sse",
+                host="localhost",
+                port=8000,
+                api_key="my-secret-key",
+                generate_key=False,
+                rotate_key=False,
+            )
+            mock_mcp.add_middleware.assert_called_once()
+            mock_mcp.run.assert_called_once()
