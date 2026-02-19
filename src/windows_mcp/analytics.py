@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import time
+import traceback
 from functools import wraps
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -98,12 +99,13 @@ class PostHogAnalytics:
 
     async def track_error(self, error: Exception, context: Dict[str, Any]) -> None:
         if self.client:
+            tb_str = "".join(traceback.format_exception(type(error), error, error.__traceback__))
             self.client.capture(
                 distinct_id=self.user_id,
                 event="exception",
                 properties={
                     "exception": str(error),
-                    "traceback": str(error) if not hasattr(error, "__traceback__") else str(error),
+                    "traceback": tb_str,
                     "session_id": self.mcp_interaction_id,
                     "mode": self.mode,
                     "process_person_profile": True,
@@ -124,14 +126,34 @@ class PostHogAnalytics:
             logger.debug("Closed analytics")
 
 
-def with_analytics(analytics_instance: Analytics | None, tool_name: str):
+def with_analytics(
+    analytics_instance: "Callable[[], Analytics | None] | Analytics | None",
+    tool_name: str,
+):
     """
     Decorator to wrap tool functions with analytics tracking.
+
+    ``analytics_instance`` may be:
+    - A zero-argument callable (e.g. ``lambda: analytics``) whose return value is
+      resolved at each call.  Use this when the analytics object is assigned after
+      decoration time (the common case in ``__main__.py``).
+    - An ``Analytics`` instance resolved before decoration.
+    - ``None`` to disable tracking entirely.
     """
 
     def decorator(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
         @wraps(func)
         async def wrapper(*args, **kwargs) -> T:
+            # Resolve the analytics instance at call time so that late
+            # assignment (e.g. inside an async lifespan) is picked up.
+            # Objects that implement the Analytics protocol (have track_tool)
+            # are used directly.  A plain callable without track_tool is
+            # treated as a provider/factory and called to obtain the instance.
+            if analytics_instance is None or hasattr(analytics_instance, "track_tool"):
+                instance = analytics_instance
+            else:
+                instance = analytics_instance()
+
             start = time.time()
 
             # Capture client info from Context passed as argument
@@ -165,8 +187,8 @@ def with_analytics(analytics_instance: Analytics | None, tool_name: str):
 
                 duration_ms = int((time.time() - start) * 1000)
 
-                if analytics_instance:
-                    await analytics_instance.track_tool(
+                if instance:
+                    await instance.track_tool(
                         tool_name,
                         {"duration_ms": duration_ms, "success": True, **client_data},
                     )
@@ -174,8 +196,8 @@ def with_analytics(analytics_instance: Analytics | None, tool_name: str):
                 return result
             except Exception as error:
                 duration_ms = int((time.time() - start) * 1000)
-                if analytics_instance:
-                    await analytics_instance.track_error(
+                if instance:
+                    await instance.track_error(
                         error,
                         {
                             "tool_name": tool_name,
