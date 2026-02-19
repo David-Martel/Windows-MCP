@@ -1,7 +1,7 @@
 # Windows-MCP TODO
 
 **Generated:** 2026-02-18 from REVIEW.md findings
-**Last updated:** 2026-02-19 -- 1955 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete
+**Last updated:** 2026-02-19 -- 2038 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete
 **Reference:** See [REVIEW.md](REVIEW.md) for full context on each item.
 
 ---
@@ -66,7 +66,7 @@
 - [x] **[A7] Add MCP tool handler integration tests** -- Done. 145 headless integration tests in `test_mcp_integration.py` covering all 23 tools via `tool.fn()`. 4 tiers: server structure, tool dispatch, error handling, transport+auth.
 - [ ] **Add WatchDog service tests** -- Test threading, COM event handling, callback dispatch.
 - [ ] **Add Desktop.get_state orchestration tests** -- Test the composition of windows, tree state, screenshots, VDM.
-- [ ] **Add tree_traversal unit tests** -- Test with mock UIA trees. Cover DOM/interactive/scrollable classification.
+- [x] **Add tree_traversal unit tests** -- 54 tests covering tree_traversal (28), focus debounce (6), DOM correction (14), plus mock infrastructure. `test_tree_service.py` up from 4 to 58 tests.
 - [ ] **Achieve 85% overall test coverage** -- Currently at 64% overall (1671 tests). Testable modules at 82-100%. COM/UIA modules at 14-42% (require live desktop).
 
 ---
@@ -81,7 +81,7 @@
 - [x] **[P10] Fix BuildUpdatedCache** -- Subtree caching attempted first (line 916), falls back to per-node only on failure. `get_cached_children` already checks scope flags.
 - [x] **Use set literals in tree/config.py** -- Already uses `{...}` set literals. Verified no `set([...])` remains.
 - [x] **[A6] Consolidate input simulation** -- Rust Win32 `SendInput` is primary path in `InputService` (click, type, scroll, drag, move, shortcut). Falls back to pyautogui when native unavailable.
-- [ ] **Add type annotations to all public APIs**.
+- [x] **Add type annotations to all public APIs** -- 25 methods annotated across InputService (7), WindowService (3), Desktop (15). Includes Generator import for context managers.
 - [x] **[T3] Fix singleton TOCTOU in _AutomationClient** -- Added double-checked locking with `threading.Lock()` to `instance()`.
 
 ---
