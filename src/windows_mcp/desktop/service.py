@@ -5,6 +5,7 @@ import logging
 import os
 import random
 import re
+import threading
 import winreg
 from contextlib import contextmanager
 from locale import getpreferredencoding
@@ -46,16 +47,19 @@ pg.PAUSE = 0.05
 
 class Desktop:
     def __init__(self):
+        from windows_mcp.input import InputService
         from windows_mcp.registry import RegistryService
         from windows_mcp.scraper import ScraperService
         from windows_mcp.shell import ShellService
 
         self.encoding = getpreferredencoding()
+        self._input = InputService()
         self._registry = RegistryService()
         self._shell = ShellService()
         self._scraper = ScraperService()
         self.tree = Tree(self)
         self.desktop_state = None
+        self._state_lock = threading.Lock()
 
     @staticmethod
     def _ps_quote(value: str) -> str:
@@ -137,7 +141,7 @@ class Desktop:
         else:
             screenshot = None
 
-        self.desktop_state = DesktopState(
+        desktop_state = DesktopState(
             active_window=active_window,
             windows=windows,
             active_desktop=active_desktop,
@@ -145,10 +149,12 @@ class Desktop:
             screenshot=screenshot,
             tree_state=tree_state,
         )
+        with self._state_lock:
+            self.desktop_state = desktop_state
         # Log the time taken to capture the state
         end_time = time()
         logger.info(f"Desktop State capture took {end_time - start_time:.2f} seconds")
-        return self.desktop_state
+        return desktop_state
 
     def get_window_status(self, control: uia.Control) -> Status:
         if uia.IsIconic(control.NativeWindowHandle):
@@ -450,8 +456,7 @@ class Desktop:
         return bounding_rectangle.xcenter(), bounding_rectangle.ycenter()
 
     def click(self, loc: tuple[int, int], button: str = "left", clicks: int = 2):
-        x, y = loc
-        pg.click(x, y, button=button, clicks=clicks, duration=0.1)
+        return self._input.click(loc, button, clicks)
 
     def type(
         self,
@@ -461,25 +466,7 @@ class Desktop:
         clear: bool | str = False,
         press_enter: bool | str = False,
     ):
-        x, y = loc
-        pg.leftClick(x, y)
-        if caret_position == "start":
-            pg.press("home")
-        elif caret_position == "end":
-            pg.press("end")
-        else:
-            pass
-
-        # Handle both boolean and string 'true'/'false'
-        if clear is True or (isinstance(clear, str) and clear.lower() == "true"):
-            pg.sleep(0.5)
-            pg.hotkey("ctrl", "a")
-            pg.press("backspace")
-
-        pg.typewrite(text, interval=0.02)
-
-        if press_enter is True or (isinstance(press_enter, str) and press_enter.lower() == "true"):
-            pg.press("enter")
+        return self._input.type(loc, text, caret_position, clear, press_enter)
 
     def scroll(
         self,
@@ -488,69 +475,22 @@ class Desktop:
         direction: Literal["up", "down", "left", "right"] = "down",
         wheel_times: int = 1,
     ) -> str | None:
-        if loc:
-            self.move(loc)
-        match type:
-            case "vertical":
-                match direction:
-                    case "up":
-                        uia.WheelUp(wheel_times)
-                    case "down":
-                        uia.WheelDown(wheel_times)
-                    case _:
-                        return 'Invalid direction. Use "up" or "down".'
-            case "horizontal":
-                match direction:
-                    case "left":
-                        pg.keyDown("Shift")
-                        pg.sleep(0.05)
-                        uia.WheelUp(wheel_times)
-                        pg.sleep(0.05)
-                        pg.keyUp("Shift")
-                    case "right":
-                        pg.keyDown("Shift")
-                        pg.sleep(0.05)
-                        uia.WheelDown(wheel_times)
-                        pg.sleep(0.05)
-                        pg.keyUp("Shift")
-                    case _:
-                        return 'Invalid direction. Use "left" or "right".'
-            case _:
-                return 'Invalid type. Use "horizontal" or "vertical".'
-        return None
+        return self._input.scroll(loc, type, direction, wheel_times)
 
     def drag(self, loc: tuple[int, int]):
-        x, y = loc
-        pg.sleep(0.5)
-        pg.dragTo(x, y, duration=0.6)
+        return self._input.drag(loc)
 
     def move(self, loc: tuple[int, int]):
-        x, y = loc
-        pg.moveTo(x, y, duration=0.1)
+        return self._input.move(loc)
 
     def shortcut(self, shortcut: str):
-        shortcut = shortcut.split("+")
-        if len(shortcut) > 1:
-            pg.hotkey(*shortcut)
-        else:
-            pg.press("".join(shortcut))
+        return self._input.shortcut(shortcut)
 
     def multi_select(self, press_ctrl: bool | str = False, locs: list[tuple[int, int]] = []):
-        press_ctrl = press_ctrl is True or (
-            isinstance(press_ctrl, str) and press_ctrl.lower() == "true"
-        )
-        if press_ctrl:
-            pg.keyDown("ctrl")
-        for loc in locs:
-            x, y = loc
-            pg.click(x, y, duration=0.2)
-            pg.sleep(0.5)
-        pg.keyUp("ctrl")
+        return self._input.multi_select(press_ctrl, locs)
 
     def multi_edit(self, locs: list[tuple[int, int, str]]):
-        for loc in locs:
-            x, y, text = loc
-            self.type((x, y), text=text, clear=True)
+        return self._input.multi_edit(locs)
 
     # --- Scraper facade (delegates to ScraperService) ---
 

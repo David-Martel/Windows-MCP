@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import weakref
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import time
@@ -56,6 +57,7 @@ class Tree:
             height=self.screen_size.height,
         )
         self.tree_state = None
+        self._state_lock = threading.Lock()
 
     def get_state(
         self,
@@ -90,16 +92,18 @@ class Tree:
             shortcut="",
             is_focused=False,
         )
-        self.tree_state = TreeState(
+        tree_state = TreeState(
             root_node=root_node,
             dom_node=dom_node,
             interactive_nodes=interactive_nodes,
             scrollable_nodes=scrollable_nodes,
             dom_informative_nodes=dom_informative_nodes,
         )
+        with self._state_lock:
+            self.tree_state = tree_state
         end_time = time()
         logger.info(f"Tree State capture took {end_time - start_time:.2f} seconds")
-        return self.tree_state
+        return tree_state
 
     def get_window_wise_nodes(
         self,
