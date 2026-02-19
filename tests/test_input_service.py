@@ -401,7 +401,7 @@ class TestScroll:
             mock_pg.position.return_value = (500, 500)
             result = svc.scroll(type="horizontal", direction="left", wheel_times=1)
             mock_pg.keyDown.assert_called_with("Shift")
-            mock_uia.WheelUp.assert_called_once_with(1)
+            mock_uia.WheelDown.assert_called_once_with(1)
             mock_pg.keyUp.assert_called_with("Shift")
             assert result is None
 
@@ -415,7 +415,7 @@ class TestScroll:
             mock_pg.position.return_value = (500, 500)
             result = svc.scroll(type="horizontal", direction="right", wheel_times=1)
             mock_pg.keyDown.assert_called_with("Shift")
-            mock_uia.WheelDown.assert_called_once_with(1)
+            mock_uia.WheelUp.assert_called_once_with(1)
             mock_pg.keyUp.assert_called_with("Shift")
             assert result is None
 
@@ -431,14 +431,14 @@ class TestScroll:
             assert result is None
 
     def test_fallback_horizontal_shift_released_on_error(self, svc):
-        """Shift must be released (via finally) even if WheelUp raises."""
+        """Shift must be released (via finally) even if WheelDown raises."""
         with (
             patch(_NATIVE_SCROLL, return_value=None),
             patch(_UIA) as mock_uia,
             patch(_PG) as mock_pg,
         ):
             mock_pg.position.return_value = (500, 500)
-            mock_uia.WheelUp.side_effect = RuntimeError("COM error")
+            mock_uia.WheelDown.side_effect = RuntimeError("COM error")
             with pytest.raises(RuntimeError):
                 svc.scroll(type="horizontal", direction="left", wheel_times=1)
             mock_pg.keyUp.assert_called_with("Shift")

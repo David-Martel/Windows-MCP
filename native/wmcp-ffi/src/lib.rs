@@ -16,6 +16,9 @@ pub const WMCP_ERROR: i32 = -1;
 /// unreasonable allocations from corrupted input.
 const MAX_HANDLE_COUNT: usize = 256;
 
+/// Maximum text length for `wmcp_send_text`.
+const MAX_TEXT_LENGTH: usize = 10_000;
+
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
 }
@@ -28,23 +31,20 @@ fn set_last_error(msg: &str) {
 
 /// Retrieve the last error message (thread-local).
 ///
-/// Returns a pointer valid until the next `set_last_error` call on this
-/// thread (i.e. the next `wmcp_*` function call).  Returns null if no
-/// error has occurred.
+/// Returns a **heap-allocated** copy of the error string.  The caller owns
+/// the returned pointer and **must** free it with `wmcp_free_string()`.
+/// Returns null if no error has occurred.
 ///
-/// # Safety
-///
-/// The returned pointer borrows from thread-local storage.  The caller
-/// must copy the string immediately -- the pointer becomes dangling after
-/// the next `wmcp_*` call on the same thread.  In particular, do NOT
-/// hold the pointer across calls to other `wmcp_*` functions.
+/// This avoids the dangling-pointer hazard of returning a borrow into
+/// thread-local storage.
 #[no_mangle]
-pub extern "C" fn wmcp_last_error() -> *const c_char {
+pub extern "C" fn wmcp_last_error() -> *mut c_char {
     LAST_ERROR.with(|e| {
         e.borrow()
             .as_ref()
-            .map(|s| s.as_ptr())
-            .unwrap_or(ptr::null())
+            .and_then(|s| CString::new(s.as_bytes()).ok())
+            .map(|copy| copy.into_raw())
+            .unwrap_or(ptr::null_mut())
     })
 }
 
@@ -103,6 +103,7 @@ pub unsafe extern "C" fn wmcp_system_info(out_json: *mut *mut c_char) -> i32 {
 /// # Safety
 ///
 /// `text` must be a valid null-terminated UTF-8 C string.
+/// `out_count` is optional (may be null).
 #[no_mangle]
 pub unsafe extern "C" fn wmcp_send_text(text: *const c_char, out_count: *mut u32) -> i32 {
     if text.is_null() {
@@ -117,6 +118,14 @@ pub unsafe extern "C" fn wmcp_send_text(text: *const c_char, out_count: *mut u32
             return WMCP_ERROR;
         }
     };
+
+    if text_str.len() > MAX_TEXT_LENGTH {
+        set_last_error(&format!(
+            "text length {} exceeds maximum {MAX_TEXT_LENGTH}",
+            text_str.len()
+        ));
+        return WMCP_ERROR;
+    }
 
     let count = wmcp_core::input::send_text_raw(text_str);
     if !out_count.is_null() {
@@ -144,11 +153,169 @@ pub extern "C" fn wmcp_send_click(x: i32, y: i32, button: i32) -> i32 {
     }
 }
 
+/// Move the mouse cursor to absolute screen coordinates.
+///
+/// Returns `WMCP_OK` on success.
+#[no_mangle]
+pub extern "C" fn wmcp_send_mouse_move(x: i32, y: i32) -> i32 {
+    wmcp_core::input::send_mouse_move_raw(x, y);
+    WMCP_OK
+}
+
+/// Scroll the mouse wheel at absolute screen coordinates.
+///
+/// `delta` is in WHEEL_DELTA units (120 = one notch).
+/// `horizontal`: 0 = vertical, nonzero = horizontal.
+#[no_mangle]
+pub extern "C" fn wmcp_send_scroll(x: i32, y: i32, delta: i32, horizontal: i32) -> i32 {
+    wmcp_core::input::send_scroll_raw(x, y, delta, horizontal != 0);
+    WMCP_OK
+}
+
+/// Send a key combination (e.g. Ctrl+C).
+///
+/// # Safety
+///
+/// `vk_codes` must point to `count` contiguous `u16` values.
+#[no_mangle]
+pub unsafe extern "C" fn wmcp_send_hotkey(vk_codes: *const u16, count: usize) -> i32 {
+    if vk_codes.is_null() || count == 0 {
+        set_last_error("null or empty vk_codes");
+        return WMCP_ERROR;
+    }
+    if count > 8 {
+        set_last_error("hotkey count exceeds maximum 8");
+        return WMCP_ERROR;
+    }
+    let codes = unsafe { std::slice::from_raw_parts(vk_codes, count) };
+    wmcp_core::input::send_hotkey_raw(codes);
+    WMCP_OK
+}
+
+/// Enumerate visible windows as a JSON array of handle integers.
+///
+/// # Safety
+///
+/// `out_json` must be a valid pointer. Caller must free with `wmcp_free_string()`.
+#[no_mangle]
+pub unsafe extern "C" fn wmcp_enumerate_windows(out_json: *mut *mut c_char) -> i32 {
+    if out_json.is_null() {
+        set_last_error("out_json is null");
+        return WMCP_ERROR;
+    }
+    match wmcp_core::window::enumerate_visible_windows() {
+        Ok(handles) => match serde_json::to_string(&handles) {
+            Ok(json) => match CString::new(json) {
+                Ok(cstr) => {
+                    unsafe { *out_json = cstr.into_raw() };
+                    WMCP_OK
+                }
+                Err(e) => {
+                    set_last_error(&format!("CString conversion failed: {e}"));
+                    WMCP_ERROR
+                }
+            },
+            Err(e) => {
+                set_last_error(&format!("JSON serialization failed: {e}"));
+                WMCP_ERROR
+            }
+        },
+        Err(e) => {
+            set_last_error(&e.to_string());
+            WMCP_ERROR
+        }
+    }
+}
+
+/// List all visible windows with details as a JSON array.
+///
+/// # Safety
+///
+/// `out_json` must be a valid pointer. Caller must free with `wmcp_free_string()`.
+#[no_mangle]
+pub unsafe extern "C" fn wmcp_list_windows(out_json: *mut *mut c_char) -> i32 {
+    if out_json.is_null() {
+        set_last_error("out_json is null");
+        return WMCP_ERROR;
+    }
+    match wmcp_core::window::list_windows() {
+        Ok(windows) => match serde_json::to_string(&windows) {
+            Ok(json) => match CString::new(json) {
+                Ok(cstr) => {
+                    unsafe { *out_json = cstr.into_raw() };
+                    WMCP_OK
+                }
+                Err(e) => {
+                    set_last_error(&format!("CString conversion failed: {e}"));
+                    WMCP_ERROR
+                }
+            },
+            Err(e) => {
+                set_last_error(&format!("JSON serialization failed: {e}"));
+                WMCP_ERROR
+            }
+        },
+        Err(e) => {
+            set_last_error(&e.to_string());
+            WMCP_ERROR
+        }
+    }
+}
+
+/// Capture a screenshot as PNG bytes.
+///
+/// # Safety
+///
+/// `out_buf` must be a valid pointer to a `*mut u8`.
+/// `out_len` must be a valid pointer to a `usize`.
+/// On success, `*out_buf` is set to a heap-allocated buffer and `*out_len` to its length.
+/// Caller must free the buffer with `wmcp_free_string()` (cast to `*mut c_char`).
+#[no_mangle]
+pub unsafe extern "C" fn wmcp_capture_screenshot_png(
+    monitor_index: u32,
+    out_buf: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    if out_buf.is_null() || out_len.is_null() {
+        set_last_error("null pointer argument");
+        return WMCP_ERROR;
+    }
+    match wmcp_core::screenshot::capture_png(monitor_index) {
+        Ok(png_bytes) => {
+            let len = png_bytes.len();
+            let boxed = png_bytes.into_boxed_slice();
+            let ptr = Box::into_raw(boxed) as *mut u8;
+            unsafe {
+                *out_buf = ptr;
+                *out_len = len;
+            }
+            WMCP_OK
+        }
+        Err(e) => {
+            set_last_error(&e.to_string());
+            WMCP_ERROR
+        }
+    }
+}
+
+/// Free a byte buffer allocated by `wmcp_capture_screenshot_png`.
+///
+/// # Safety
+///
+/// `ptr` must be a buffer returned by `wmcp_capture_screenshot_png` or null.
+/// `len` must be the corresponding length.
+#[no_mangle]
+pub unsafe extern "C" fn wmcp_free_buffer(ptr: *mut u8, len: usize) {
+    if !ptr.is_null() && len > 0 {
+        drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)) });
+    }
+}
+
 /// Capture the UIA tree for window handles as a JSON string.
 ///
 /// # Safety
 ///
-/// `handles` must point to `handle_count` valid `isize` values.
+/// `handles` must point to `handle_count` contiguous, initialized `isize` values.
 /// `*out_json` will be set to a heap-allocated string; free with
 /// `wmcp_free_string()`.
 #[no_mangle]
@@ -163,6 +330,20 @@ pub unsafe extern "C" fn wmcp_capture_tree(
         return WMCP_ERROR;
     }
 
+    if handle_count == 0 {
+        // Return empty JSON array for zero handles
+        match CString::new("[]") {
+            Ok(cstr) => {
+                unsafe { *out_json = cstr.into_raw() };
+                return WMCP_OK;
+            }
+            Err(_) => {
+                set_last_error("CString allocation failed");
+                return WMCP_ERROR;
+            }
+        }
+    }
+
     if handle_count > MAX_HANDLE_COUNT {
         set_last_error(&format!(
             "handle_count {handle_count} exceeds maximum {MAX_HANDLE_COUNT}"
@@ -170,18 +351,28 @@ pub unsafe extern "C" fn wmcp_capture_tree(
         return WMCP_ERROR;
     }
 
+    // Validate pointer alignment
+    if (handles as usize) % std::mem::align_of::<isize>() != 0 {
+        set_last_error("handles pointer is not properly aligned");
+        return WMCP_ERROR;
+    }
+
     let handle_slice = unsafe { std::slice::from_raw_parts(handles, handle_count) };
     let snapshots = wmcp_core::tree::capture_tree_raw(handle_slice, max_depth);
 
     match serde_json::to_string(&snapshots) {
-        Ok(json) => match CString::new(json) {
-            Ok(cstr) => {
-                unsafe { *out_json = cstr.into_raw() };
-                WMCP_OK
-            }
-            Err(e) => {
-                set_last_error(&format!("CString conversion failed: {e}"));
-                WMCP_ERROR
+        Ok(json) => {
+            // Sanitize null bytes that would break CString
+            let json_sanitized = json.replace('\0', "\\u0000");
+            match CString::new(json_sanitized) {
+                Ok(cstr) => {
+                    unsafe { *out_json = cstr.into_raw() };
+                    WMCP_OK
+                }
+                Err(e) => {
+                    set_last_error(&format!("CString conversion failed: {e}"));
+                    WMCP_ERROR
+                }
             }
         },
         Err(e) => {

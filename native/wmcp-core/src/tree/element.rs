@@ -11,6 +11,7 @@ use serde::Serialize;
 /// All string fields are `String` (UTF-8).  `bounding_rect` stores
 /// `[left, top, right, bottom]` as `f64` to match the Python convention.
 #[derive(Debug, Clone, Serialize)]
+#[allow(clippy::struct_excessive_bools)] // Direct UIA property mapping
 pub struct TreeElementSnapshot {
     pub name: String,
     pub automation_id: String,

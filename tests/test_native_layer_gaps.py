@@ -723,13 +723,13 @@ class TestInputServiceScrollBranches:
         mock_scroll.assert_called_once_with(123, 456, -120, False)
 
     def test_fallback_horizontal_shift_released_even_on_wheel_exception(self):
-        """keyUp("Shift") is called even if WheelUp raises in fallback path."""
+        """keyUp("Shift") is called even if WheelDown raises in fallback path."""
         svc = self._make_service()
         with (
             patch("windows_mcp.input.service.native_send_scroll", return_value=None),
             patch("windows_mcp.input.service.pg") as mock_pg,
             patch(
-                "windows_mcp.input.service.uia.WheelUp",
+                "windows_mcp.input.service.uia.WheelDown",
                 side_effect=RuntimeError("COM error"),
             ),
         ):

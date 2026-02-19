@@ -33,24 +33,19 @@ impl COMGuard {
 
         let hresult_value = hr.0 as u32;
         match hresult_value {
-            // S_OK -- newly initialised.
-            0x0 => Ok(COMGuard {
-                should_uninit: true,
-                _not_send: std::marker::PhantomData,
-            }),
-            // S_FALSE -- already initialised on this thread.
-            0x1 => Ok(COMGuard {
+            // S_OK (newly initialised) or S_FALSE (already initialised).
+            0x0 | 0x1 => Ok(Self {
                 should_uninit: true,
                 _not_send: std::marker::PhantomData,
             }),
             // RPC_E_CHANGED_MODE -- thread already has STA.  COM is usable
             // but we requested MTA, so log a warning for diagnostics.
-            0x80010106 => {
+            0x8001_0106 => {
                 log::warn!(
                     "CoInitializeEx: RPC_E_CHANGED_MODE -- thread already has STA apartment, \
                      using existing apartment instead of MTA"
                 );
-                Ok(COMGuard {
+                Ok(Self {
                     should_uninit: false,
                     _not_send: std::marker::PhantomData,
                 })

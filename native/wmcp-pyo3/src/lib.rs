@@ -10,6 +10,12 @@ use pyo3::types::{PyDict, PyList};
 
 use wmcp_core::tree::element::TreeElementSnapshot;
 
+/// Maximum text length accepted by `send_text` (matches core).
+const MAX_SEND_TEXT_LEN: usize = 10_000;
+
+/// Maximum window handles accepted by `capture_tree` (matches FFI).
+const MAX_HANDLE_COUNT: usize = 256;
+
 // ---------------------------------------------------------------------------
 // Error conversion helper
 // ---------------------------------------------------------------------------
@@ -65,6 +71,30 @@ fn snapshot_to_py_dict(py: Python<'_>, root: &TreeElementSnapshot) -> PyResult<P
     root_list.get_item(0).map(|item| item.into())
 }
 
+/// Convert a [`WindowInfo`] to a Python dict.
+fn window_info_to_dict(
+    py: Python<'_>,
+    info: &wmcp_core::window::WindowInfo,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("hwnd", info.hwnd)?;
+    dict.set_item("title", &info.title)?;
+    dict.set_item("class_name", &info.class_name)?;
+    dict.set_item("pid", info.pid)?;
+    dict.set_item("is_minimized", info.is_minimized)?;
+    dict.set_item("is_maximized", info.is_maximized)?;
+    dict.set_item("is_visible", info.is_visible)?;
+
+    let rect = PyDict::new(py);
+    rect.set_item("left", info.rect.left)?;
+    rect.set_item("top", info.rect.top)?;
+    rect.set_item("right", info.rect.right)?;
+    rect.set_item("bottom", info.rect.bottom)?;
+    dict.set_item("rect", rect)?;
+
+    Ok(dict.into())
+}
+
 // ---------------------------------------------------------------------------
 // system_info
 // ---------------------------------------------------------------------------
@@ -115,6 +145,13 @@ fn capture_tree(
     window_handles: Vec<isize>,
     max_depth: Option<usize>,
 ) -> PyResult<PyObject> {
+    if window_handles.len() > MAX_HANDLE_COUNT {
+        return Err(PyRuntimeError::new_err(format!(
+            "window_handles length {} exceeds maximum {MAX_HANDLE_COUNT}",
+            window_handles.len()
+        )));
+    }
+
     let max_depth = max_depth.unwrap_or(wmcp_core::tree::MAX_TREE_DEPTH);
 
     let snapshots = py.allow_threads(|| {
@@ -137,6 +174,12 @@ fn capture_tree(
 #[pyfunction]
 #[pyo3(signature = (text,))]
 fn send_text(py: Python<'_>, text: &str) -> PyResult<u32> {
+    if text.len() > MAX_SEND_TEXT_LEN {
+        return Err(PyRuntimeError::new_err(format!(
+            "text length {} exceeds maximum {MAX_SEND_TEXT_LEN}",
+            text.len()
+        )));
+    }
     let text_owned = text.to_owned();
     Ok(py.allow_threads(move || wmcp_core::input::send_text_raw(&text_owned)))
 }
@@ -206,23 +249,7 @@ fn get_window_info(py: Python<'_>, hwnd: isize) -> PyResult<PyObject> {
         .allow_threads(move || wmcp_core::window::get_window_info(hwnd))
         .map_err(to_py_err)?;
 
-    let dict = PyDict::new(py);
-    dict.set_item("hwnd", info.hwnd)?;
-    dict.set_item("title", &info.title)?;
-    dict.set_item("class_name", &info.class_name)?;
-    dict.set_item("pid", info.pid)?;
-    dict.set_item("is_minimized", info.is_minimized)?;
-    dict.set_item("is_maximized", info.is_maximized)?;
-    dict.set_item("is_visible", info.is_visible)?;
-
-    let rect = PyDict::new(py);
-    rect.set_item("left", info.rect.left)?;
-    rect.set_item("top", info.rect.top)?;
-    rect.set_item("right", info.rect.right)?;
-    rect.set_item("bottom", info.rect.bottom)?;
-    dict.set_item("rect", rect)?;
-
-    Ok(dict.into())
+    window_info_to_dict(py, &info)
 }
 
 /// Get the foreground (active) window handle.
@@ -240,26 +267,44 @@ fn list_windows(py: Python<'_>) -> PyResult<PyObject> {
 
     let result = PyList::empty(py);
     for info in &windows {
-        let dict = PyDict::new(py);
-        dict.set_item("hwnd", info.hwnd)?;
-        dict.set_item("title", &info.title)?;
-        dict.set_item("class_name", &info.class_name)?;
-        dict.set_item("pid", info.pid)?;
-        dict.set_item("is_minimized", info.is_minimized)?;
-        dict.set_item("is_maximized", info.is_maximized)?;
-        dict.set_item("is_visible", info.is_visible)?;
-
-        let rect = PyDict::new(py);
-        rect.set_item("left", info.rect.left)?;
-        rect.set_item("top", info.rect.top)?;
-        rect.set_item("right", info.rect.right)?;
-        rect.set_item("bottom", info.rect.bottom)?;
-        dict.set_item("rect", rect)?;
-
-        result.append(dict)?;
+        result.append(window_info_to_dict(py, info)?)?;
     }
 
     Ok(result.into())
+}
+
+// ---------------------------------------------------------------------------
+// screenshot functions
+// ---------------------------------------------------------------------------
+
+/// Capture a screenshot as raw BGRA pixel bytes.
+///
+/// Returns a dict with keys: `width` (int), `height` (int), `data` (bytes).
+#[pyfunction]
+#[pyo3(signature = (monitor_index=0))]
+fn capture_screenshot_raw(py: Python<'_>, monitor_index: u32) -> PyResult<PyObject> {
+    let frame = py
+        .allow_threads(move || wmcp_core::screenshot::capture_raw(monitor_index))
+        .map_err(to_py_err)?;
+
+    let dict = PyDict::new(py);
+    dict.set_item("width", frame.width)?;
+    dict.set_item("height", frame.height)?;
+    dict.set_item("data", pyo3::types::PyBytes::new(py, &frame.data))?;
+    Ok(dict.into())
+}
+
+/// Capture a screenshot and encode it as PNG bytes.
+///
+/// Returns a `bytes` object containing the PNG file data.
+#[pyfunction]
+#[pyo3(signature = (monitor_index=0))]
+fn capture_screenshot_png(py: Python<'_>, monitor_index: u32) -> PyResult<PyObject> {
+    let png_bytes = py
+        .allow_threads(move || wmcp_core::screenshot::capture_png(monitor_index))
+        .map_err(to_py_err)?;
+
+    Ok(pyo3::types::PyBytes::new(py, &png_bytes).into())
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +327,8 @@ fn windows_mcp_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_window_info, m)?)?;
     m.add_function(wrap_pyfunction!(get_foreground_window, m)?)?;
     m.add_function(wrap_pyfunction!(list_windows, m)?)?;
+    m.add_function(wrap_pyfunction!(capture_screenshot_raw, m)?)?;
+    m.add_function(wrap_pyfunction!(capture_screenshot_png, m)?)?;
 
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add("__doc__", "Native Rust acceleration layer for Windows-MCP.")?;

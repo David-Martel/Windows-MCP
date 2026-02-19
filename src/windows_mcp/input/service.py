@@ -145,9 +145,11 @@ class InputService:
             try:
                 pg.sleep(0.05)
                 if delta > 0:
-                    uia.WheelDown(wheel_times)
-                else:
+                    # Shift+WheelUp = scroll right (positive delta)
                     uia.WheelUp(wheel_times)
+                else:
+                    # Shift+WheelDown = scroll left (negative delta)
+                    uia.WheelDown(wheel_times)
                 pg.sleep(0.05)
             finally:
                 pg.keyUp("Shift")

@@ -28,7 +28,7 @@ fn get_foreground_hwnd() -> isize {
     hwnd.0 as isize
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     let handles = if args.all {
@@ -45,10 +45,11 @@ fn main() {
     let snapshots = wmcp_core::tree::capture_tree_raw(&handles, args.max_depth);
 
     let json = if args.compact {
-        serde_json::to_string(&snapshots).unwrap()
+        serde_json::to_string(&snapshots)?
     } else {
-        serde_json::to_string_pretty(&snapshots).unwrap()
+        serde_json::to_string_pretty(&snapshots)?
     };
 
     println!("{json}");
+    Ok(())
 }

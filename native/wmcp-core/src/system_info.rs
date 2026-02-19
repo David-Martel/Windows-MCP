@@ -78,10 +78,15 @@ pub fn collect_system_info() -> Result<SystemSnapshot, WindowsMcpError> {
     // sysinfo requires two refresh_cpu_usage() calls with a gap to compute
     // meaningful percentages.  The first call only establishes a baseline
     // and always returns 0%.  We do this once on the first invocation.
-    if !CPU_BASELINE_SET.swap(true, Ordering::Relaxed) {
+    //
+    // Release the mutex during the 200ms sleep so concurrent callers aren't
+    // blocked.  A double-init race is harmless (refresh_cpu_usage is idempotent).
+    if !CPU_BASELINE_SET.load(Ordering::Relaxed) {
         sys.refresh_cpu_usage();
-        // 200ms gives sysinfo enough delta for reasonable readings.
+        drop(sys);
         std::thread::sleep(std::time::Duration::from_millis(200));
+        CPU_BASELINE_SET.store(true, Ordering::Relaxed);
+        sys = mutex.lock();
     }
 
     sys.refresh_cpu_usage();

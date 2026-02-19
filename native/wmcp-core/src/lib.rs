@@ -15,10 +15,12 @@
 //! | [`system_info`] | System telemetry via `sysinfo` crate |
 //! | [`input`] | `SendInput` keyboard/mouse simulation |
 //! | [`tree`] | UIA accessibility tree traversal via `windows-rs` + Rayon |
+//! | [`screenshot`] | DXGI Output Duplication desktop capture (PNG + raw BGRA) |
 
 pub mod com;
 pub mod errors;
 pub mod input;
+pub mod screenshot;
 pub mod system_info;
 pub mod tree;
 pub mod window;

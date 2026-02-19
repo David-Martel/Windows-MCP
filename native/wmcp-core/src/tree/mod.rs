@@ -237,10 +237,17 @@ unsafe fn collect_children(
 // ---------------------------------------------------------------------------
 
 fn capture_window(handle: isize, max_depth: usize) -> Option<TreeElementSnapshot> {
-    let _com_guard = COMGuard::init().ok()?;
+    let _com_guard = COMGuard::init()
+        .map_err(|e| log::error!("capture_window: COMGuard::init failed for handle {handle}: {e}"))
+        .ok()?;
 
-    let uia: IUIAutomation =
-        unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()? };
+    let uia: IUIAutomation = unsafe {
+        CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+            .map_err(|e| {
+                log::error!("capture_window: CoCreateInstance failed for handle {handle}: {e}")
+            })
+            .ok()?
+    };
 
     let cache_req = unsafe { build_cache_request(&uia).ok()? };
 
