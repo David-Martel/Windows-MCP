@@ -14,7 +14,7 @@ pub mod element;
 use element::TreeElementSnapshot;
 
 use rayon::prelude::*;
-use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationCacheRequest, IUIAutomationElement,
     IUIAutomationElementArray, TreeScope_Subtree, UIA_AcceleratorKeyPropertyId,
@@ -200,6 +200,10 @@ unsafe fn walk_element(
     }
 }
 
+/// Maximum children per node to prevent memory exhaustion on
+/// pathological trees (e.g. a grid with 100k cells).
+const MAX_CHILDREN_PER_NODE: i32 = 512;
+
 unsafe fn collect_children(
     parent: &IUIAutomationElement,
     depth: usize,
@@ -211,7 +215,7 @@ unsafe fn collect_children(
     };
 
     let len = match array.Length() {
-        Ok(n) if n > 0 => n,
+        Ok(n) if n > 0 => n.min(MAX_CHILDREN_PER_NODE),
         _ => return Vec::new(),
     };
 
@@ -232,7 +236,7 @@ fn capture_window(handle: isize, max_depth: usize) -> Option<TreeElementSnapshot
     let _com_guard = COMGuard::init().ok()?;
 
     let uia: IUIAutomation =
-        unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL).ok()? };
+        unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()? };
 
     let cache_req = unsafe { build_cache_request(&uia).ok()? };
 
@@ -255,12 +259,15 @@ fn capture_window(handle: isize, max_depth: usize) -> Option<TreeElementSnapshot
 /// Windows are traversed in parallel using Rayon.  Each thread initialises
 /// its own COM apartment.  Invalid/inaccessible handles are silently skipped.
 ///
-/// `max_depth` is clamped to 200 to prevent stack overflow.
+/// `max_depth` is clamped to 50 to stay within Rayon's ~2MB thread stack.
+/// Each recursion level uses ~1-2 KB of stack, so 50 levels ≈ 50-100 KB.
 pub fn capture_tree_raw(window_handles: &[isize], max_depth: usize) -> Vec<TreeElementSnapshot> {
-    let max_depth = max_depth.min(200);
+    let max_depth = max_depth.min(50);
 
     window_handles
         .par_iter()
-        .filter_map(|&handle| capture_window(handle, max_depth))
+        .copied()
+        .filter(|&handle| handle != 0)
+        .filter_map(|handle| capture_window(handle, max_depth))
         .collect()
 }

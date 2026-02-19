@@ -33,6 +33,13 @@ struct Response {
     error: Option<String>,
 }
 
+/// Extract an i32 from a JSON value, clamping i64 to i32 range.
+fn json_i32(val: Option<&serde_json::Value>) -> i32 {
+    val.and_then(|v| v.as_i64())
+        .unwrap_or(0)
+        .clamp(i32::MIN as i64, i32::MAX as i64) as i32
+}
+
 fn dispatch(method: &str, params: &serde_json::Value) -> Result<serde_json::Value, String> {
     match method {
         "system_info" => {
@@ -48,7 +55,8 @@ fn dispatch(method: &str, params: &serde_json::Value) -> Result<serde_json::Valu
             let max_depth: usize = params
                 .get("max_depth")
                 .and_then(|v| v.as_u64())
-                .unwrap_or(50) as usize;
+                .map(|d| d.min(200) as usize)
+                .unwrap_or(50);
             let snapshots = wmcp_core::tree::capture_tree_raw(&handles, max_depth);
             serde_json::to_value(snapshots).map_err(|e| e.to_string())
         }
@@ -61,14 +69,18 @@ fn dispatch(method: &str, params: &serde_json::Value) -> Result<serde_json::Valu
             Ok(serde_json::Value::from(count))
         }
         "send_click" => {
-            let x = params.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-            let y = params.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let x = json_i32(params.get("x"));
+            let y = json_i32(params.get("y"));
             let button = params.get("button").and_then(|v| v.as_str()).unwrap_or("left");
             let count = wmcp_core::input::send_click_raw(x, y, button);
             Ok(serde_json::Value::from(count))
         }
         "send_key" => {
-            let vk = params.get("vk_code").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+            let vk = params
+                .get("vk_code")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+                .min(u16::MAX as u64) as u16;
             let key_up = params.get("key_up").and_then(|v| v.as_bool()).unwrap_or(false);
             let count = wmcp_core::input::send_key_raw(vk, key_up);
             Ok(serde_json::Value::from(count))
@@ -113,13 +125,16 @@ fn main() {
         let req: Request = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
+                // Parse error -- use id=0 since we can't extract it.
                 let resp = Response {
                     id: 0,
                     result: None,
                     error: Some(format!("invalid JSON: {e}")),
                 };
-                let _ = writeln!(stdout, "{}", serde_json::to_string(&resp).unwrap());
-                let _ = stdout.flush();
+                if let Ok(json) = serde_json::to_string(&resp) {
+                    let _ = writeln!(stdout, "{json}");
+                    let _ = stdout.flush();
+                }
                 continue;
             }
         };
@@ -137,7 +152,16 @@ fn main() {
             },
         };
 
-        let _ = writeln!(stdout, "{}", serde_json::to_string(&resp).unwrap());
+        if let Ok(json) = serde_json::to_string(&resp) {
+            let _ = writeln!(stdout, "{json}");
+        } else {
+            // Serialization failed -- send minimal error response.
+            let _ = writeln!(
+                stdout,
+                r#"{{"id":{},"error":"response serialization failed"}}"#,
+                req.id
+            );
+        }
         let _ = stdout.flush();
     }
 }

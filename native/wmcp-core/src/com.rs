@@ -8,6 +8,7 @@
 //! time, preventing the guard from being moved across thread boundaries.
 
 use crate::errors::WindowsMcpError;
+use log;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
 /// RAII wrapper that calls `CoUninitialize` on `Drop` when appropriate.
@@ -15,6 +16,7 @@ use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITH
 /// Instantiate **once per thread** via [`COMGuard::init`].  The guard tracks
 /// whether `CoInitializeEx` actually succeeded (vs. `RPC_E_CHANGED_MODE`)
 /// and only calls `CoUninitialize` when a balancing call is required per MSDN.
+#[must_use = "COMGuard must be kept alive for the duration of COM usage"]
 pub struct COMGuard {
     should_uninit: bool,
     _not_send: std::marker::PhantomData<*const ()>,
@@ -41,11 +43,18 @@ impl COMGuard {
                 should_uninit: true,
                 _not_send: std::marker::PhantomData,
             }),
-            // RPC_E_CHANGED_MODE -- thread already has STA.
-            0x80010106 => Ok(COMGuard {
-                should_uninit: false,
-                _not_send: std::marker::PhantomData,
-            }),
+            // RPC_E_CHANGED_MODE -- thread already has STA.  COM is usable
+            // but we requested MTA, so log a warning for diagnostics.
+            0x80010106 => {
+                log::warn!(
+                    "CoInitializeEx: RPC_E_CHANGED_MODE -- thread already has STA apartment, \
+                     using existing apartment instead of MTA"
+                );
+                Ok(COMGuard {
+                    should_uninit: false,
+                    _not_send: std::marker::PhantomData,
+                })
+            }
             _ => Err(WindowsMcpError::ComError(format!(
                 "CoInitializeEx failed: HRESULT 0x{hresult_value:08X}"
             ))),

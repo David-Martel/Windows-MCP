@@ -12,6 +12,10 @@ use std::cell::RefCell;
 pub const WMCP_OK: i32 = 0;
 pub const WMCP_ERROR: i32 = -1;
 
+/// Maximum handles to process in `wmcp_capture_tree` to prevent
+/// unreasonable allocations from corrupted input.
+const MAX_HANDLE_COUNT: usize = 256;
+
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
 }
@@ -24,8 +28,16 @@ fn set_last_error(msg: &str) {
 
 /// Retrieve the last error message (thread-local).
 ///
-/// Returns a pointer valid until the next wmcp_* call on this thread.
-/// Returns null if no error has occurred.
+/// Returns a pointer valid until the next `set_last_error` call on this
+/// thread (i.e. the next `wmcp_*` function call).  Returns null if no
+/// error has occurred.
+///
+/// # Safety
+///
+/// The returned pointer borrows from thread-local storage.  The caller
+/// must copy the string immediately -- the pointer becomes dangling after
+/// the next `wmcp_*` call on the same thread.  In particular, do NOT
+/// hold the pointer across calls to other `wmcp_*` functions.
 #[no_mangle]
 pub extern "C" fn wmcp_last_error() -> *const c_char {
     LAST_ERROR.with(|e| {
@@ -114,6 +126,8 @@ pub unsafe extern "C" fn wmcp_send_text(text: *const c_char, out_count: *mut u32
 }
 
 /// Click the mouse at absolute screen coordinates.
+///
+/// Returns `WMCP_OK` on success, `WMCP_ERROR` if SendInput failed.
 #[no_mangle]
 pub extern "C" fn wmcp_send_click(x: i32, y: i32, button: i32) -> i32 {
     let button_str = match button {
@@ -121,8 +135,13 @@ pub extern "C" fn wmcp_send_click(x: i32, y: i32, button: i32) -> i32 {
         2 => "middle",
         _ => "left",
     };
-    wmcp_core::input::send_click_raw(x, y, button_str);
-    WMCP_OK
+    let count = wmcp_core::input::send_click_raw(x, y, button_str);
+    if count == 0 {
+        set_last_error("SendInput returned 0 events for click");
+        WMCP_ERROR
+    } else {
+        WMCP_OK
+    }
 }
 
 /// Capture the UIA tree for window handles as a JSON string.
@@ -141,6 +160,13 @@ pub unsafe extern "C" fn wmcp_capture_tree(
 ) -> i32 {
     if handles.is_null() || out_json.is_null() {
         set_last_error("null pointer argument");
+        return WMCP_ERROR;
+    }
+
+    if handle_count > MAX_HANDLE_COUNT {
+        set_last_error(&format!(
+            "handle_count {handle_count} exceeds maximum {MAX_HANDLE_COUNT}"
+        ));
         return WMCP_ERROR;
     }
 

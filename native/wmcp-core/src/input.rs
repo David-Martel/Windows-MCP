@@ -19,7 +19,27 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOUSEEVENTF_HWHEEL, MOUSEEVENTF_WHEEL,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+};
+
+/// Query virtual screen dimensions (covers all monitors).
+///
+/// Uses `SM_CXVIRTUALSCREEN`/`SM_CYVIRTUALSCREEN` so that coordinates
+/// map correctly across multi-monitor setups.  Called on every
+/// `normalise_coords()` invocation to handle resolution changes.
+fn screen_dimensions() -> (i32, i32) {
+    unsafe {
+        let w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        let h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        // Fallback: GetSystemMetrics returns 0 on failure
+        if w > 0 && h > 0 {
+            (w, h)
+        } else {
+            (1920, 1080)
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers: build INPUT structs
@@ -100,16 +120,18 @@ fn mouse_input_with_data(abs_x: i32, abs_y: i32, data: i32, flags: MOUSE_EVENT_F
 }
 
 /// Convert pixel coordinates to 0..65535 normalised space.
+///
+/// Uses the standard MSDN formula: `(pixel * 65535) / (screen_size - 1)`.
+/// Result is clamped to `[0, 65535]` to prevent out-of-range values.
 fn normalise_coords(x: i32, y: i32) -> (i32, i32) {
-    let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
-    let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    let (screen_w, screen_h) = screen_dimensions();
 
-    if screen_w <= 0 || screen_h <= 0 {
+    if screen_w <= 1 || screen_h <= 1 {
         return (0, 0);
     }
 
-    let abs_x = ((x as i64 * 65536) / screen_w as i64 + 1) as i32;
-    let abs_y = ((y as i64 * 65536) / screen_h as i64 + 1) as i32;
+    let abs_x = ((x as i64 * 65535) / (screen_w as i64 - 1)).clamp(0, 65535) as i32;
+    let abs_y = ((y as i64 * 65535) / (screen_h as i64 - 1)).clamp(0, 65535) as i32;
     (abs_x, abs_y)
 }
 
@@ -200,7 +222,7 @@ pub fn send_hotkey_raw(vk_codes: &[u16]) -> u32 {
 /// `delta` is in WHEEL_DELTA units (120 = one notch).
 /// `horizontal` selects horizontal vs vertical scrolling.
 ///
-/// Returns the number of events injected.
+/// Returns the number of events injected (2: move + wheel).
 pub fn send_scroll_raw(x: i32, y: i32, delta: i32, horizontal: bool) -> u32 {
     let (abs_x, abs_y) = normalise_coords(x, y);
 
@@ -210,28 +232,33 @@ pub fn send_scroll_raw(x: i32, y: i32, delta: i32, horizontal: bool) -> u32 {
         MOUSEEVENTF_WHEEL
     };
 
-    let flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | wheel_flag;
-    let input = mouse_input_with_data(abs_x, abs_y, delta, flags);
-    unsafe { SendInput(&[input], mem::size_of::<INPUT>() as i32) }
+    // Move and wheel MUST be separate INPUT events -- combining
+    // MOUSEEVENTF_MOVE with MOUSEEVENTF_WHEEL is undefined behavior.
+    let inputs = [
+        mouse_input(abs_x, abs_y, MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE),
+        mouse_input_with_data(0, 0, delta, wheel_flag),
+    ];
+    unsafe { SendInput(&inputs, mem::size_of::<INPUT>() as i32) }
 }
 
-/// Drag the mouse from current position to (x, y) over `steps` intermediate
-/// moves.
+/// Drag the mouse from current position to (`to_x`, `to_y`).
 ///
-/// Sends a series of MOUSEEVENTF_MOVE events with left button held, then
-/// releases.  Returns total events injected.
-pub fn send_drag_raw(to_x: i32, to_y: i32, steps: u32) -> u32 {
+/// Sends: left-button-down, move to destination, left-button-up.
+/// `steps` is reserved for future interpolation (currently ignored).
+///
+/// Returns total events injected (3 on success).
+pub fn send_drag_raw(to_x: i32, to_y: i32, _steps: u32) -> u32 {
     let (abs_to_x, abs_to_y) = normalise_coords(to_x, to_y);
     let move_flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
 
-    // Just do a simple move-to + release sequence.
-    // For smooth dragging with interpolation, the caller should provide
-    // intermediate coordinates.
     let inputs = [
-        // Move to destination while holding button
+        // Press left button at current position
+        mouse_input(0, 0, MOUSEEVENTF_LEFTDOWN),
+        // Move to destination while holding
         mouse_input(abs_to_x, abs_to_y, move_flags),
+        // Release left button at destination
+        mouse_input(abs_to_x, abs_to_y, move_flags | MOUSEEVENTF_LEFTUP),
     ];
 
-    let _ = steps; // Reserved for future interpolation
     unsafe { SendInput(&inputs, mem::size_of::<INPUT>() as i32) }
 }

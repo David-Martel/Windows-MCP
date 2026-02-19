@@ -10,6 +10,7 @@
 //! safe concurrent access.
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -22,6 +23,9 @@ use crate::errors::WindowsMcpError;
 // ---------------------------------------------------------------------------
 
 static SYSTEM: OnceLock<Mutex<System>> = OnceLock::new();
+
+/// Tracks whether we've established a CPU baseline (first refresh returns 0%).
+static CPU_BASELINE_SET: AtomicBool = AtomicBool::new(false);
 
 fn get_system() -> &'static Mutex<System> {
     SYSTEM.get_or_init(|| {
@@ -70,6 +74,15 @@ pub struct DiskSnapshot {
 pub fn collect_system_info() -> Result<SystemSnapshot, WindowsMcpError> {
     let mutex = get_system();
     let mut sys = mutex.lock();
+
+    // sysinfo requires two refresh_cpu_usage() calls with a gap to compute
+    // meaningful percentages.  The first call only establishes a baseline
+    // and always returns 0%.  We do this once on the first invocation.
+    if !CPU_BASELINE_SET.swap(true, Ordering::Relaxed) {
+        sys.refresh_cpu_usage();
+        // 200ms gives sysinfo enough delta for reasonable readings.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
 
     sys.refresh_cpu_usage();
     sys.refresh_memory();

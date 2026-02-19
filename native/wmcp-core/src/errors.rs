@@ -34,9 +34,12 @@ pub enum WindowsMcpError {
 }
 
 /// Convert a `windows::core::Error` (COM / Win32 HRESULT failure) into a
-/// `WindowsMcpError::ComError`.
+/// `WindowsMcpError::ComError`, preserving the HRESULT code for diagnostics.
 impl From<WindowsError> for WindowsMcpError {
     fn from(err: WindowsError) -> Self {
-        WindowsMcpError::ComError(format!("Windows COM error: {err}"))
+        let hr = err.code().0;
+        WindowsMcpError::ComError(format!(
+            "Windows COM error (HRESULT 0x{hr:08X}): {err}"
+        ))
     }
 }
