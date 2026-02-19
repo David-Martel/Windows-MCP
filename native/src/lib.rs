@@ -11,10 +11,10 @@
 //! |--------|---------|
 //! | [`errors`] | [`WindowsMcpError`] enum and `From<> for PyErr` impl |
 //! | [`system_info`] | Replace PowerShell subprocess calls with `sysinfo` |
+//! | [`tree`] | UIA accessibility tree traversal via `windows-rs` + Rayon |
 //!
-//! # Planned modules (Phase 3)
+//! # Planned modules
 //!
-//! - `tree` -- UIA accessibility tree traversal via `windows-rs` + Rayon
 //! - `screenshot` -- DXGI Output Duplication capture
 //! - `input` -- `SendInput` (keyboard/mouse) replacing pyautogui
 //!
@@ -22,8 +22,9 @@
 //!
 //! ```bash
 //! # From the `native/` directory:
-//! maturin develop --release          # install into the active venv
-//! maturin build --release            # produce a wheel in target/wheels/
+//! RUSTC_WRAPPER="" cargo build --release
+//! # Then copy target/release/windows_mcp_core.dll to
+//! # .venv/Lib/site-packages/windows_mcp_core.pyd
 //! ```
 //!
 //! # Usage (Python)
@@ -34,11 +35,16 @@
 //! info = windows_mcp_core.system_info()
 //! print(info["os_name"])       # e.g. "Windows 11 Pro"
 //! print(info["cpu_count"])     # e.g. 16
-//! print(info["disks"])         # list of dicts
+//!
+//! import ctypes
+//! hwnd = ctypes.windll.user32.GetForegroundWindow()
+//! trees = windows_mcp_core.capture_tree([hwnd], max_depth=10)
+//! print(trees[0]["name"], trees[0]["control_type"])
 //! ```
 
 pub mod errors;
 pub mod system_info;
+pub mod tree;
 
 use pyo3::prelude::*;
 
@@ -49,13 +55,10 @@ use pyo3::prelude::*;
 ///
 /// ```python
 /// import windows_mcp_core
+///
 /// info = windows_mcp_core.system_info()
-/// ```
 ///
-/// Submodule objects are also added for dot-access and for future expansion:
-///
-/// ```python
-/// # (future) import windows_mcp_core.tree
+/// trees = windows_mcp_core.capture_tree([hwnd])
 /// ```
 #[pymodule]
 fn windows_mcp_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -65,6 +68,10 @@ fn windows_mcp_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // system_info: replaces 200-500 ms PowerShell subprocess calls
     m.add_function(wrap_pyfunction!(system_info::system_info, m)?)?;
+
+    // capture_tree: single-RPC UIA subtree capture with Rayon parallelism.
+    // Replaces the Python comtypes per-node BuildUpdatedCache loop.
+    m.add_function(wrap_pyfunction!(tree::capture_tree, m)?)?;
 
     // -----------------------------------------------------------------------
     // Module metadata

@@ -18,6 +18,7 @@
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::PyErr;
+use windows::core::Error as WindowsError;
 
 /// Top-level error type for the `windows_mcp_core` extension.
 ///
@@ -49,6 +50,29 @@ impl std::fmt::Display for WindowsMcpError {
 }
 
 impl std::error::Error for WindowsMcpError {}
+
+/// Convert a [`windows::core::Error`] (COM / Win32 HRESULT failure) into a
+/// [`WindowsMcpError::ComError`].
+///
+/// This allows `?` to be used on `windows-rs` fallible calls inside
+/// functions that return `Result<_, WindowsMcpError>`.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use windows::Win32::UI::Accessibility::IUIAutomation;
+/// use crate::errors::WindowsMcpError;
+///
+/// fn get_root(uia: &IUIAutomation) -> Result<(), WindowsMcpError> {
+///     let _root = unsafe { uia.GetRootElement() }?;  // From<windows::core::Error>
+///     Ok(())
+/// }
+/// ```
+impl From<WindowsError> for WindowsMcpError {
+    fn from(err: WindowsError) -> Self {
+        WindowsMcpError::ComError(format!("Windows COM error: {err}"))
+    }
+}
 
 /// Convert any [`WindowsMcpError`] into a Python `RuntimeError`.
 ///
