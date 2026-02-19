@@ -897,3 +897,74 @@ class TestWithAnalyticsMultipleTools:
         analytics_b.track_tool.assert_called_once()
         analytics_a.track_error.assert_not_called()
         analytics_b.track_error.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap: analytics lines 80-81, 181-182, 199-200, 215-216
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyticsCoverageGaps:
+    """Exercises the remaining uncovered exception handlers in analytics.py."""
+
+    def test_user_id_write_failure_logs_warning(self, tmp_path):
+        """Lines 80-81: write_text raises but user_id is still generated."""
+        mock_client = _make_mock_posthog()
+        analytics = _make_posthog_analytics(mock_client)
+        analytics.TEMP_FOLDER = tmp_path
+        analytics._user_id = None  # Clear cached user_id from __init__
+
+        with patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
+            uid = analytics.user_id
+        assert isinstance(uid, str)
+        assert len(uid) > 0
+
+    async def test_track_tool_exception_is_swallowed(self):
+        """Lines 199-200: track_tool raises during decorator but doesn't crash the tool."""
+        mock_instance = AsyncMock(spec=Analytics)
+        mock_instance.track_tool = AsyncMock(side_effect=RuntimeError("analytics broken"))
+
+        @with_analytics(lambda: mock_instance, "TestTool")
+        async def my_tool():
+            return "success"
+
+        result = await my_tool()
+        assert result == "success"
+        mock_instance.track_tool.assert_awaited_once()
+
+    async def test_track_error_exception_is_swallowed(self):
+        """Lines 215-216: track_error raises during error path but original exception propagates."""
+        mock_instance = AsyncMock(spec=Analytics)
+        mock_instance.track_error = AsyncMock(side_effect=RuntimeError("analytics broken"))
+        mock_instance.track_tool = AsyncMock()
+
+        @with_analytics(lambda: mock_instance, "TestTool")
+        async def my_failing_tool():
+            raise ValueError("tool error")
+
+        with pytest.raises(ValueError, match="tool error"):
+            await my_failing_tool()
+        mock_instance.track_error.assert_awaited_once()
+
+    async def test_client_params_exception_is_swallowed(self):
+        """Lines 181-182: exception accessing ctx.session.client_params.clientInfo is caught."""
+        from fastmcp import Context
+
+        mock_instance = AsyncMock(spec=Analytics)
+        mock_instance.track_tool = AsyncMock()
+
+        # Create a mock that passes isinstance(arg, Context) and has a session
+        # where clientInfo.name raises, triggering the except block at lines 181-182
+        mock_ctx = MagicMock(spec=Context)
+        mock_client_info = MagicMock()
+        mock_client_info.name = property(lambda self: (_ for _ in ()).throw(TypeError("broken")))
+        # Assign to a class so the property descriptor works
+        broken_info = type("BrokenInfo", (), {"name": property(lambda s: 1 / 0)})()
+        mock_ctx.session.client_params.clientInfo = broken_info
+
+        @with_analytics(lambda: mock_instance, "TestTool")
+        async def my_tool(ctx=None):
+            return "ok"
+
+        result = await my_tool(ctx=mock_ctx)
+        assert result == "ok"

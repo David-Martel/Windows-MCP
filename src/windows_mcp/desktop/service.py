@@ -333,6 +333,7 @@ class Desktop:
                 .replace("_", "")
                 .replace(".", "")
                 .replace("-", "")
+                .replace("!", "")
                 .isalnum()
             ):
                 return (f"Invalid app identifier: {appid}", 1, 0)

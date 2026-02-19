@@ -1082,11 +1082,11 @@ class TestLaunchApp:
         assert status == 0
 
     def test_app_found_with_shell_folder_launch(self):
-        """App ID is an alphanumeric identifier -- uses shell:AppsFolder launch."""
+        """App ID is a UWP AUMID -- uses shell:AppsFolder launch."""
         d = _make_bare_desktop()
-        # Use an ID that passes the alphanumeric check (no ! character)
+        # UWP AUMIDs contain '!' delimiter between package name and entry point
         d.get_apps_from_start_menu = MagicMock(
-            return_value={"calculator": "Microsoft.WindowsCalculator_8wekyb3d8bbwe"}
+            return_value={"calculator": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"}
         )
         with (
             patch("windows_mcp.desktop.service.process") as mock_fuzz,
