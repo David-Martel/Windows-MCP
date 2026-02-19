@@ -113,10 +113,12 @@ class VisionService:
             json=payload,
             timeout=60,
         )
-        response.raise_for_status()
-
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
+        try:
+            response.raise_for_status()
+            result = response.json()
+            return result["choices"][0]["message"]["content"]
+        finally:
+            response.close()
 
     def identify_elements(
         self,
