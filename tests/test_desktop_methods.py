@@ -1046,3 +1046,213 @@ class TestGetStateTreeException:
             state = d.get_state(use_vision=False)
 
         assert state.tree_state.scrollable_nodes == []
+
+
+# ---------------------------------------------------------------------------
+# launch_app -- coverage lines 313-341
+# ---------------------------------------------------------------------------
+
+
+class TestLaunchApp:
+    """Unit tests for Desktop.launch_app() covering all branches."""
+
+    def test_app_not_found_in_start_menu(self):
+        """No match in start menu returns error tuple."""
+        d = _make_bare_desktop()
+        d.get_apps_from_start_menu = MagicMock(return_value={"notepad": "notepad.exe"})
+        with patch("windows_mcp.desktop.service.process") as mock_fuzz:
+            mock_fuzz.extractOne.return_value = None
+            msg, status, pid = d.launch_app("nonexistent_app_xyz")
+        assert status == 1
+        assert pid == 0
+        assert "not found" in msg.lower()
+
+    def test_app_found_with_path_launch(self):
+        """App ID is a filesystem path -- uses Start-Process with path."""
+        d = _make_bare_desktop()
+        d.get_apps_from_start_menu = MagicMock(return_value={"notepad": r"C:\Windows\notepad.exe"})
+        with (
+            patch("windows_mcp.desktop.service.process") as mock_fuzz,
+            patch("windows_mcp.desktop.service.os.path.exists", return_value=True),
+        ):
+            mock_fuzz.extractOne.return_value = ("notepad", 90)
+            d.execute_command = MagicMock(return_value=("1234", 0))
+            msg, status, pid = d.launch_app("notepad")
+        assert pid == 1234
+        assert status == 0
+
+    def test_app_found_with_shell_folder_launch(self):
+        """App ID is an alphanumeric identifier -- uses shell:AppsFolder launch."""
+        d = _make_bare_desktop()
+        # Use an ID that passes the alphanumeric check (no ! character)
+        d.get_apps_from_start_menu = MagicMock(
+            return_value={"calculator": "Microsoft.WindowsCalculator_8wekyb3d8bbwe"}
+        )
+        with (
+            patch("windows_mcp.desktop.service.process") as mock_fuzz,
+            patch("windows_mcp.desktop.service.os.path.exists", return_value=False),
+        ):
+            mock_fuzz.extractOne.return_value = ("calculator", 85)
+            d.execute_command = MagicMock(return_value=("", 0))
+            msg, status, pid = d.launch_app("calculator")
+        assert status == 0
+
+    def test_app_invalid_identifier_returns_error(self):
+        """App ID with invalid chars (not alphanumeric/underscore/dot/dash/backslash) rejects."""
+        d = _make_bare_desktop()
+        d.get_apps_from_start_menu = MagicMock(return_value={"badapp": "$(malicious;command)"})
+        with (
+            patch("windows_mcp.desktop.service.process") as mock_fuzz,
+            patch("windows_mcp.desktop.service.os.path.exists", return_value=False),
+        ):
+            mock_fuzz.extractOne.return_value = ("badapp", 95)
+            msg, status, pid = d.launch_app("badapp")
+        assert status == 1
+        assert "Invalid app identifier" in msg
+
+    def test_matched_app_name_not_in_map_returns_error(self):
+        """extractOne returns a match but app_map.get returns None (race condition)."""
+        d = _make_bare_desktop()
+        d.get_apps_from_start_menu = MagicMock(return_value={})
+        with patch("windows_mcp.desktop.service.process") as mock_fuzz:
+            mock_fuzz.extractOne.return_value = ("ghost", 80)
+            msg, status, pid = d.launch_app("ghost")
+        assert status == 1
+
+
+# ---------------------------------------------------------------------------
+# get_apps_from_start_menu + _get_apps_from_shortcuts -- coverage lines 164-224
+# ---------------------------------------------------------------------------
+
+
+class TestAppCache:
+    """Unit tests for app cache and Start Menu scanning."""
+
+    def test_cache_hit_returns_cached(self):
+        """Warm cache returns immediately without shell execution."""
+        from time import time
+
+        d = _make_bare_desktop()
+        cached = {"notepad": "notepad.exe"}
+        d._app_cache = cached
+        d._app_cache_time = time()
+        result = d.get_apps_from_start_menu()
+        assert result is cached
+
+    def test_cache_miss_calls_shell(self):
+        """Cold cache triggers Get-StartApps PowerShell command."""
+        d = _make_bare_desktop()
+        d._app_cache = None
+        csv_output = '"Name","AppID"\n"Notepad","notepad.exe"\n"Calc","calc.exe"'
+        d.execute_command = MagicMock(return_value=(csv_output, 0))
+        result = d.get_apps_from_start_menu()
+        assert "notepad" in result
+        assert "calc" in result
+
+    def test_cache_miss_bad_csv_falls_back_to_shortcuts(self):
+        """Malformed CSV falls back to Start Menu shortcut scanning."""
+        d = _make_bare_desktop()
+        d._app_cache = None
+        d.execute_command = MagicMock(return_value=("not-csv-at-all", 0))
+        d._get_apps_from_shortcuts = MagicMock(return_value={"notepad": "notepad.lnk"})
+        result = d.get_apps_from_start_menu()
+        d._get_apps_from_shortcuts.assert_called_once()
+        assert "notepad" in result
+
+    def test_cache_miss_command_fails_falls_back_to_shortcuts(self):
+        """Non-zero exit from Get-StartApps falls back to shortcuts."""
+        d = _make_bare_desktop()
+        d._app_cache = None
+        d.execute_command = MagicMock(return_value=("error", 1))
+        d._get_apps_from_shortcuts = MagicMock(return_value={"calc": "calc.lnk"})
+        result = d.get_apps_from_start_menu()
+        assert "calc" in result
+
+    def test_shortcut_scanning(self, tmp_path):
+        """_get_apps_from_shortcuts finds .lnk files in Start Menu folders."""
+        import os
+
+        d = _make_bare_desktop()
+        # Create fake Start Menu structure
+        programs = tmp_path / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+        programs.mkdir(parents=True)
+        (programs / "Notepad.lnk").write_bytes(b"fake")
+        sub = programs / "Accessories"
+        sub.mkdir()
+        (sub / "WordPad.lnk").write_bytes(b"fake")
+
+        with (
+            patch.dict(os.environ, {"PROGRAMDATA": str(tmp_path), "APPDATA": ""}),
+        ):
+            result = d._get_apps_from_shortcuts()
+        assert "notepad" in result
+        assert "wordpad" in result
+
+
+# ---------------------------------------------------------------------------
+# is_app_running -- coverage line 263-269
+# ---------------------------------------------------------------------------
+
+
+class TestIsAppRunning:
+    """Unit tests for Desktop.is_app_running()."""
+
+    def test_app_running_found(self):
+        d = _make_bare_desktop()
+        from tests.desktop_helpers import make_window
+
+        win = make_window(name="Notepad")
+        d._window.get_windows.return_value = ([win], {win.handle})
+        with patch("windows_mcp.desktop.service.process") as mock_fuzz:
+            mock_fuzz.extractOne.return_value = ("Notepad", 90)
+            assert d.is_app_running("notepad") is True
+
+    def test_app_running_not_found(self):
+        d = _make_bare_desktop()
+        from tests.desktop_helpers import make_window
+
+        win = make_window(name="Chrome")
+        d._window.get_windows.return_value = ([win], {win.handle})
+        with patch("windows_mcp.desktop.service.process") as mock_fuzz:
+            mock_fuzz.extractOne.return_value = None
+            assert d.is_app_running("notepad") is False
+
+    def test_app_running_exception_returns_false(self):
+        d = _make_bare_desktop()
+        d._window.get_windows.side_effect = RuntimeError("COM failure")
+        assert d.is_app_running("notepad") is False
+
+
+# ---------------------------------------------------------------------------
+# VDM fallback path -- coverage lines 98-103
+# ---------------------------------------------------------------------------
+
+
+class TestGetStateVdmFallback:
+    """Desktop.get_state() VDM RuntimeError fallback."""
+
+    _UIA = "windows_mcp.desktop.service.uia"
+
+    def test_vdm_runtime_error_uses_default_desktop(self):
+        """When VDM raises RuntimeError, state uses a default desktop placeholder."""
+        d = _make_bare_desktop()
+        d._window.get_controls_handles.return_value = set()
+        d._window.get_windows.return_value = ([], set())
+        d._window.get_active_window.return_value = None
+        d.tree.get_state.return_value = MagicMock()
+
+        with (
+            patch(self._UIA),
+            patch(
+                "windows_mcp.desktop.service.get_current_desktop",
+                side_effect=RuntimeError("VDM not available"),
+            ),
+            patch(
+                "windows_mcp.desktop.service.get_all_desktops",
+                side_effect=RuntimeError("VDM not available"),
+            ),
+        ):
+            state = d.get_state(use_vision=False)
+
+        assert state.active_desktop["name"] == "Default Desktop"
+        assert len(state.all_desktops) == 1

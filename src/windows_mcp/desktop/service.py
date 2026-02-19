@@ -29,6 +29,7 @@ logger.setLevel(logging.INFO)
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE)
 except Exception:
+    logger.debug("SetProcessDpiAwareness unavailable, falling back to SetProcessDPIAware")
     ctypes.windll.user32.SetProcessDPIAware()
 
 import windows_mcp.uia as uia  # noqa: E402
@@ -264,6 +265,7 @@ class Desktop:
         try:
             windows, _ = self._window.get_windows()
         except Exception:
+            logger.debug("Failed to enumerate windows for is_app_running", exc_info=True)
             return False
         windows_dict = {window.name: window for window in windows if window.name}
         return process.extractOne(name, list(windows_dict.keys()), score_cutoff=60) is not None
