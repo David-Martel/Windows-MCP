@@ -11,20 +11,16 @@ from time import time
 from typing import Literal
 
 import win32con
-import win32gui
-import win32process
 from PIL import Image
-from psutil import Process
 from thefuzz import process
 
 from windows_mcp.desktop.config import PROCESS_PER_MONITOR_DPI_AWARE
-from windows_mcp.desktop.views import Browser, DesktopState, Size, Status, Window
+from windows_mcp.desktop.views import DesktopState, Size, Status, Window
 from windows_mcp.tree.service import Tree
-from windows_mcp.tree.views import BoundingBox, TreeElementNode
+from windows_mcp.tree.views import TreeElementNode
 from windows_mcp.vdm.core import (
     get_all_desktops,
     get_current_desktop,
-    is_window_on_current_desktop,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,10 +41,12 @@ class Desktop:
         from windows_mcp.scraper import ScraperService
         from windows_mcp.screen import ScreenService
         from windows_mcp.shell import ShellService
+        from windows_mcp.window import WindowService
 
         self.encoding = getpreferredencoding()
         self._input = InputService()
         self._screen = ScreenService()
+        self._window = WindowService()
         self._registry = RegistryService()
         self._shell = ShellService()
         self._scraper = ScraperService()
@@ -60,9 +58,6 @@ class Desktop:
         self._app_cache_time: float = 0.0
         self._app_cache_lock = threading.Lock()
         self._APP_CACHE_TTL: float = 3600.0  # 1 hour
-        # Cache for process name lookups (avoids psutil.Process() per window)
-        self._process_name_cache: dict[int, str] = {}
-        self._process_cache_lock = threading.Lock()
 
     @staticmethod
     def _ps_quote(value: str) -> str:
@@ -169,14 +164,7 @@ class Desktop:
         return desktop_state
 
     def get_window_status(self, control: uia.Control) -> Status:
-        if uia.IsIconic(control.NativeWindowHandle):
-            return Status.MINIMIZED
-        elif uia.IsZoomed(control.NativeWindowHandle):
-            return Status.MAXIMIZED
-        elif uia.IsWindowVisible(control.NativeWindowHandle):
-            return Status.NORMAL
-        else:
-            return Status.HIDDEN
+        return self._window.get_window_status(control)
 
     def get_apps_from_start_menu(self) -> dict[str, str]:
         """Get installed apps with caching. Tries Get-StartApps first, falls back to shortcut scanning."""
@@ -254,21 +242,8 @@ class Desktop:
     _PROCESS_CACHE_MAX = 256
 
     def is_window_browser(self, node: uia.Control):
-        """Give any node of the app and it will return True if the app is a browser, False otherwise."""
-        try:
-            pid = node.ProcessId
-            with self._process_cache_lock:
-                proc_name = self._process_name_cache.get(pid)
-            if proc_name is None:
-                proc_name = Process(pid).name()
-                with self._process_cache_lock:
-                    # Evict if cache grows too large (PIDs are recycled by OS)
-                    if len(self._process_name_cache) >= self._PROCESS_CACHE_MAX:
-                        self._process_name_cache.clear()
-                    self._process_name_cache[pid] = proc_name
-            return Browser.has_process(proc_name)
-        except Exception:
-            return False
+        """Return True if the UIA control belongs to a browser process."""
+        return self._window.is_window_browser(node)
 
     def resize_app(
         self,
@@ -302,7 +277,7 @@ class Desktop:
             return (f"{active_window.name} resized to {width}x{height} at {x},{y}.", 0)
 
     def is_app_running(self, name: str) -> bool:
-        windows, _ = self.get_windows()
+        windows, _ = self._window.get_windows()
         windows_dict = {window.name: window for window in windows}
         return process.extractOne(name, list(windows_dict.keys()), score_cutoff=60) is not None
 
@@ -396,11 +371,7 @@ class Desktop:
             if state is None:
                 return ("Failed to get desktop state. Please try again.", 1)
 
-            window_list = [
-                w
-                for w in [state.active_window] + state.windows
-                if w is not None
-            ]
+            window_list = [w for w in [state.active_window] + state.windows if w is not None]
             if not window_list:
                 return ("No windows found on the desktop.", 1)
 
@@ -420,63 +391,14 @@ class Desktop:
                 uia.ShowWindow(target_handle, win32con.SW_RESTORE)
                 content = f"{window_name.title()} restored from Minimized state."
             else:
-                self.bring_window_to_top(target_handle)
+                self._window.bring_window_to_top(target_handle)
                 content = f"Switched to {window_name.title()} window."
             return content, 0
         except Exception as e:
             return (f"Error switching app: {str(e)}", 1)
 
     def bring_window_to_top(self, target_handle: int):
-        if not win32gui.IsWindow(target_handle):
-            raise ValueError("Invalid window handle")
-
-        try:
-            if win32gui.IsIconic(target_handle):
-                win32gui.ShowWindow(target_handle, win32con.SW_RESTORE)
-
-            foreground_handle = win32gui.GetForegroundWindow()
-
-            # Validate both handles before proceeding
-            if not win32gui.IsWindow(foreground_handle):
-                # No valid foreground window, just try to set target as foreground
-                win32gui.SetForegroundWindow(target_handle)
-                win32gui.BringWindowToTop(target_handle)
-                return
-
-            foreground_thread, _ = win32process.GetWindowThreadProcessId(foreground_handle)
-            target_thread, _ = win32process.GetWindowThreadProcessId(target_handle)
-
-            if not foreground_thread or not target_thread or foreground_thread == target_thread:
-                win32gui.SetForegroundWindow(target_handle)
-                win32gui.BringWindowToTop(target_handle)
-                return
-
-            ctypes.windll.user32.AllowSetForegroundWindow(-1)
-
-            attached = False
-            try:
-                win32process.AttachThreadInput(foreground_thread, target_thread, True)
-                attached = True
-
-                win32gui.SetForegroundWindow(target_handle)
-                win32gui.BringWindowToTop(target_handle)
-
-                win32gui.SetWindowPos(
-                    target_handle,
-                    win32con.HWND_TOP,
-                    0,
-                    0,
-                    0,
-                    0,
-                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW,
-                )
-
-            finally:
-                if attached:
-                    win32process.AttachThreadInput(foreground_thread, target_thread, False)
-
-        except Exception as e:
-            logger.exception("Failed to bring window to top: %s", e)
+        self._window.bring_window_to_top(target_handle)
 
     def get_element_handle_from_label(self, label: int) -> uia.Control:
         with self._state_lock:
@@ -544,162 +466,29 @@ class Desktop:
         return self._scraper.scrape(url)
 
     def get_window_from_element(self, element: uia.Control) -> Window | None:
-        if element is None:
-            return None
-        top_window = element.GetTopLevelControl()
-        if top_window is None:
-            return None
-        handle = top_window.NativeWindowHandle
-        windows, _ = self.get_windows()
-        for window in windows:
-            if window.handle == handle:
-                return window
-        return None
+        return self._window.get_window_from_element(element)
 
     def is_overlay_window(self, element: uia.Control) -> bool:
-        no_children = len(element.GetChildren()) == 0
-        is_name = "Overlay" in (element.Name or "").strip()
-        return no_children or is_name
+        return self._window.is_overlay_window(element)
 
     def get_controls_handles(self, optimized: bool = False):
-        handles = set()
-
-        # For even more faster results (still under development)
-        def callback(hwnd, _):
-            try:
-                # Validate handle before checking properties
-                if (
-                    win32gui.IsWindow(hwnd)
-                    and win32gui.IsWindowVisible(hwnd)
-                    and is_window_on_current_desktop(hwnd)
-                ):
-                    handles.add(hwnd)
-            except Exception:
-                # Skip invalid handles without logging (common during window enumeration)
-                pass
-
-        win32gui.EnumWindows(callback, None)
-
-        if desktop_hwnd := win32gui.FindWindow("Progman", None):
-            handles.add(desktop_hwnd)
-        if taskbar_hwnd := win32gui.FindWindow("Shell_TrayWnd", None):
-            handles.add(taskbar_hwnd)
-        if secondary_taskbar_hwnd := win32gui.FindWindow("Shell_SecondaryTrayWnd", None):
-            handles.add(secondary_taskbar_hwnd)
-        return handles
+        return self._window.get_controls_handles(optimized)
 
     def get_active_window(self, windows: list[Window] | None = None) -> Window | None:
-        try:
-            if windows is None:
-                windows, _ = self.get_windows()
-            active_window = self.get_foreground_window()
-            if active_window.ClassName == "Progman":
-                return None
-            active_window_handle = active_window.NativeWindowHandle
-            for window in windows:
-                if window.handle != active_window_handle:
-                    continue
-                return window
-            # In case active window is not present in the windows list
-            return Window(
-                **{
-                    "name": active_window.Name,
-                    "is_browser": self.is_window_browser(active_window),
-                    "depth": 0,
-                    "bounding_box": BoundingBox(
-                        left=active_window.BoundingRectangle.left,
-                        top=active_window.BoundingRectangle.top,
-                        right=active_window.BoundingRectangle.right,
-                        bottom=active_window.BoundingRectangle.bottom,
-                        width=active_window.BoundingRectangle.width(),
-                        height=active_window.BoundingRectangle.height(),
-                    ),
-                    "status": self.get_window_status(active_window),
-                    "handle": active_window_handle,
-                    "process_id": active_window.ProcessId,
-                }
-            )
-        except Exception as ex:
-            logger.error("Error in get_active_window: %s", ex)
-        return None
+        return self._window.get_active_window(windows)
 
     def get_foreground_window(self) -> uia.Control:
-        handle = uia.GetForegroundWindow()
-        active_window = self.get_window_from_element_handle(handle)
-        return active_window
-
-    _MAX_PARENT_DEPTH = 64
+        return self._window.get_foreground_window()
 
     def get_window_from_element_handle(self, element_handle: int) -> uia.Control:
-        current = uia.ControlFromHandle(element_handle)
-        root_handle = uia.GetRootControl().NativeWindowHandle
-
-        for _ in range(self._MAX_PARENT_DEPTH):
-            parent = current.GetParentControl()
-            if parent is None or parent.NativeWindowHandle == root_handle:
-                return current
-            current = parent
-        logger.warning(
-            "get_window_from_element_handle exceeded depth limit (%d) for handle %s",
-            self._MAX_PARENT_DEPTH,
-            element_handle,
-        )
-        return current
+        return self._window.get_window_from_element_handle(element_handle)
 
     def get_windows(
         self, controls_handles: set[int] | None = None
     ) -> tuple[list[Window], set[int]]:
-        try:
-            windows = []
-            window_handles = set()
-            controls_handles = controls_handles or self.get_controls_handles()
-            for idx, hwnd in enumerate(controls_handles):
-                try:
-                    child = uia.ControlFromHandle(hwnd)
-                except Exception:
-                    continue
+        return self._window.get_windows(controls_handles)
 
-                # Filter out Overlays (e.g. NVIDIA, Steam)
-                if self.is_overlay_window(child):
-                    continue
-
-                if isinstance(child, (uia.WindowControl, uia.PaneControl)):
-                    window_pattern = child.GetPattern(uia.PatternId.WindowPattern)
-                    if window_pattern is None:
-                        continue
-
-                    if window_pattern.CanMinimize and window_pattern.CanMaximize:
-                        status = self.get_window_status(child)
-
-                        bounding_rect = child.BoundingRectangle
-                        if bounding_rect.isempty() and status != Status.MINIMIZED:
-                            continue
-
-                        windows.append(
-                            Window(
-                                **{
-                                    "name": child.Name,
-                                    "depth": idx,
-                                    "status": status,
-                                    "bounding_box": BoundingBox(
-                                        left=bounding_rect.left,
-                                        top=bounding_rect.top,
-                                        right=bounding_rect.right,
-                                        bottom=bounding_rect.bottom,
-                                        width=bounding_rect.width(),
-                                        height=bounding_rect.height(),
-                                    ),
-                                    "handle": child.NativeWindowHandle,
-                                    "process_id": child.ProcessId,
-                                    "is_browser": self.is_window_browser(child),
-                                }
-                            )
-                        )
-                        window_handles.add(child.NativeWindowHandle)
-        except Exception as ex:
-            logger.error("Error in get_windows: %s", ex)
-            windows = []
-        return windows, window_handles
+    _MAX_PARENT_DEPTH = 64
 
     def get_xpath_from_element(self, element: uia.Control):
         current = element
@@ -840,7 +629,7 @@ class Desktop:
             "name": lambda x: x["name"].lower(),
         }
         procs.sort(key=sort_key.get(sort_by, sort_key["memory"]), reverse=(sort_by != "name"))
-        procs = procs[:max(1, limit)]
+        procs = procs[: max(1, limit)]
         if not procs:
             return f"No processes found{f' matching {name}' if name else ''}."
         table = tabulate(
@@ -972,12 +761,5 @@ class Desktop:
 
     @contextmanager
     def auto_minimize(self):
-        handle = uia.GetForegroundWindow()
-        if not handle:
+        with self._window.auto_minimize():
             yield
-            return
-        try:
-            uia.ShowWindow(handle, win32con.SW_MINIMIZE)
-            yield
-        finally:
-            uia.ShowWindow(handle, win32con.SW_RESTORE)

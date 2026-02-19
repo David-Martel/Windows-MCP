@@ -16,7 +16,6 @@ Bug fixes covered:
 
 import sys
 import threading
-from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -55,6 +54,7 @@ def _make_bare_desktop():
     d._shell = MagicMock()
     d._scraper = MagicMock()
     d._screen = MagicMock()
+    d._window = MagicMock()
     return d
 
 
@@ -230,6 +230,11 @@ class TestSwitchAppNoneDereference:
 class TestIsOverlayWindowNoneName:
     """is_overlay_window must not raise AttributeError when element.Name is None."""
 
+    def _make_svc(self):
+        from windows_mcp.window.service import WindowService
+
+        return WindowService()
+
     def _make_ctrl(self, name, children_count: int = 1):
         ctrl = MagicMock()
         ctrl.Name = name
@@ -237,49 +242,45 @@ class TestIsOverlayWindowNoneName:
         return ctrl
 
     def test_none_name_does_not_raise(self):
-        d = _make_bare_desktop()
+        svc = self._make_svc()
         ctrl = self._make_ctrl(name=None, children_count=1)
-        # Should not raise
         try:
-            result = d.is_overlay_window(ctrl)
+            result = svc.is_overlay_window(ctrl)
         except AttributeError:
             pytest.fail("is_overlay_window raised AttributeError for Name=None")
-        # With children and no "Overlay" in name -> not an overlay
         assert result is False
 
     def test_none_name_no_children_is_overlay(self):
         """No children => overlay regardless of name."""
-        d = _make_bare_desktop()
+        svc = self._make_svc()
         ctrl = self._make_ctrl(name=None, children_count=0)
-        assert d.is_overlay_window(ctrl) is True
+        assert svc.is_overlay_window(ctrl) is True
 
     def test_overlay_in_name_is_overlay(self):
-        d = _make_bare_desktop()
+        svc = self._make_svc()
         ctrl = self._make_ctrl(name="NVIDIA Overlay", children_count=1)
-        assert d.is_overlay_window(ctrl) is True
+        assert svc.is_overlay_window(ctrl) is True
 
     def test_normal_name_with_children_not_overlay(self):
-        d = _make_bare_desktop()
+        svc = self._make_svc()
         ctrl = self._make_ctrl(name="Notepad", children_count=3)
-        assert d.is_overlay_window(ctrl) is False
+        assert svc.is_overlay_window(ctrl) is False
 
     def test_empty_name_string_not_overlay(self):
-        d = _make_bare_desktop()
+        svc = self._make_svc()
         ctrl = self._make_ctrl(name="", children_count=1)
-        assert d.is_overlay_window(ctrl) is False
+        assert svc.is_overlay_window(ctrl) is False
 
     def test_overlay_keyword_case_sensitive(self):
         """'Overlay' must appear exactly (capital O) to be detected."""
-        d = _make_bare_desktop()
+        svc = self._make_svc()
         ctrl = self._make_ctrl(name="overlay window", children_count=1)
-        # lowercase 'overlay' should NOT trigger is_name=True per current impl
-        # (implementation uses "Overlay" in name -- capital O)
-        assert d.is_overlay_window(ctrl) is False
+        assert svc.is_overlay_window(ctrl) is False
 
     def test_name_overlay_exact_word(self):
-        d = _make_bare_desktop()
+        svc = self._make_svc()
         ctrl = self._make_ctrl(name="Overlay", children_count=1)
-        assert d.is_overlay_window(ctrl) is True
+        assert svc.is_overlay_window(ctrl) is True
 
 
 # ===========================================================================
@@ -672,28 +673,28 @@ class TestListProcessesNegativeLimit:
 
 
 # ===========================================================================
-# Fix 9 -- auto_minimize skips ShowWindow when GetForegroundWindow returns 0
+# Fix 8 -- auto_minimize skips ShowWindow when GetForegroundWindow returns 0
 # ===========================================================================
+
+_WINDOW_UIA = "windows_mcp.window.service.uia"
 
 
 class TestAutoMinimizeHandleZero:
     """When GetForegroundWindow returns 0 (no foreground window),
     auto_minimize must yield without calling ShowWindow."""
 
+    def _make_svc(self):
+        from windows_mcp.window.service import WindowService
+
+        return WindowService()
+
     def test_handle_zero_skips_show_window(self):
-        d = _make_bare_desktop()
-        with patch(_UIA) as mock_uia:
+        svc = self._make_svc()
+        with patch(_WINDOW_UIA) as mock_uia:
             mock_uia.GetForegroundWindow.return_value = 0
             executed = []
 
-            @contextmanager
-            def _run():
-                with d.auto_minimize():
-                    executed.append("body")
-                    yield
-
-            # Drive the context manager
-            with d.auto_minimize():
+            with svc.auto_minimize():
                 executed.append("body")
 
         assert "body" in executed, "Context body must execute even with handle=0"
@@ -703,14 +704,13 @@ class TestAutoMinimizeHandleZero:
         """With a valid handle, ShowWindow should be called for minimize and restore."""
         import win32con
 
-        d = _make_bare_desktop()
-        with patch(_UIA) as mock_uia:
+        svc = self._make_svc()
+        with patch(_WINDOW_UIA) as mock_uia:
             mock_uia.GetForegroundWindow.return_value = 12345
 
-            with d.auto_minimize():
-                pass  # body
+            with svc.auto_minimize():
+                pass
 
-        # Should have called SW_MINIMIZE then SW_RESTORE
         calls = mock_uia.ShowWindow.call_args_list
         assert len(calls) == 2
         handles = [c[0][0] for c in calls]
@@ -721,30 +721,28 @@ class TestAutoMinimizeHandleZero:
 
     def test_handle_zero_body_exception_propagates(self):
         """Exceptions in the body must still propagate when handle=0."""
-        d = _make_bare_desktop()
-        with patch(_UIA) as mock_uia:
+        svc = self._make_svc()
+        with patch(_WINDOW_UIA) as mock_uia:
             mock_uia.GetForegroundWindow.return_value = 0
 
             with pytest.raises(RuntimeError, match="test error"):
-                with d.auto_minimize():
+                with svc.auto_minimize():
                     raise RuntimeError("test error")
 
-        # ShowWindow must still not have been called
         mock_uia.ShowWindow.assert_not_called()
 
     def test_handle_nonzero_restore_called_after_exception(self):
         """Even if the body raises, restore (SW_RESTORE) must be called via finally."""
         import win32con
 
-        d = _make_bare_desktop()
-        with patch(_UIA) as mock_uia:
+        svc = self._make_svc()
+        with patch(_WINDOW_UIA) as mock_uia:
             mock_uia.GetForegroundWindow.return_value = 9999
 
             with pytest.raises(ValueError):
-                with d.auto_minimize():
+                with svc.auto_minimize():
                     raise ValueError("inner error")
 
-        # The finally block must call SW_RESTORE
         restore_calls = [
             c for c in mock_uia.ShowWindow.call_args_list if c[0][1] == win32con.SW_RESTORE
         ]
