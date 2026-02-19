@@ -177,73 +177,62 @@ function Step-NativeBuild {
         return
     }
 
-    Invoke-Step 'Native Build (Rust/PyO3 -- warnings=deny)' {
+    Invoke-Step 'Native Build (Rust workspace -- warnings=deny)' {
         $savedRustFlags = $env:RUSTFLAGS
+        $savedPyo3Python = $env:PYO3_PYTHON
         try {
+            # PYO3_PYTHON must point to the venv Python for correct linking
+            $venvPython = Join-Path $ProjectRoot '.venv' 'Scripts' 'python.exe'
+            if (Test-Path $venvPython) {
+                $env:PYO3_PYTHON = $venvPython
+            }
+
             if ($CargoToolsAvailable) {
-                # Use CargoTools for sccache lifecycle and environment setup
                 Write-Host "  Using CargoTools Invoke-CargoWrapper" -ForegroundColor Cyan
                 $env:RUSTFLAGS = '-D warnings'
                 Invoke-CargoWrapper -Command 'build' `
-                    -AdditionalArgs @('--release') `
+                    -AdditionalArgs @('--release', '--workspace') `
                     -WorkingDirectory $NativeDir
             } else {
-                # Fallback: direct cargo build (no sccache)
                 Write-Host "  Using direct cargo build (warnings=deny)" -ForegroundColor Yellow
                 Push-Location $NativeDir
                 try {
                     $env:RUSTC_WRAPPER = ''
                     $env:RUSTFLAGS = '-D warnings'
-                    cargo build --release
+                    cargo build --release --workspace
                 } finally { Pop-Location }
             }
         } finally {
             $env:RUSTFLAGS = $savedRustFlags
+            $env:PYO3_PYTHON = $savedPyo3Python
         }
     }
 }
 
-function Find-NativeDll {
+function Find-NativeArtifact {
     <#
     .SYNOPSIS
-    Searches all known cargo target directories for windows_mcp_core.dll.
+    Searches cargo target directories for a named build artifact.
     .DESCRIPTION
-    Checks (in order): CARGO_TARGET_DIR env, native/target/, T:\RustCache\cargo-target/,
-    and any sccache-related paths. Returns the first found path or $null.
+    Checks (in order): CARGO_TARGET_DIR env, native/target/.
+    Returns the first found path or $null.
+    .PARAMETER Name
+    The artifact filename (e.g. 'windows_mcp_core.dll', 'wmcp-worker.exe').
     #>
-    $dllName = 'windows_mcp_core.dll'
+    param([string]$Name)
     $searchPaths = @()
 
     # 1. CARGO_TARGET_DIR environment variable (highest priority)
     if ($env:CARGO_TARGET_DIR) {
-        $searchPaths += Join-Path $env:CARGO_TARGET_DIR 'release' $dllName
+        $searchPaths += Join-Path $env:CARGO_TARGET_DIR 'release' $Name
     }
 
     # 2. Local native/target/ (standard cargo location)
-    $searchPaths += Join-Path $NativeDir 'target' 'release' $dllName
-
-    # 3. CargoTools shared cache (T:\RustCache\cargo-target)
-    $searchPaths += "T:\RustCache\cargo-target\release\$dllName"
-
-    # 4. User-local cargo target
-    $searchPaths += Join-Path $env:USERPROFILE '.cargo' 'target' 'release' $dllName
+    $searchPaths += Join-Path $NativeDir 'target' 'release' $Name
 
     foreach ($path in $searchPaths) {
         if (Test-Path $path) {
-            Write-Host "  Found DLL: $path" -ForegroundColor Cyan
             return $path
-        }
-    }
-
-    # 5. Recursive search in known cache roots as last resort
-    $cacheRoots = @('T:\RustCache', (Join-Path $env:USERPROFILE '.cargo'))
-    foreach ($root in $cacheRoots) {
-        if (Test-Path $root) {
-            $found = Get-ChildItem -Path $root -Recurse -Filter $dllName -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($found) {
-                Write-Host "  Found DLL (search): $($found.FullName)" -ForegroundColor Cyan
-                return $found.FullName
-            }
         }
     }
 
@@ -256,35 +245,61 @@ function Step-NativeInstall {
         return
     }
 
-    Invoke-Step 'Native Install (copy .pyd to venv)' {
-        $dllPath = Find-NativeDll
-
-        if (-not $dllPath) {
-            Write-Host "  windows_mcp_core.dll not found in any known location" -ForegroundColor Yellow
-            Write-Host "  Searched: CARGO_TARGET_DIR, native/target/, T:\RustCache\cargo-target/" -ForegroundColor Yellow
-            Write-Host "  Run 'Build.ps1 -Action Native' to compile first" -ForegroundColor Yellow
-            return
-        }
-
-        # Copy DLL as .pyd into UV venv site-packages
+    Invoke-Step 'Native Install (workspace artifacts to venv)' {
         $venvSitePackages = Join-Path $ProjectRoot '.venv' 'Lib' 'site-packages'
+        $venvScripts = Join-Path $ProjectRoot '.venv' 'Scripts'
         if (-not (Test-Path $venvSitePackages)) {
             Write-Host "  venv not found at $venvSitePackages -- run 'uv sync' first" -ForegroundColor Yellow
             return
         }
 
-        $dest = Join-Path $venvSitePackages 'windows_mcp_core.pyd'
-        $dllInfo = Get-Item $dllPath
-        Copy-Item $dllPath $dest -Force
-        $sizeKB = [math]::Round($dllInfo.Length / 1024, 0)
-        Write-Host "  Installed windows_mcp_core.pyd (${sizeKB} KB) to venv" -ForegroundColor Green
+        $installed = 0
 
-        # Verify the module loads
-        $testResult = & (Join-Path $ProjectRoot '.venv' 'Scripts' 'python.exe') -c "import windows_mcp_core; print('OK')" 2>&1
-        if ($testResult -eq 'OK') {
-            Write-Host "  Import verification: OK" -ForegroundColor Green
+        # 1. PyO3 extension: windows_mcp_core.dll -> .pyd
+        $pyo3Dll = Find-NativeArtifact 'windows_mcp_core.dll'
+        if ($pyo3Dll) {
+            $dest = Join-Path $venvSitePackages 'windows_mcp_core.pyd'
+            Copy-Item $pyo3Dll $dest -Force
+            $sizeKB = [math]::Round((Get-Item $pyo3Dll).Length / 1024, 0)
+            Write-Host "  Installed windows_mcp_core.pyd (${sizeKB} KB)" -ForegroundColor Green
+            $installed++
+
+            # Verify the module loads
+            $testResult = & (Join-Path $venvScripts 'python.exe') -c "import windows_mcp_core; print('OK')" 2>&1
+            if ($testResult -eq 'OK') {
+                Write-Host "  Import verification: OK" -ForegroundColor Green
+            } else {
+                Write-Host "  Import verification: FAILED -- $testResult" -ForegroundColor Red
+            }
         } else {
-            Write-Host "  Import verification: FAILED -- $testResult" -ForegroundColor Red
+            Write-Host "  windows_mcp_core.dll not found" -ForegroundColor Yellow
+        }
+
+        # 2. FFI DLL: windows_mcp_ffi.dll -> site-packages (for ctypes)
+        $ffiDll = Find-NativeArtifact 'windows_mcp_ffi.dll'
+        if ($ffiDll) {
+            $srcPkg = Join-Path $ProjectRoot 'src' 'windows_mcp'
+            $dest = Join-Path $srcPkg 'windows_mcp_ffi.dll'
+            Copy-Item $ffiDll $dest -Force
+            $sizeKB = [math]::Round((Get-Item $ffiDll).Length / 1024, 0)
+            Write-Host "  Installed windows_mcp_ffi.dll (${sizeKB} KB)" -ForegroundColor Green
+            $installed++
+        }
+
+        # 3. Worker binary: wmcp-worker.exe -> venv/Scripts
+        $workerExe = Find-NativeArtifact 'wmcp-worker.exe'
+        if ($workerExe) {
+            $dest = Join-Path $venvScripts 'wmcp-worker.exe'
+            Copy-Item $workerExe $dest -Force
+            $sizeKB = [math]::Round((Get-Item $workerExe).Length / 1024, 0)
+            Write-Host "  Installed wmcp-worker.exe (${sizeKB} KB)" -ForegroundColor Green
+            $installed++
+        }
+
+        if ($installed -eq 0) {
+            Write-Host "  No artifacts found. Run 'Build.ps1 -Action Native' to compile first" -ForegroundColor Yellow
+        } else {
+            Write-Host "  Installed $installed artifact(s)" -ForegroundColor Green
         }
     }
 }
@@ -292,18 +307,20 @@ function Step-NativeInstall {
 function Step-NativeCheck {
     if (-not (Test-Path $NativeDir)) { return }
 
-    Invoke-Step 'Native Check (cargo check + clippy)' {
+    Invoke-Step 'Native Check (cargo check + clippy -- workspace)' {
         if ($CargoToolsAvailable) {
             Invoke-CargoWrapper -Command 'check' `
+                -AdditionalArgs @('--workspace') `
                 -WorkingDirectory $NativeDir
             Invoke-CargoWrapper -Command 'clippy' `
-                -AdditionalArgs @('--all-targets', '--', '-D', 'warnings') `
+                -AdditionalArgs @('--workspace', '--all-targets', '--', '-D', 'warnings') `
                 -WorkingDirectory $NativeDir
         } else {
             Push-Location $NativeDir
             try {
-                cargo check
-                cargo clippy --all-targets -- -D warnings
+                $env:RUSTC_WRAPPER = ''
+                cargo check --workspace
+                cargo clippy --workspace --all-targets -- -D warnings
             } finally { Pop-Location }
         }
     }
@@ -312,13 +329,17 @@ function Step-NativeCheck {
 function Step-NativeTest {
     if (-not (Test-Path $NativeDir)) { return }
 
-    Invoke-Step 'Native Tests (Rust)' {
+    Invoke-Step 'Native Tests (Rust workspace)' {
         if ($CargoToolsAvailable) {
             Invoke-CargoWrapper -Command 'test' `
+                -AdditionalArgs @('--workspace') `
                 -WorkingDirectory $NativeDir
         } else {
             Push-Location $NativeDir
-            try { cargo test } finally { Pop-Location }
+            try {
+                $env:RUSTC_WRAPPER = ''
+                cargo test --workspace
+            } finally { Pop-Location }
         }
     }
 }
