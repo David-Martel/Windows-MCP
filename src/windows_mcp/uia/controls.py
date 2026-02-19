@@ -19,15 +19,102 @@ import datetime
 import re
 import threading
 import time
-from typing import Callable, Dict, Generator, List, Tuple
+from typing import Any, Callable, Dict, Generator, List, Tuple
 
 import comtypes
 
-from .constants import *  # noqa: F401, F403
-from .core import *
-from .core import _AutomationClient
-from .enums import *
-from .patterns import *
+from .constants import (  # noqa: F401, F403
+    DEBUG_EXIST_DISAPPEAR,
+    DEBUG_SEARCH_TIME,
+    MAX_MOVE_SECOND,
+    METRO_WINDOW_CLASS_NAME,
+    OPERATION_WAIT_TIME,
+    S_OK,
+    SEARCH_INTERVAL,
+    TIME_OUT_SECOND,
+    ProcessTime,
+    TreeNode,
+)
+from .core import (  # noqa: F401, F403
+    CacheRequest,
+    Click,
+    CreateTrueCondition,
+    DragDrop,
+    GetAncestor,
+    GetCursorPos,
+    GetDoubleClickTime,
+    GetForegroundWindow,
+    GetScreenSize,
+    GetWindowLong,
+    GetWindowText,
+    IsIconic,
+    IsKeyPressed,
+    IsWindowVisible,
+    IsZoomed,
+    Logger,
+    MiddleClick,
+    MoveTo,
+    MoveWindow,
+    PostMessage,
+    ReleaseKey,
+    RightClick,
+    RightDragDrop,
+    SendKey,
+    SendKeys,
+    SetCursorPos,
+    SetForegroundWindow,
+    SetWindowPos,
+    SetWindowText,
+    SetWindowTopmost,
+    ShowWindow,
+    SwitchToThisWindow,
+    WheelDown,
+    WheelUp,
+    WindowFromPoint,
+    _AutomationClient,
+    _GetDictKeyName,
+)
+from .enums import (  # noqa: F401, F403
+    GWL,
+    SW,
+    SWP,
+    ConsoleColor,
+    ControlType,
+    ControlTypeNames,
+    ExpandCollapseState,
+    GAFlag,
+    Keys,
+    ModifierKey,
+    OrientationType,
+    PatternId,
+    PatternIdNames,
+    PropertyId,
+    Rect,
+    ToggleState,
+    TreeScope,
+)
+from .patterns import (  # noqa: F401, F403
+    CreatePattern,
+    DockPattern,
+    ExpandCollapsePattern,
+    GridItemPattern,
+    GridPattern,
+    InvokePattern,
+    LegacyIAccessiblePattern,
+    MultipleViewPattern,
+    RangeValuePattern,
+    ScrollItemPattern,
+    ScrollPattern,
+    SelectionItemPattern,
+    SelectionPattern,
+    TableItemPattern,
+    TablePattern,
+    TextPattern,
+    TogglePattern,
+    TransformPattern,
+    ValuePattern,
+    WindowPattern,
+)
 
 
 class Control:
@@ -158,7 +245,7 @@ class Control:
 
     @staticmethod
     def CreateControlFromElement(
-        element: "ctypes.POINTER(IUIAutomationElement)",
+        element: "ctypes.POINTER(IUIAutomationElement)",  # noqa: F821
     ) -> "Control" | None:
         """
         Create a concreate `Control` from a com type `IUIAutomationElement`.
