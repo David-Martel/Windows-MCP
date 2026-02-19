@@ -150,10 +150,12 @@ function Step-PythonSync {
 }
 
 function Step-PythonLint {
-    Invoke-Step 'Python Lint' {
+    Invoke-Step 'Python Lint (zero-warning enforcement)' {
         Push-Location $ProjectRoot
         try {
-            uv run ruff check . --fix
+            # Check for lint errors -- no --fix, CI must see failures
+            uv run ruff check .
+            # Check formatting
             uv run ruff format --check .
         } finally { Pop-Location }
     }
@@ -175,19 +177,21 @@ function Step-NativeBuild {
         return
     }
 
-    Invoke-Step 'Native Build (Rust/PyO3)' {
+    Invoke-Step 'Native Build (Rust/PyO3 -- warnings=deny)' {
         if ($CargoToolsAvailable) {
             # Use CargoTools for sccache lifecycle and environment setup
             Write-Host "  Using CargoTools Invoke-CargoWrapper" -ForegroundColor Cyan
+            $env:RUSTFLAGS = '-D warnings'
             Invoke-CargoWrapper -Command 'build' `
                 -AdditionalArgs @('--release') `
                 -WorkingDirectory $NativeDir
         } else {
             # Fallback: direct cargo build (no sccache)
-            Write-Host "  Using direct cargo build" -ForegroundColor Yellow
+            Write-Host "  Using direct cargo build (warnings=deny)" -ForegroundColor Yellow
             Push-Location $NativeDir
             try {
                 $env:RUSTC_WRAPPER = ''
+                $env:RUSTFLAGS = '-D warnings'
                 cargo build --release
             } finally { Pop-Location }
         }
@@ -415,7 +419,6 @@ switch ($Action) {
     'Build' {
         Step-PythonSync
         if (-not $PythonOnly -and -not $SkipLint) { Step-PythonLint }
-        if (-not $NativeOnly) { Step-PythonSync }
         if (-not $PythonOnly) { Step-NativeBuild; Step-NativeInstall }
         if (-not $SkipTests -and -not $NativeOnly) { Step-PythonTest }
     }
