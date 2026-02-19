@@ -29,10 +29,9 @@ from __future__ import annotations
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -253,8 +252,9 @@ class TestFindFfiDll:
         dll = tmp_path / "release" / "windows_mcp_ffi.dll"
         dll.parent.mkdir(parents=True)
         dll.write_bytes(b"MZ")
-        from windows_mcp.native_ffi import _find_ffi_dll
         from pathlib import Path as _Path
+
+        from windows_mcp.native_ffi import _find_ffi_dll
 
         # Determine the real cargo-target candidate path the function would build
         expected_cargo_candidate = _Path(str(tmp_path)) / "release" / "windows_mcp_ffi.dll"
@@ -344,8 +344,6 @@ class TestNativeFFIErrorPaths:
     def test_system_info_invalid_json_raises_runtime_error(self):
         """system_info() surfaces JSONDecodeError when DLL returns malformed JSON."""
         ffi, _ = self._make_ffi_with_mock_dll()
-
-        import ctypes
 
         bad_json = b"not-valid-json{{{"
         with pytest.raises((json.JSONDecodeError, ValueError)):
@@ -966,7 +964,7 @@ class TestInputServiceMultiSelectBranches:
         svc = self._make_service()
         with (
             patch("windows_mcp.input.service.pg.keyDown") as mock_kd,
-            patch("windows_mcp.input.service.pg.keyUp") as mock_ku,
+            patch("windows_mcp.input.service.pg.keyUp"),
             patch("windows_mcp.input.service.pg.click"),
             patch("windows_mcp.input.service.pg.sleep"),
         ):
@@ -1184,7 +1182,13 @@ class TestGetSystemInfoNativeInfoShapes:
     def test_no_c_drive_in_disk_list_leaves_disk_at_zero(self):
         d = self._desktop()
         native_info = self._full_native_info(
-            disks=[{"mount_point": "D:\\", "total_bytes": 1000 * 1024**3, "available_bytes": 200 * 1024**3}]
+            disks=[
+                {
+                    "mount_point": "D:\\",
+                    "total_bytes": 1000 * 1024**3,
+                    "available_bytes": 200 * 1024**3,
+                }
+            ]
         )
         result = self._call_get_system_info(d, native_info)
         # Should not crash; disk values remain 0
@@ -1225,7 +1229,7 @@ class TestGetSystemInfoNativeInfoShapes:
             "disks": [],
         }
         pm = self._psutil_mock()
-        result = self._call_get_system_info(d, native_info=native_info, psutil_mock=pm)
+        self._call_get_system_info(d, native_info=native_info, psutil_mock=pm)
         pm.cpu_percent.assert_called_once()
 
     def test_output_contains_network_stats(self):
@@ -1294,7 +1298,7 @@ class TestNativeWrapperBoundaryValues:
             patch.object(native, "windows_mcp_core", mock_core),
         ):
             # Emoji and CJK characters
-            result = native.native_send_text("\U0001F600\u4e2d\u6587")
+            result = native.native_send_text("\U0001f600\u4e2d\u6587")
         assert result == 2
 
     def test_send_click_negative_coordinates(self):
@@ -1374,7 +1378,7 @@ class TestNativeWrapperBoundaryValues:
             patch.object(native, "HAS_NATIVE", True),
             patch.object(native, "windows_mcp_core", mock_core),
         ):
-            result = native.native_capture_tree(handles, max_depth=5)
+            native.native_capture_tree(handles, max_depth=5)
         mock_core.capture_tree.assert_called_once_with(handles, max_depth=5)
 
 
