@@ -32,6 +32,7 @@ def make_bare_desktop():
     d._registry = MagicMock()
     d._shell = MagicMock()
     d._scraper = MagicMock()
+    d._process = MagicMock()
     d._screen = MagicMock()
     d._window = MagicMock()
     return d

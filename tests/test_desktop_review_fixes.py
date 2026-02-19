@@ -14,7 +14,6 @@ Bug fixes covered:
   8. auto_minimize skips ShowWindow when GetForegroundWindow returns 0
 """
 
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -525,104 +524,29 @@ class TestGetStateScaleValidation:
 
 
 class TestListProcessesNegativeLimit:
-    """limit=-1 must be clamped to 1 (not return all-but-last via slicing).
+    """Desktop.list_processes delegates to ProcessService.
 
-    list_processes() imports psutil and tabulate inside the function body, so
-    they are patched via sys.modules rather than as module-level attributes.
+    Detailed limit-clamping tests live in test_process_service.py.
+    These tests verify that Desktop passes arguments correctly.
     """
 
-    def _make_proc_info(self, pid: int, name: str, cpu: float = 0.0, mem_rss: int = 1024 * 1024):
-        mem = MagicMock()
-        mem.rss = mem_rss
-        return {"pid": pid, "name": name, "cpu_percent": cpu, "memory_info": mem}
-
-    def _make_mock_psutil(self, proc_infos: list) -> MagicMock:
-        """Build a psutil mock whose process_iter yields the given info dicts."""
-        mock_psutil = MagicMock()
-        mock_p_list = []
-        for info in proc_infos:
-            p = MagicMock()
-            p.info = info
-            mock_p_list.append(p)
-        mock_psutil.process_iter.return_value = mock_p_list
-        # NoSuchProcess and AccessDenied are used as exception types in the except clause;
-        # using a base Exception subclass keeps the guard active without triggering it.
-        mock_psutil.NoSuchProcess = type("NoSuchProcess", (Exception,), {})
-        mock_psutil.AccessDenied = type("AccessDenied", (Exception,), {})
-        return mock_psutil
-
-    def _run_list_processes(self, d, proc_infos: list, limit: int, mock_tab: MagicMock):
-        """Inject psutil and tabulate via sys.modules and call list_processes."""
-        mock_psutil = self._make_mock_psutil(proc_infos)
-        # tabulate is also a local import inside the function; patch via sys.modules
-        orig_psutil = sys.modules.get("psutil")
-        orig_tabulate = sys.modules.get("tabulate")
-        try:
-            sys.modules["psutil"] = mock_psutil
-            sys.modules["tabulate"] = MagicMock(tabulate=mock_tab)
-            d.list_processes(limit=limit)
-        finally:
-            if orig_psutil is None:
-                sys.modules.pop("psutil", None)
-            else:
-                sys.modules["psutil"] = orig_psutil
-            if orig_tabulate is None:
-                sys.modules.pop("tabulate", None)
-            else:
-                sys.modules["tabulate"] = orig_tabulate
-        return mock_psutil
-
-    def test_negative_limit_clamped_to_one(self):
+    def test_negative_limit_passed_through(self):
         d = _make_bare_desktop()
-        proc_infos = [
-            self._make_proc_info(1, "proc_a", mem_rss=100 * 1024 * 1024),
-            self._make_proc_info(2, "proc_b", mem_rss=200 * 1024 * 1024),
-            self._make_proc_info(3, "proc_c", mem_rss=300 * 1024 * 1024),
-        ]
-        mock_tab = MagicMock(return_value="table")
-        self._run_list_processes(d, proc_infos, limit=-1, mock_tab=mock_tab)
+        d._process.list_processes.return_value = "ok"
+        d.list_processes(limit=-1)
+        d._process.list_processes.assert_called_once_with(name=None, sort_by="memory", limit=-1)
 
-        call_args = mock_tab.call_args
-        rows = call_args[0][0]  # first positional arg is the rows list
-        assert len(rows) == 1, f"limit=-1 should clamp to 1 row, got {len(rows)}"
-
-    def test_negative_large_limit_clamped_to_one(self):
+    def test_zero_limit_passed_through(self):
         d = _make_bare_desktop()
-        proc_infos = [self._make_proc_info(i, f"proc_{i}") for i in range(5)]
-        mock_tab = MagicMock(return_value="table")
-        self._run_list_processes(d, proc_infos, limit=-100, mock_tab=mock_tab)
+        d._process.list_processes.return_value = "ok"
+        d.list_processes(limit=0)
+        d._process.list_processes.assert_called_once_with(name=None, sort_by="memory", limit=0)
 
-        rows = mock_tab.call_args[0][0]
-        assert len(rows) == 1
-
-    def test_limit_zero_also_clamped_to_one(self):
-        """limit=0 is also non-positive and should clamp to 1."""
+    def test_positive_limit_passed_through(self):
         d = _make_bare_desktop()
-        proc_infos = [self._make_proc_info(i, f"proc_{i}") for i in range(3)]
-        mock_tab = MagicMock(return_value="table")
-        self._run_list_processes(d, proc_infos, limit=0, mock_tab=mock_tab)
-
-        rows = mock_tab.call_args[0][0]
-        assert len(rows) == 1
-
-    def test_positive_limit_not_clamped(self):
-        """Positive limit values must be respected as-is."""
-        d = _make_bare_desktop()
-        proc_infos = [self._make_proc_info(i, f"proc_{i}") for i in range(10)]
-        mock_tab = MagicMock(return_value="table")
-        self._run_list_processes(d, proc_infos, limit=5, mock_tab=mock_tab)
-
-        rows = mock_tab.call_args[0][0]
-        assert len(rows) == 5
-
-    def test_limit_1_returns_one_row(self):
-        d = _make_bare_desktop()
-        proc_infos = [self._make_proc_info(i, f"proc_{i}") for i in range(4)]
-        mock_tab = MagicMock(return_value="table")
-        self._run_list_processes(d, proc_infos, limit=1, mock_tab=mock_tab)
-
-        rows = mock_tab.call_args[0][0]
-        assert len(rows) == 1
+        d._process.list_processes.return_value = "ok"
+        d.list_processes(limit=5)
+        d._process.list_processes.assert_called_once_with(name=None, sort_by="memory", limit=5)
 
 
 # ===========================================================================

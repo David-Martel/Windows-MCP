@@ -1,7 +1,7 @@
 # Windows-MCP TODO
 
 **Generated:** 2026-02-18 from REVIEW.md findings
-**Last updated:** 2026-02-19 -- 1671 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports)
+**Last updated:** 2026-02-19 -- 1770 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports)
 **Reference:** See [REVIEW.md](REVIEW.md) for full context on each item.
 
 ---
@@ -11,7 +11,7 @@
 - [x] **[S2] Add authentication for SSE/HTTP transport** -- Bearer token auth via `BearerAuthMiddleware`. DPAPI key storage via `AuthKeyManager`. CLI: `--api-key`, `--generate-key`, `--rotate-key`. Refuses `0.0.0.0` without auth.
 - [x] **[A4] Fix analytics decorator binding bug** -- Changed `with_analytics` to accept a callable factory (`lambda: analytics`). Resolves at call time, not decoration time. Also fixed [Q5] traceback formatting.
 - [x] **[P4] Fix PIL ImageDraw thread safety** -- Removed `ThreadPoolExecutor` from `get_annotated_screenshot`. Now draws sequentially (<5ms).
-- [ ] **[A5] Remove `ipykernel` from dependencies** -- Unused, pulls in jupyter/zmq/tornado. Move to `[dev]` optional deps if needed.
+- [x] **[A5] Remove `ipykernel` from dependencies** -- Removed from `pyproject.toml` dependencies.
 - [x] **[Q6] Remove debug `print()` from analytics.py:97** -- Removed. Also fixed 3 `print()` calls in `watchdog/event_handlers.py` (replaced with `logger.debug()`).
 
 ---
@@ -19,7 +19,7 @@
 ## P1 -- High Impact Performance & Safety
 
 - [x] **[P6] Cache Start Menu app list** -- Added thread-safe TTL cache (1 hour) to `get_apps_from_start_menu()` with double-checked locking pattern.
-- [ ] **[P5] Eliminate duplicate VDM desktop enumeration** -- `get_state` calls `get_current_desktop()` and `get_all_desktops()` separately; both enumerate all desktops. Combine into a single call.
+- [x] **[P5] Eliminate duplicate VDM desktop enumeration** -- Added `get_desktop_info()` that returns `(current, all)` from a single `_enumerate_desktops()` call. `get_state()` uses it.
 - [x] **[P2] Bound ThreadPoolExecutor** -- Added `max_workers=min(8, os.cpu_count() or 4)` to tree traversal executor in `tree/service.py`.
 - [ ] **[P3] Convert tree_traversal to iterative** -- Replace recursion with an explicit stack to avoid Python's 1000-frame limit on complex UIs.
 - [x] **[P9] Make pyautogui.PAUSE configurable** -- Reduced from 1.0s to 0.05s in both `desktop/service.py` and `__main__.py`. Saves 1-6s per input operation.
@@ -31,7 +31,7 @@
 
 ## P2 -- Architectural Improvements
 
-- [x] **[A1] Decompose Desktop God Object** -- All 6 services extracted (Desktop down from 1039 to 752 lines):
+- [x] **[A1] Decompose Desktop God Object** -- All 8 services extracted (Desktop down from 1039 to ~680 lines):
   - [x] `RegistryService` -- registry_get/set/delete/list (`registry/service.py`)
   - [x] `ShellService` -- execute, check_blocklist, ps_quote (`shell/service.py`)
   - [x] `ScraperService` -- validate_url, scrape (`scraper/service.py`)
@@ -39,6 +39,7 @@
   - [x] `WindowService` -- get_windows, get_active_window, bring_window_to_top, auto_minimize (`window/service.py`)
   - [x] `ScreenService` -- get_screenshot, get_annotated_screenshot, get_screen_size, get_dpi_scaling (`screen/service.py`)
   - [x] `VisionService` -- LLM-powered screenshot analysis via OpenAI-compatible API (`vision/service.py`)
+  - [x] `ProcessService` -- list_processes, kill_process with protected process blocklist (`process/service.py`)
 - [ ] **[A3] Replace module globals with dependency injection** -- Use FastMCP's lifespan context to pass `desktop`, `watchdog`, `analytics` via `ctx.request_context.lifespan_context`.
 - [ ] **[A2] Decompose __main__.py** -- Extract tool registrations into domain modules (e.g., `tools/input_tools.py`, `tools/window_tools.py`, `tools/file_tools.py`).
 - [ ] **[P5] Parallelize get_state** -- Run window enumeration, VDM queries, and tree traversal concurrently with `asyncio.gather`.
@@ -54,7 +55,7 @@
 - [ ] **[S3] Restrict Registry tool access** -- Deny security-sensitive keys (Run, RunOnce, Services, Policies, SAM). Require confirmation for write/delete.
 - [ ] **[S5] Rotate PostHog API key** -- Move to environment variable. Disable GeoIP, disable exception auto-capture. Default telemetry to opt-in.
 - [ ] **[S6] Enforce HTTPS for auth client** -- Change default from `http://` to `https://`. Add certificate verification. Reduce `__repr__` key exposure to 4 chars.
-- [ ] **[S8] Add protected process list** -- Prevent killing csrss, lsass, services, svchost, winlogon, MsMpEng.
+- [x] **[S8] Add protected process list** -- `ProcessService.is_protected()` blocks csrss, lsass, services, svchost, winlogon, MsMpEng, smss, wininit, system, registry. Extracted to `process/service.py`.
 - [ ] **Implement security audit logging** -- Log all tool invocations with timestamps, parameters, results.
 - [ ] **Implement rate limiting** -- Per-tool rate limits to prevent abuse.
 
