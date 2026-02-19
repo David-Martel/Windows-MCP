@@ -1,7 +1,10 @@
 """Integration tests for the Rust native extension and Python adapters.
 
-Tests are skipped when the native extension is not available.
+Tests are skipped when the native extension is not available, except for
+mock-based fallback tests which always run.
 """
+
+from unittest.mock import patch
 
 import pytest
 
@@ -119,28 +122,18 @@ class TestNativeSystemInfo:
 
 
 class TestNativeInput:
-    def test_send_text_returns_int(self):
-        # send_text returns event count; 0 for empty string
+    def test_send_text_empty_returns_zero(self):
+        # send_text returns event count; 0 for empty string (no actual input)
         result = native_send_text("")
         assert result == 0
 
-    def test_send_click_returns_int(self):
-        result = native_send_click(0, 0, "left")
-        assert isinstance(result, int)
-
-    def test_send_key_returns_int(self):
-        result = native_send_key(0x00, False)
-        assert isinstance(result, int)
-
-    def test_send_mouse_move_returns_int(self):
-        result = native_send_mouse_move(0, 0)
-        assert isinstance(result, int)
-
     def test_send_hotkey_empty_returns_zero(self):
+        # Empty hotkey list returns 0 (no actual input)
         result = native_send_hotkey([])
         assert result == 0
 
-    def test_send_scroll_returns_int(self):
+    def test_send_scroll_zero_delta_returns_int(self):
+        # delta=0 sends a wheel event but no actual scrolling
         result = native_send_scroll(0, 0, 0, False)
         assert isinstance(result, int)
 
@@ -175,19 +168,51 @@ class TestNativeCaptureTree:
 
 
 class TestFallbackBehavior:
-    """Verify that native wrapper functions return None gracefully."""
+    """Verify that native wrapper functions return None when extension is mocked away.
 
-    def test_system_info_returns_dict_or_none(self):
-        result = native_system_info()
-        assert result is None or isinstance(result, dict)
+    These tests always run regardless of HAS_NATIVE state by patching
+    HAS_NATIVE to False.
+    """
 
-    def test_capture_tree_returns_list_or_none(self):
-        result = native_capture_tree([])
-        assert result is None or isinstance(result, list)
+    def test_system_info_returns_none_when_unavailable(self):
+        with patch("windows_mcp.native.HAS_NATIVE", False):
+            result = native_system_info()
+            assert result is None
 
-    def test_send_text_returns_int_or_none(self):
-        result = native_send_text("")
-        assert result is None or isinstance(result, int)
+    def test_capture_tree_returns_none_when_unavailable(self):
+        with patch("windows_mcp.native.HAS_NATIVE", False):
+            result = native_capture_tree([])
+            assert result is None
+
+    def test_send_text_returns_none_when_unavailable(self):
+        with patch("windows_mcp.native.HAS_NATIVE", False):
+            result = native_send_text("")
+            assert result is None
+
+    def test_send_click_returns_none_when_unavailable(self):
+        with patch("windows_mcp.native.HAS_NATIVE", False):
+            result = native_send_click(100, 200)
+            assert result is None
+
+    def test_send_key_returns_none_when_unavailable(self):
+        with patch("windows_mcp.native.HAS_NATIVE", False):
+            result = native_send_key(0x0D)
+            assert result is None
+
+    def test_send_mouse_move_returns_none_when_unavailable(self):
+        with patch("windows_mcp.native.HAS_NATIVE", False):
+            result = native_send_mouse_move(100, 200)
+            assert result is None
+
+    def test_send_hotkey_returns_none_when_unavailable(self):
+        with patch("windows_mcp.native.HAS_NATIVE", False):
+            result = native_send_hotkey([0x11, 0x43])
+            assert result is None
+
+    def test_send_scroll_returns_none_when_unavailable(self):
+        with patch("windows_mcp.native.HAS_NATIVE", False):
+            result = native_send_scroll(100, 200, 120)
+            assert result is None
 
 
 # ---------------------------------------------------------------------------

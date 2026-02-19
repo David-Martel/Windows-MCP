@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class InputService:
     """Simulate mouse clicks, keyboard input, scrolling, and drag operations."""
 
-    def click(self, loc: tuple[int, int], button: str = "left", clicks: int = 2):
+    def click(self, loc: tuple[int, int], button: str = "left", clicks: int = 1):
         """Click at screen coordinates.
 
         Args:
@@ -98,7 +98,7 @@ class InputService:
         Returns:
             An error string if an invalid type/direction is supplied, else None.
         """
-        if loc:
+        if loc is not None:
             self.move(loc)
         match type:
             case "vertical":
@@ -113,16 +113,20 @@ class InputService:
                 match direction:
                     case "left":
                         pg.keyDown("Shift")
-                        pg.sleep(0.05)
-                        uia.WheelUp(wheel_times)
-                        pg.sleep(0.05)
-                        pg.keyUp("Shift")
+                        try:
+                            pg.sleep(0.05)
+                            uia.WheelUp(wheel_times)
+                            pg.sleep(0.05)
+                        finally:
+                            pg.keyUp("Shift")
                     case "right":
                         pg.keyDown("Shift")
-                        pg.sleep(0.05)
-                        uia.WheelDown(wheel_times)
-                        pg.sleep(0.05)
-                        pg.keyUp("Shift")
+                        try:
+                            pg.sleep(0.05)
+                            uia.WheelDown(wheel_times)
+                            pg.sleep(0.05)
+                        finally:
+                            pg.keyUp("Shift")
                     case _:
                         return 'Invalid direction. Use "left" or "right".'
             case _:

@@ -452,7 +452,7 @@ class Desktop:
         bounding_rectangle = element_handle.BoundingRectangle
         return bounding_rectangle.xcenter(), bounding_rectangle.ycenter()
 
-    def click(self, loc: tuple[int, int], button: str = "left", clicks: int = 2):
+    def click(self, loc: tuple[int, int], button: str = "left", clicks: int = 1):
         return self._input.click(loc, button, clicks)
 
     def type(
@@ -937,25 +937,26 @@ class Desktop:
         # Try Rust fast-path for CPU/memory/disk (avoids 1s blocking cpu_percent)
         native_info = native_system_info()
 
-        if native_info is not None:
+        if native_info is not None and "cpu_count" in native_info:
             os_str = f"{platform.system()} {platform.release()} ({platform.version()})"
-            cpu_count = native_info["cpu_count"]
-            cpu_usages = native_info["cpu_usage_percent"]
+            cpu_count = native_info.get("cpu_count", 0)
+            cpu_usages = native_info.get("cpu_usage_percent", [])
             cpu_pct = round(sum(cpu_usages) / len(cpu_usages), 1) if cpu_usages else 0.0
-            mem_total = native_info["total_memory_bytes"]
-            mem_used = native_info["used_memory_bytes"]
+            mem_total = native_info.get("total_memory_bytes", 0)
+            mem_used = native_info.get("used_memory_bytes", 0)
             mem_pct = round(mem_used / mem_total * 100, 1) if mem_total else 0.0
 
             # Find C: disk from Rust data
             disk_pct = disk_used_gb = disk_total_gb = 0.0
             for d in native_info.get("disks", []):
-                if d["mount_point"].upper().startswith("C:"):
-                    disk_total_gb = round(d["total_bytes"] / 1024**3, 1)
-                    disk_used = d["total_bytes"] - d["available_bytes"]
+                mount = d.get("mount_point", "")
+                total = d.get("total_bytes", 0)
+                available = d.get("available_bytes", 0)
+                if mount.upper().startswith("C:"):
+                    disk_total_gb = round(total / 1024**3, 1)
+                    disk_used = total - available
                     disk_used_gb = round(disk_used / 1024**3, 1)
-                    disk_pct = (
-                        round(disk_used / d["total_bytes"] * 100, 1) if d["total_bytes"] else 0.0
-                    )
+                    disk_pct = round(disk_used / total * 100, 1) if total else 0.0
                     break
         else:
             os_str = f"{platform.system()} {platform.release()} ({platform.version()})"

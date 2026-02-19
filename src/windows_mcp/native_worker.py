@@ -18,25 +18,32 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Default timeout for a single RPC call (seconds).
+DEFAULT_CALL_TIMEOUT = 30.0
+
 
 def _find_worker_exe() -> Path | None:
     """Search for wmcp-worker.exe in known locations."""
-    candidates = [
-        # In venv Scripts
-        Path("C:/codedev/windows-mcp/.venv/Scripts/wmcp-worker.exe"),
-        # Shared Cargo target
-        Path("T:/RustCache/cargo-target/release/wmcp-worker.exe"),
-        # Local build
-        Path("native/target/release/wmcp-worker.exe"),
-    ]
+    candidates = []
 
+    # Environment variable override
     env_path = os.environ.get("WMCP_WORKER_EXE")
     if env_path:
-        candidates.insert(0, Path(env_path))
+        candidates.append(Path(env_path))
+
+    # In venv Scripts (derived from sys.prefix, not hardcoded)
+    venv_exe = Path(sys.prefix) / "Scripts" / "wmcp-worker.exe"
+    candidates.append(venv_exe)
+
+    # Shared Cargo target (via environment variable)
+    cargo_target = os.environ.get("CARGO_TARGET_DIR")
+    if cargo_target:
+        candidates.append(Path(cargo_target) / "release" / "wmcp-worker.exe")
 
     for p in candidates:
         if p.exists():
@@ -51,16 +58,38 @@ class NativeWorker:
     Each ``call()`` sends a JSON-RPC request and awaits the response.
     """
 
-    def __init__(self, exe_path: str | Path | None = None, verbose: bool = False):
+    def __init__(
+        self,
+        exe_path: str | Path | None = None,
+        verbose: bool = False,
+        call_timeout: float = DEFAULT_CALL_TIMEOUT,
+    ):
         self._exe_path = Path(exe_path) if exe_path else _find_worker_exe()
         self._verbose = verbose
+        self._call_timeout = call_timeout
         self._process: asyncio.subprocess.Process | None = None
         self._request_id = 0
         self._lock = asyncio.Lock()
+        self._stderr_task: asyncio.Task | None = None
 
     @property
     def is_running(self) -> bool:
         return self._process is not None and self._process.returncode is None
+
+    async def _drain_stderr(self):
+        """Background task that reads and logs worker stderr."""
+        assert self._process is not None
+        assert self._process.stderr is not None
+        try:
+            while True:
+                line = await self._process.stderr.readline()
+                if not line:
+                    break
+                logger.debug(
+                    "wmcp-worker stderr: %s", line.decode("utf-8", errors="replace").rstrip()
+                )
+        except asyncio.CancelledError:
+            pass
 
     async def start(self):
         """Spawn the worker process."""
@@ -83,10 +112,20 @@ class NativeWorker:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        # Start background stderr drain to prevent pipe buffer from filling
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
         logger.info("Started wmcp-worker (PID %d)", self._process.pid)
 
     async def stop(self):
         """Terminate the worker process."""
+        if self._stderr_task and not self._stderr_task.done():
+            self._stderr_task.cancel()
+            try:
+                await self._stderr_task
+            except asyncio.CancelledError:
+                pass
+            self._stderr_task = None
+
         if self._process and self._process.returncode is None:
             self._process.stdin.close()
             try:
@@ -109,14 +148,16 @@ class NativeWorker:
 
         Raises:
             RuntimeError: If the worker returns an error or is not running.
+            TimeoutError: If the worker doesn't respond within the timeout.
         """
         if not self.is_running:
             raise RuntimeError("Worker not running. Call start() first.")
 
         async with self._lock:
             self._request_id += 1
+            request_id = self._request_id
             request = {
-                "id": self._request_id,
+                "id": request_id,
                 "method": method,
                 "params": params if params else {},
             }
@@ -125,11 +166,28 @@ class NativeWorker:
             self._process.stdin.write(line.encode("utf-8"))
             await self._process.stdin.drain()
 
-            response_line = await self._process.stdout.readline()
+            try:
+                response_line = await asyncio.wait_for(
+                    self._process.stdout.readline(),
+                    timeout=self._call_timeout,
+                )
+            except asyncio.TimeoutError:
+                raise TimeoutError(
+                    f"Worker call '{method}' timed out after {self._call_timeout}s"
+                ) from None
+
             if not response_line:
                 raise RuntimeError("Worker process closed stdout unexpectedly")
 
-            response = json.loads(response_line.decode("utf-8"))
+            try:
+                response = json.loads(response_line.decode("utf-8"))
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"Worker returned non-JSON output: {response_line!r}") from exc
+
+            # Validate response ID matches request
+            resp_id = response.get("id")
+            if resp_id != request_id:
+                raise RuntimeError(f"Response ID mismatch: expected {request_id}, got {resp_id}")
 
             if response.get("error"):
                 raise RuntimeError(f"Worker error: {response['error']}")

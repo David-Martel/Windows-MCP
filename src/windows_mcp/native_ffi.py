@@ -22,6 +22,7 @@ from ctypes import (
     c_int32,
     c_size_t,
     c_uint32,
+    c_void_p,
     pointer,
 )
 from pathlib import Path
@@ -34,19 +35,20 @@ WMCP_ERROR = -1
 
 def _find_ffi_dll() -> Path | None:
     """Search for windows_mcp_ffi.dll in known locations."""
-    candidates = [
-        # Next to this source file
-        Path(__file__).parent / "windows_mcp_ffi.dll",
-        # Shared Cargo target
-        Path("T:/RustCache/cargo-target/release/windows_mcp_ffi.dll"),
-        # Local build
-        Path("native/target/release/windows_mcp_ffi.dll"),
-    ]
+    candidates = []
 
-    # Also check env var
+    # Environment variable override (highest priority)
     env_path = os.environ.get("WMCP_FFI_DLL")
     if env_path:
-        candidates.insert(0, Path(env_path))
+        candidates.append(Path(env_path))
+
+    # Next to this source file
+    candidates.append(Path(__file__).parent / "windows_mcp_ffi.dll")
+
+    # Shared Cargo target (if CARGO_TARGET_DIR is set)
+    cargo_target = os.environ.get("CARGO_TARGET_DIR")
+    if cargo_target:
+        candidates.append(Path(cargo_target) / "release" / "windows_mcp_ffi.dll")
 
     for p in candidates:
         if p.exists():
@@ -78,13 +80,18 @@ class NativeFFI:
         dll.wmcp_last_error.restype = c_char_p
         dll.wmcp_last_error.argtypes = []
 
-        # wmcp_free_string(*mut c_char)
+        # wmcp_free_string(*mut c_char) -- use c_void_p to prevent ctypes
+        # from doing automatic Python-string conversion on the pointer.
+        # The pointer was allocated by Rust's CString::into_raw() and must
+        # be freed by CString::from_raw() -- not by Python's allocator.
         dll.wmcp_free_string.restype = None
-        dll.wmcp_free_string.argtypes = [c_char_p]
+        dll.wmcp_free_string.argtypes = [c_void_p]
 
         # wmcp_system_info(*mut *mut c_char) -> i32
+        # Use c_void_p for the output pointer so we get the raw address
+        # (needed for proper freeing via wmcp_free_string).
         dll.wmcp_system_info.restype = c_int32
-        dll.wmcp_system_info.argtypes = [POINTER(c_char_p)]
+        dll.wmcp_system_info.argtypes = [POINTER(c_void_p)]
 
         # wmcp_send_text(*const c_char, *mut u32) -> i32
         dll.wmcp_send_text.restype = c_int32
@@ -100,7 +107,7 @@ class NativeFFI:
             ctypes.POINTER(ctypes.c_ssize_t),
             c_size_t,
             c_size_t,
-            POINTER(c_char_p),
+            POINTER(c_void_p),
         ]
 
     def _check_error(self, status: int, operation: str):
@@ -111,11 +118,14 @@ class NativeFFI:
 
     def system_info(self) -> dict:
         """Collect system information, returns a dict."""
-        out = c_char_p()
+        out = c_void_p()
         status = self._dll.wmcp_system_info(pointer(out))
         self._check_error(status, "wmcp_system_info")
+        if not out.value:
+            raise RuntimeError("wmcp_system_info returned null output")
         try:
-            return json.loads(out.value.decode("utf-8"))
+            raw_bytes = ctypes.string_at(out.value)
+            return json.loads(raw_bytes.decode("utf-8"))
         finally:
             self._dll.wmcp_free_string(out)
 
@@ -136,10 +146,13 @@ class NativeFFI:
         """Capture UIA tree for window handles, returns list of dicts."""
         HandleArray = ctypes.c_ssize_t * len(handles)
         arr = HandleArray(*handles)
-        out = c_char_p()
+        out = c_void_p()
         status = self._dll.wmcp_capture_tree(arr, len(handles), max_depth, pointer(out))
         self._check_error(status, "wmcp_capture_tree")
+        if not out.value:
+            raise RuntimeError("wmcp_capture_tree returned null output")
         try:
-            return json.loads(out.value.decode("utf-8"))
+            raw_bytes = ctypes.string_at(out.value)
+            return json.loads(raw_bytes.decode("utf-8"))
         finally:
             self._dll.wmcp_free_string(out)
