@@ -75,3 +75,6 @@ known-first-party = ["windows_mcp"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::RuntimeWarning:unittest.mock",  # AsyncMockMixin coroutine GC noise
+]
