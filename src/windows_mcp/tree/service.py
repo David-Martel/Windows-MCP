@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import comtypes
 
+from windows_mcp.native import native_capture_tree
 from windows_mcp.tree.cache_utils import CachedControlHelper, CacheRequestFactory
 from windows_mcp.tree.config import (
     DEFAULT_ACTIONS,
@@ -105,6 +106,112 @@ class Tree:
         logger.info(f"Tree State capture took {end_time - start_time:.2f} seconds")
         return tree_state
 
+    # -----------------------------------------------------------------------
+    # Rust fast-path: classify elements from Rust tree snapshot
+    # -----------------------------------------------------------------------
+
+    # Set of Rust control type names (without "Control" suffix) that are
+    # considered interactive -- derived from INTERACTIVE_CONTROL_TYPE_NAMES.
+    _RUST_INTERACTIVE_TYPES = {
+        name.removesuffix("Control") for name in INTERACTIVE_CONTROL_TYPE_NAMES
+    } | {name.removesuffix("Control") for name in DOCUMENT_CONTROL_TYPE_NAMES}
+
+    _RUST_INFORMATIVE_TYPES = {
+        name.removesuffix("Control") for name in INFORMATIVE_CONTROL_TYPE_NAMES
+    }
+
+    def _classify_rust_tree(
+        self,
+        snapshot: dict,
+        window_name: str,
+        window_rect: list[float],
+        interactive_nodes: list[TreeElementNode],
+    ):
+        """Walk a Rust TreeElementSnapshot dict and classify elements.
+
+        Uses only cached properties (no live COM calls).  Produces
+        interactive TreeElementNodes from the Rust tree structure.
+
+        This is the fast path -- it skips scroll detection and
+        LegacyIAccessiblePattern role checks, relying on control type
+        and is_keyboard_focusable for classification.
+
+        Args:
+            snapshot: Dict from native_capture_tree (one window root).
+            window_name: Corrected window name for the output nodes.
+            window_rect: [left, top, right, bottom] of the window.
+            interactive_nodes: Output list to append to.
+        """
+        # Build window bounding box for intersection
+        wl, wt, wr, wb = window_rect
+        window_box_left = int(wl)
+        window_box_top = int(wt)
+        window_box_right = int(wr)
+        window_box_bottom = int(wb)
+
+        stack: list[dict] = [snapshot]
+        while stack:
+            elem = stack.pop()
+
+            # Skip non-control / offscreen / disabled elements
+            if not elem.get("is_control_element", False):
+                pass  # still walk children
+            elif not elem.get("is_enabled", False):
+                pass
+            elif elem.get("is_offscreen", False) and elem.get("control_type") != "Edit":
+                pass
+            else:
+                control_type = elem.get("control_type", "Unknown")
+                rect = elem.get("bounding_rect", [0, 0, 0, 0])
+                el, et, er, eb = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
+                area = (er - el) * (eb - et)
+
+                if area > 0:
+                    # Interactive classification
+                    is_kb_focusable = elem.get("is_keyboard_focusable", False)
+                    is_interactive = False
+
+                    if control_type in self._RUST_INTERACTIVE_TYPES:
+                        is_interactive = True
+                    elif control_type == "Image" and is_kb_focusable:
+                        is_interactive = True
+
+                    if is_interactive:
+                        # Compute intersection with window and screen
+                        il = max(window_box_left, self.screen_box.left, el)
+                        it = max(window_box_top, self.screen_box.top, et)
+                        ir = min(window_box_right, self.screen_box.right, er)
+                        ib = min(window_box_bottom, self.screen_box.bottom, eb)
+
+                        if ir > il and ib > it:
+                            bb = BoundingBox(
+                                left=il,
+                                top=it,
+                                right=ir,
+                                bottom=ib,
+                                width=ir - il,
+                                height=ib - it,
+                            )
+                            interactive_nodes.append(
+                                TreeElementNode(
+                                    name=elem.get("name", "").strip(),
+                                    control_type=elem.get(
+                                        "localized_control_type", control_type
+                                    ).title(),
+                                    bounding_box=bb,
+                                    center=bb.get_center(),
+                                    window_name=window_name,
+                                    value="",
+                                    shortcut=elem.get("accelerator_key", ""),
+                                    xpath="",
+                                    is_focused=elem.get("has_keyboard_focus", False),
+                                )
+                            )
+
+            # Push children onto the stack (reversed for left-to-right order)
+            for child in reversed(elem.get("children", [])):
+                stack.append(child)
+
     def get_window_wise_nodes(
         self,
         windows_handles: list[int],
@@ -121,6 +228,7 @@ class Tree:
 
         # Pre-calculate browser status in main thread to pass simple types to workers
         task_inputs = []
+        rust_handles = []  # Non-browser windows for Rust fast-path
         for handle in windows_handles:
             is_browser = False
             try:
@@ -132,7 +240,33 @@ class Tree:
                 is_browser = self.desktop.is_window_browser(temp_node)
             except Exception:
                 pass
-            task_inputs.append((handle, is_browser))
+
+            if is_browser or use_dom:
+                # Browser windows need full Python path (DOM mode, pattern queries)
+                task_inputs.append((handle, is_browser))
+            else:
+                rust_handles.append(handle)
+
+        # Rust fast-path for non-browser windows (parallel Rayon traversal)
+        if rust_handles:
+            rust_start = time()
+            rust_tree = native_capture_tree(rust_handles, max_depth=50)
+            if rust_tree is not None:
+                for snapshot in rust_tree:
+                    rect = snapshot.get("bounding_rect", [0, 0, 0, 0])
+                    wname = snapshot.get("name", "").strip()
+                    wname = self.app_name_correction(wname)
+                    self._classify_rust_tree(snapshot, wname, rect, interactive_nodes)
+                logger.info(
+                    "Rust fast-path: %d windows, %d interactive elements in %.2fs",
+                    len(rust_handles),
+                    len(interactive_nodes),
+                    time() - rust_start,
+                )
+            else:
+                # Rust unavailable -- fall back to Python for all
+                for handle in rust_handles:
+                    task_inputs.append((handle, False))
 
         with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as executor:
             retry_counts = {handle: 0 for handle in windows_handles}
