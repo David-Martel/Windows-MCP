@@ -96,6 +96,9 @@ class Desktop:
         use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == "true")
         as_bytes = as_bytes is True or (isinstance(as_bytes, str) and as_bytes.lower() == "true")
 
+        if not (0.1 <= scale <= 4.0):
+            raise ValueError(f"scale must be between 0.1 and 4.0, got {scale}")
+
         start_time = time()
 
         controls_handles = self.get_controls_handles()  # Taskbar,Program Manager,Apps, Dialogs
@@ -324,6 +327,9 @@ class Desktop:
         loc: tuple[int, int] | None = None,
         size: tuple[int, int] | None = None,
     ):
+        if name is None and mode in ("launch", "switch"):
+            return "Application name is required for launch/switch mode."
+
         match mode:
             case "launch":
                 response, status, pid = self.launch_app(name)
@@ -420,6 +426,8 @@ class Desktop:
                 return (f"Application {name.title()} not found.", 1)
             window_name, _ = matched_window
             window = windows.get(window_name)
+            if window is None:
+                return (f"Application {name.title()} not found.", 1)
             target_handle = window.handle
 
             if uia.IsIconic(target_handle):
@@ -563,15 +571,15 @@ class Desktop:
         return None
 
     def is_window_visible(self, window: uia.Control) -> bool:
-        is_minimized = self.get_window_status(window) != Status.MINIMIZED
+        is_not_minimized = self.get_window_status(window) != Status.MINIMIZED
         size = window.BoundingRectangle
         area = size.width() * size.height()
         is_overlay = self.is_overlay_window(window)
-        return not is_overlay and is_minimized and area > 10
+        return not is_overlay and is_not_minimized and area > 10
 
     def is_overlay_window(self, element: uia.Control) -> bool:
         no_children = len(element.GetChildren()) == 0
-        is_name = "Overlay" in element.Name.strip()
+        is_name = "Overlay" in (element.Name or "").strip()
         return no_children or is_name
 
     def get_controls_handles(self, optimized: bool = False):
@@ -765,10 +773,10 @@ class Desktop:
                     f"XPath resolution failed: no children of type '{control_type}' found. "
                     "The UI may have changed since last snapshot."
                 )
-            if index:
-                if index - 1 >= len(same_type_children):
+            if index is not None:
+                if index < 1 or index - 1 >= len(same_type_children):
                     raise ValueError(
-                        f"XPath resolution failed: index {index} exceeds "
+                        f"XPath resolution failed: index {index} out of range for "
                         f"{len(same_type_children)} children of type '{control_type}'. "
                         "The UI may have changed since last snapshot."
                     )
@@ -828,8 +836,8 @@ class Desktop:
         screenshot = self.get_screenshot()
         # Add padding
         padding = 5
-        width = int(screenshot.width + (1.5 * padding))
-        height = int(screenshot.height + (1.5 * padding))
+        width = screenshot.width + 2 * padding
+        height = screenshot.height + 2 * padding
         padded_screenshot = Image.new("RGB", (width, height), color=(255, 255, 255))
         padded_screenshot.paste(screenshot, (padding, padding))
 
@@ -951,7 +959,7 @@ class Desktop:
             "name": lambda x: x["name"].lower(),
         }
         procs.sort(key=sort_key.get(sort_by, sort_key["memory"]), reverse=(sort_by != "name"))
-        procs = procs[:limit]
+        procs = procs[:max(1, limit)]
         if not procs:
             return f"No processes found{f' matching {name}' if name else ''}."
         table = tabulate(
@@ -1083,11 +1091,12 @@ class Desktop:
 
     @contextmanager
     def auto_minimize(self):
-        handle = None
+        handle = uia.GetForegroundWindow()
+        if not handle:
+            yield
+            return
         try:
-            handle = uia.GetForegroundWindow()
             uia.ShowWindow(handle, win32con.SW_MINIMIZE)
             yield
         finally:
-            if handle is not None:
-                uia.ShowWindow(handle, win32con.SW_RESTORE)
+            uia.ShowWindow(handle, win32con.SW_RESTORE)
