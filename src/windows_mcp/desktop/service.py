@@ -719,7 +719,9 @@ class Desktop:
         if current is None:
             return ""
         path_parts = []
-        while current is not None:
+        for _ in range(self._MAX_PARENT_DEPTH):
+            if current is None:
+                break
             parent = current.GetParentControl()
             if parent is None:
                 # we are at the root node
@@ -731,9 +733,11 @@ class Desktop:
                 for child in children
                 if child.ControlType == current.ControlType
             ]
-            index = same_type_children.index(
-                "-".join(map(lambda x: str(x), current.GetRuntimeId()))
-            )
+            current_id = "-".join(map(lambda x: str(x), current.GetRuntimeId()))
+            try:
+                index = same_type_children.index(current_id)
+            except ValueError:
+                index = 0
             if same_type_children:
                 path_parts.append(f"{current.ControlTypeName}[{index + 1}]")
             else:

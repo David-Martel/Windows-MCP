@@ -455,10 +455,15 @@ class Tree:
             if is_kb_focusable:
                 child = node
                 try:
-                    while child.GetFirstChildControl() is not None:
+                    for _ in range(64):
+                        first_child = child.GetFirstChildControl()
+                        if first_child is None:
+                            break
                         if child.ControlTypeName in INTERACTIVE_CONTROL_TYPE_NAMES:
                             return None
-                        child = child.GetFirstChildControl()
+                        child = first_child
+                    else:
+                        return None  # depth limit exceeded
                 except Exception:
                     return None
                 if child.ControlTypeName != "TextControl":

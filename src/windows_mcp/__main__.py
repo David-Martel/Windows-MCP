@@ -221,13 +221,20 @@ def state_tool(use_vision: bool | str = False, use_dom: bool | str = False, ctx:
         use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == "true")
 
         # Calculate scale factor to cap resolution at 1080p (1920x1080)
-        scale_width = (
-            MAX_IMAGE_WIDTH / screen_size.width if screen_size.width > MAX_IMAGE_WIDTH else 1.0
-        )
-        scale_height = (
-            MAX_IMAGE_HEIGHT / screen_size.height if screen_size.height > MAX_IMAGE_HEIGHT else 1.0
-        )
-        scale = min(scale_width, scale_height)
+        if screen_size is not None:
+            scale_width = (
+                MAX_IMAGE_WIDTH / screen_size.width
+                if screen_size.width > MAX_IMAGE_WIDTH
+                else 1.0
+            )
+            scale_height = (
+                MAX_IMAGE_HEIGHT / screen_size.height
+                if screen_size.height > MAX_IMAGE_HEIGHT
+                else 1.0
+            )
+            scale = min(scale_width, scale_height)
+        else:
+            scale = 1.0
 
         desktop_state = desktop.get_state(
             use_vision=use_vision, use_dom=use_dom, as_bytes=False, scale=scale
@@ -295,7 +302,7 @@ def click_tool(
     x, y = loc[0], loc[1]
     desktop.click(loc=loc, button=button, clicks=clicks)
     num_clicks = {0: "Hover", 1: "Single", 2: "Double"}
-    return f"{num_clicks.get(clicks)} {button} clicked at ({x},{y})."
+    return f"{num_clicks.get(clicks, clicks)} {button} clicked at ({x},{y})."
 
 
 @mcp.tool(
@@ -440,7 +447,7 @@ def scrape_tool(url: str, use_dom: bool | str = False, ctx: Context = None) -> s
 
     desktop_state = desktop.get_state(use_vision=False, use_dom=use_dom)
     tree_state = desktop_state.tree_state
-    if not tree_state.dom_node:
+    if not tree_state or not tree_state.dom_node:
         return f"No DOM information found. Please open {url} in browser first."
     dom_node = tree_state.dom_node
     vertical_scroll_percent = dom_node.vertical_scroll_percent
@@ -470,6 +477,9 @@ def multi_select_tool(
     press_ctrl = press_ctrl is True or (
         isinstance(press_ctrl, str) and press_ctrl.lower() == "true"
     )
+    for i, loc in enumerate(locs):
+        if not isinstance(loc, (list, tuple)) or len(loc) != 2:
+            raise ValueError(f"locs[{i}] must be [x, y], got {loc!r}")
     desktop.multi_select(press_ctrl, locs)
     elements_str = "\n".join([f"({loc[0]},{loc[1]})" for loc in locs])
     return f"Multi-selected elements at:\n{elements_str}"
@@ -488,6 +498,9 @@ def multi_select_tool(
 )
 @with_analytics(lambda: analytics, "Multi-Edit-Tool")
 def multi_edit_tool(locs: list[list], ctx: Context = None) -> str:
+    for i, entry in enumerate(locs):
+        if not isinstance(entry, (list, tuple)) or len(entry) < 3:
+            raise ValueError(f"locs[{i}] must be [x, y, text], got {entry!r}")
     desktop.multi_edit(locs)
     elements_str = ", ".join([f"({e[0]},{e[1]}) with text '{e[2]}'" for e in locs])
     return f"Multi-edited elements at: {elements_str}"
