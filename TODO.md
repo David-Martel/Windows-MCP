@@ -1,7 +1,7 @@
 # Windows-MCP TODO
 
 **Generated:** 2026-02-18 from REVIEW.md findings
-**Last updated:** 2026-02-19 -- 2123 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete
+**Last updated:** 2026-02-19 -- 2127 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete
 **Reference:** See [REVIEW.md](REVIEW.md) for full context on each item.
 
 ---
@@ -129,6 +129,6 @@
 - [ ] **Playwright-MCP bridge** -- Detect browser windows and forward to `playwright-mcp` for DOM tasks. Use existing ProxyClient pattern from remote mode.
 - [ ] **Power Automate Desktop flow trigger** -- `PADFlow(flow_name, inputs)` tool via Dataverse REST API POST to `RunDesktopFlow`.
 - [x] **Capability/permission manifest** -- Tauri-inspired `WINDOWS_MCP_ALLOW`/`WINDOWS_MCP_DENY` env vars. Evaluated in `with_analytics` decorator. `ToolNotAllowedError` raised for blocked tools. 39 tests.
-- [ ] **WatchDog-backed WaitForEvent** -- Subscribe to `Window_WindowOpened`/`Window_WindowClosed` events. Expose as `WaitForEvent(event, name, timeout)`.
+- [x] **WatchDog-backed WaitForEvent** -- `WaitForEvent(event, name, timeout)` subscribes to UIA automation events via WatchDog. Supports window_opened/closed, menu_opened/closed, text_changed, focus_changed. Optional name filter. 24th tool.
 - [ ] **Win32 message fallback** -- `PostMessage(WM_COMMAND/WM_LBUTTONDOWN)` for legacy apps without UIAutomation. AutoHotkey-level coverage.
 - [ ] **Session recording** -- Middleware decorator logging tool calls + before/after screenshots when `RECORD_SESSION=true`.
