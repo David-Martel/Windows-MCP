@@ -87,19 +87,28 @@ class Desktop:
 
         start_time = time()
 
-        controls_handles = self.get_controls_handles()  # Taskbar,Program Manager,Apps, Dialogs
-        windows, windows_handles = self.get_windows(controls_handles=controls_handles)  # Apps
-        active_window = self.get_active_window(windows=windows)  # Active Window
-        active_window_handle = active_window.handle if active_window else None
+        # Run VDM desktop query in parallel with window enumeration
+        # (VDM uses thread-local COM, safe to run from any thread)
+        from concurrent.futures import ThreadPoolExecutor
 
-        try:
-            active_desktop, all_desktops = get_desktop_info()
-        except RuntimeError:
-            active_desktop = {
-                "id": "00000000-0000-0000-0000-000000000000",
-                "name": "Default Desktop",
-            }
-            all_desktops = [active_desktop]
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="vdm") as vdm_pool:
+            vdm_future = vdm_pool.submit(get_desktop_info)
+
+            # Window chain runs serially on the calling thread
+            controls_handles = self.get_controls_handles()
+            windows, windows_handles = self.get_windows(controls_handles=controls_handles)
+            active_window = self.get_active_window(windows=windows)
+            active_window_handle = active_window.handle if active_window else None
+
+            # Collect VDM result
+            try:
+                active_desktop, all_desktops = vdm_future.result(timeout=5)
+            except Exception:
+                active_desktop = {
+                    "id": "00000000-0000-0000-0000-000000000000",
+                    "name": "Default Desktop",
+                }
+                all_desktops = [active_desktop]
 
         if active_window is not None and active_window in windows:
             windows.remove(active_window)
