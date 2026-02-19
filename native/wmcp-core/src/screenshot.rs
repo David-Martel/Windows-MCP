@@ -12,7 +12,7 @@
 //! 2. Walk `IDXGIFactory1 -> IDXGIAdapter -> IDXGIOutput -> IDXGIOutput1`.
 //! 3. Call `IDXGIOutput1::DuplicateOutput` to obtain an
 //!    `IDXGIOutputDuplication` interface.
-//! 4. `AcquireNextFrame` returns a `IDXGISurface` backed by a GPU texture.
+//! 4. `AcquireNextFrame` returns an `IDXGIResource` backed by a GPU texture.
 //! 5. Create a CPU-readable staging texture (`D3D11_USAGE_STAGING`), copy
 //!    the desktop frame into it, then map it with `D3D11_MAP_READ` to
 //!    obtain a `*const u8` pointer to BGRA pixels.
@@ -22,8 +22,9 @@
 //!
 //! All DXGI / D3D11 interfaces are COM objects.  This module creates them
 //! fresh on every call -- there is no shared global state.  Each call must
-//! be made from a thread with a valid COM apartment (call [`crate::com::COMGuard::init`]
-//! before invoking these functions from a new thread).
+//! be made from a thread with a valid COM apartment (call
+//! [`crate::com::COMGuard::init`] before invoking these functions from a
+//! new thread).
 //!
 //! # Examples
 //!
@@ -43,13 +44,13 @@ use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
-    D3D11_BIND_FLAG, D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_SDK_VERSION,
+    D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION,
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, IDXGIAdapter, IDXGIFactory1, IDXGIOutput, IDXGIOutput1,
-    IDXGIOutputDuplication, IDXGIResource, DXGI_OUTDUPL_FRAME_INFO, DXGI_OUTPUT_DESC,
+    IDXGIOutputDuplication, IDXGIResource, DXGI_OUTDUPL_FRAME_INFO,
 };
 use windows::core::Interface;
 
@@ -97,11 +98,10 @@ pub struct ScreenshotData {
 fn create_d3d11_device() -> Result<(ID3D11Device, ID3D11DeviceContext), WindowsMcpError> {
     let mut device: Option<ID3D11Device> = None;
     let mut context: Option<ID3D11DeviceContext> = None;
-    let mut feature_level =
-        windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_9_1;
+    let mut feature_level = windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_9_1;
 
     // Try hardware adapter first.
-    let hr = unsafe {
+    let hw_result = unsafe {
         D3D11CreateDevice(
             None,
             D3D_DRIVER_TYPE_HARDWARE,
@@ -115,65 +115,62 @@ fn create_d3d11_device() -> Result<(ID3D11Device, ID3D11DeviceContext), WindowsM
         )
     };
 
-    let (device, context) = if hr.is_ok() {
-        (
-            device.ok_or_else(|| {
-                WindowsMcpError::ScreenshotError(
-                    "D3D11CreateDevice succeeded but returned null device".into(),
-                )
-            })?,
-            context.ok_or_else(|| {
-                WindowsMcpError::ScreenshotError(
-                    "D3D11CreateDevice succeeded but returned null context".into(),
-                )
-            })?,
-        )
-    } else {
-        // Try WARP software renderer as fallback.
-        let mut device2: Option<ID3D11Device> = None;
-        let mut context2: Option<ID3D11DeviceContext> = None;
-
-        unsafe {
-            D3D11CreateDevice(
-                None,
-                windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_WARP,
-                None,
-                windows::Win32::Graphics::Direct3D11::D3D11_CREATE_DEVICE_FLAG(0),
-                None,
-                D3D11_SDK_VERSION,
-                Some(&mut device2),
-                Some(&mut feature_level),
-                Some(&mut context2),
+    if hw_result.is_ok() {
+        let dev = device.ok_or_else(|| {
+            WindowsMcpError::ScreenshotError(
+                "D3D11CreateDevice (HW) succeeded but returned null device".into(),
             )
-            .map_err(|e| {
-                WindowsMcpError::ScreenshotError(format!(
-                    "D3D11CreateDevice (WARP fallback) failed: {e}"
-                ))
-            })?;
-        }
+        })?;
+        let ctx = context.ok_or_else(|| {
+            WindowsMcpError::ScreenshotError(
+                "D3D11CreateDevice (HW) succeeded but returned null context".into(),
+            )
+        })?;
+        return Ok((dev, ctx));
+    }
 
-        (
-            device2.ok_or_else(|| {
-                WindowsMcpError::ScreenshotError(
-                    "D3D11CreateDevice (WARP) returned null device".into(),
-                )
-            })?,
-            context2.ok_or_else(|| {
-                WindowsMcpError::ScreenshotError(
-                    "D3D11CreateDevice (WARP) returned null context".into(),
-                )
-            })?,
+    // Hardware failed -- try WARP software renderer.
+    let mut device2: Option<ID3D11Device> = None;
+    let mut context2: Option<ID3D11DeviceContext> = None;
+
+    unsafe {
+        D3D11CreateDevice(
+            None,
+            windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_WARP,
+            None,
+            windows::Win32::Graphics::Direct3D11::D3D11_CREATE_DEVICE_FLAG(0),
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut device2),
+            Some(&mut feature_level),
+            Some(&mut context2),
         )
-    };
+        .map_err(|e| {
+            WindowsMcpError::ScreenshotError(format!(
+                "D3D11CreateDevice (WARP fallback) failed: {e}"
+            ))
+        })?;
+    }
 
-    Ok((device, context))
+    let dev = device2.ok_or_else(|| {
+        WindowsMcpError::ScreenshotError(
+            "D3D11CreateDevice (WARP) returned null device".into(),
+        )
+    })?;
+    let ctx = context2.ok_or_else(|| {
+        WindowsMcpError::ScreenshotError(
+            "D3D11CreateDevice (WARP) returned null context".into(),
+        )
+    })?;
+    Ok((dev, ctx))
 }
 
 /// Enumerate DXGI outputs (monitors) and return the `IDXGIOutput1` for
-/// `monitor_index`, plus the first adapter that owns it.
+/// `monitor_index`, plus the adapter that owns it and the monitor
+/// desktop coordinates.
 fn get_dxgi_output(
     monitor_index: u32,
-) -> Result<(IDXGIAdapter, IDXGIOutput1, DXGI_OUTPUT_DESC), WindowsMcpError> {
+) -> Result<(IDXGIAdapter, IDXGIOutput1, RECT), WindowsMcpError> {
     let factory: IDXGIFactory1 = unsafe {
         CreateDXGIFactory1().map_err(|e| {
             WindowsMcpError::ScreenshotError(format!("CreateDXGIFactory1 failed: {e}"))
@@ -182,7 +179,7 @@ fn get_dxgi_output(
 
     let mut global_output_index: u32 = 0;
 
-    // Walk adapters (graphics cards) in order.
+    // Walk adapters (graphics cards) in enumeration order.
     let mut adapter_index: u32 = 0;
     loop {
         let adapter: IDXGIAdapter = match unsafe { factory.EnumAdapters(adapter_index) } {
@@ -208,6 +205,7 @@ fn get_dxgi_output(
                     ))
                 })?;
 
+                // GetDesc returns Result<DXGI_OUTPUT_DESC> in windows 0.58.
                 let desc = unsafe {
                     output1.GetDesc().map_err(|e| {
                         WindowsMcpError::ScreenshotError(format!(
@@ -216,7 +214,7 @@ fn get_dxgi_output(
                     })?
                 };
 
-                return Ok((adapter, output1, desc));
+                return Ok((adapter, output1, desc.DesktopCoordinates));
             }
 
             global_output_index += 1;
@@ -231,11 +229,11 @@ fn get_dxgi_output(
     )))
 }
 
-/// Capture one frame from `duplication`, copy it into a CPU-readable
-/// staging texture, map it, and return the raw BGRA bytes.
+/// Acquire one frame from `duplication`, copy it into a CPU-readable
+/// staging texture, and return the raw BGRA pixel bytes.
 ///
-/// The caller provides the D3D11 device and context so the staging
-/// texture is created with the same device that owns the duplication.
+/// The device/context pair must have been created against the same DXGI
+/// adapter as the output used to create `duplication`.
 fn read_frame(
     device: &ID3D11Device,
     context: &ID3D11DeviceContext,
@@ -243,37 +241,42 @@ fn read_frame(
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, WindowsMcpError> {
-    // AcquireNextFrame blocks until a new frame is ready.
-    // Timeout of 500ms is enough for a 60Hz display (~16ms between frames).
-    let timeout_ms: u32 = 500;
+    // AcquireNextFrame blocks until a new frame is available.
+    // 500ms timeout is ample for a 60Hz display (~16ms between frames).
     let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
+    // AcquireNextFrame takes *mut Option<IDXGIResource> -- must use a raw ptr.
     let mut desktop_resource: Option<IDXGIResource> = None;
 
     unsafe {
         duplication
-            .AcquireNextFrame(timeout_ms, &mut frame_info, &mut desktop_resource)
+            .AcquireNextFrame(
+                500,
+                std::ptr::addr_of_mut!(frame_info),
+                std::ptr::addr_of_mut!(desktop_resource),
+            )
             .map_err(|e| {
                 WindowsMcpError::ScreenshotError(format!("AcquireNextFrame failed: {e}"))
             })?;
     }
 
-    // The desktop resource is a `IDXGISurface` backed by a GPU texture.
-    // We must release the frame before returning, so use a defer-style guard.
-    let result = (|| -> Result<Vec<u8>, WindowsMcpError> {
-        let desktop_resource = desktop_resource.ok_or_else(|| {
+    // We must call ReleaseFrame before returning -- even on error paths.
+    // Implement with a defer-style closure.
+    let pixel_result = (|| -> Result<Vec<u8>, WindowsMcpError> {
+        let resource = desktop_resource.ok_or_else(|| {
             WindowsMcpError::ScreenshotError(
-                "AcquireNextFrame returned null desktop resource".into(),
+                "AcquireNextFrame returned a null desktop resource".into(),
             )
         })?;
 
-        let gpu_texture: ID3D11Texture2D =
-            desktop_resource.cast::<ID3D11Texture2D>().map_err(|e| {
-                WindowsMcpError::ScreenshotError(format!(
-                    "Desktop resource -> ID3D11Texture2D cast failed: {e}"
-                ))
-            })?;
+        // QueryInterface the IDXGIResource to get an ID3D11Texture2D.
+        let gpu_texture: ID3D11Texture2D = resource.cast::<ID3D11Texture2D>().map_err(|e| {
+            WindowsMcpError::ScreenshotError(format!(
+                "IDXGIResource -> ID3D11Texture2D cast failed: {e}"
+            ))
+        })?;
 
-        // Create a CPU-readable staging texture with the same dimensions.
+        // Create a CPU-readable staging texture with matching dimensions.
+        // BindFlags / CPUAccessFlags / MiscFlags are plain u32 in this struct.
         let staging_desc = D3D11_TEXTURE2D_DESC {
             Width: width,
             Height: height,
@@ -285,9 +288,9 @@ fn read_frame(
                 Quality: 0,
             },
             Usage: D3D11_USAGE_STAGING,
-            BindFlags: D3D11_BIND_FLAG(0).0 as u32,
+            BindFlags: 0,
             CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
-            MiscFlags: windows::Win32::Graphics::Direct3D11::D3D11_RESOURCE_MISC_FLAG(0).0 as u32,
+            MiscFlags: 0,
         };
 
         let mut staging_texture: Option<ID3D11Texture2D> = None;
@@ -303,20 +306,28 @@ fn read_frame(
 
         let staging_texture = staging_texture.ok_or_else(|| {
             WindowsMcpError::ScreenshotError(
-                "CreateTexture2D returned null staging texture".into(),
+                "CreateTexture2D returned a null staging texture".into(),
             )
         })?;
 
-        // Copy GPU texture -> staging texture.
+        // Copy the GPU-resident desktop texture into the CPU-readable staging
+        // texture.  This is a GPU-to-GPU blit; the CPU sees the result after
+        // Map().
         unsafe {
             context.CopyResource(&staging_texture, &gpu_texture);
         }
 
-        // Map the staging texture to get a CPU pointer.
-        let mut mapped = windows::Win32::Graphics::Direct3D11::D3D11_MAPPED_SUBRESOURCE::default();
+        // Map the staging texture to obtain a CPU pointer to the pixel data.
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
         unsafe {
             context
-                .Map(&staging_texture, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                .Map(
+                    &staging_texture,
+                    0,
+                    D3D11_MAP_READ,
+                    0,
+                    Some(&mut mapped),
+                )
                 .map_err(|e| {
                     WindowsMcpError::ScreenshotError(format!(
                         "ID3D11DeviceContext::Map failed: {e}"
@@ -324,23 +335,23 @@ fn read_frame(
                 })?;
         }
 
-        // Copy pixels out of mapped memory row-by-row.
-        // `mapped.RowPitch` may be larger than `width * 4` due to GPU
-        // alignment padding; we must skip padding bytes on each row.
+        // Copy pixels out row-by-row.
+        // `mapped.RowPitch` >= `width * 4` due to GPU alignment padding;
+        // skip the padding bytes at the end of each row.
         let row_pitch = mapped.RowPitch as usize;
-        let row_bytes = (width * 4) as usize;
+        let row_bytes = (width as usize) * 4;
         let mut pixels: Vec<u8> = Vec::with_capacity(row_bytes * height as usize);
 
         unsafe {
             let src_ptr = mapped.pData as *const u8;
             for row in 0..height as usize {
-                let src_row = src_ptr.add(row * row_pitch);
-                let src_slice = std::slice::from_raw_parts(src_row, row_bytes);
+                let row_start = src_ptr.add(row * row_pitch);
+                let src_slice = std::slice::from_raw_parts(row_start, row_bytes);
                 pixels.extend_from_slice(src_slice);
             }
         }
 
-        // Unmap before releasing the staging texture.
+        // Unmap before the staging texture is dropped.
         unsafe {
             context.Unmap(&staging_texture, 0);
         }
@@ -348,12 +359,12 @@ fn read_frame(
         Ok(pixels)
     })();
 
-    // Always release the acquired frame, even if pixel read failed.
+    // Always release the acquired DXGI frame.
     unsafe {
         let _ = duplication.ReleaseFrame();
     }
 
-    result
+    pixel_result
 }
 
 // ---------------------------------------------------------------------------
@@ -362,16 +373,15 @@ fn read_frame(
 
 /// Capture the desktop for `monitor_index` via DXGI Output Duplication.
 ///
-/// Returns raw BGRA pixel data.  This path requires a hardware or WARP
-/// D3D11 device and fails inside pure Remote Desktop sessions without
-/// GPU access.  Use [`capture_raw`] which automatically falls back to GDI.
+/// Returns raw BGRA pixel data or a [`WindowsMcpError::ScreenshotError`].
+/// This path requires a D3D11 device and fails in pure Remote Desktop
+/// sessions without GPU passthrough.  The public [`capture_raw`] falls
+/// back to GDI automatically.
 fn capture_dxgi(monitor_index: u32) -> Result<ScreenshotData, WindowsMcpError> {
-    let (device, context) = create_d3d11_device()?;
+    // Retrieve the target adapter/output so we can bind DuplicateOutput to
+    // the correct device.
+    let (adapter, output1, desktop_rect) = get_dxgi_output(monitor_index)?;
 
-    let (adapter, output1, desc) = get_dxgi_output(monitor_index)?;
-
-    // Derive monitor dimensions from the output descriptor.
-    let desktop_rect: RECT = desc.DesktopCoordinates;
     let width = (desktop_rect.right - desktop_rect.left).unsigned_abs();
     let height = (desktop_rect.bottom - desktop_rect.top).unsigned_abs();
 
@@ -381,60 +391,57 @@ fn capture_dxgi(monitor_index: u32) -> Result<ScreenshotData, WindowsMcpError> {
         )));
     }
 
-    // DuplicateOutput requires the D3D11 device that was created against
-    // the same adapter as the output.  We create the device fresh for
-    // the correct adapter here.
-    //
-    // If the device was created against a different adapter (e.g. hardware
-    // failed and we used WARP), create a new device for the correct adapter.
-    let duplication: IDXGIOutputDuplication = {
-        // Try to create device against the specific adapter owning this output.
-        let mut specific_device: Option<ID3D11Device> = None;
-        let mut specific_context: Option<ID3D11DeviceContext> = None;
-        let mut fl = windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_9_1;
+    // Create the D3D11 device against the specific adapter that owns the
+    // output.  DuplicateOutput requires the device and output to share
+    // the same DXGI adapter; passing D3D_DRIVER_TYPE_UNKNOWN with an
+    // explicit adapter achieves this.
+    let mut device_opt: Option<ID3D11Device> = None;
+    let mut context_opt: Option<ID3D11DeviceContext> = None;
+    let mut feature_level = windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_9_1;
 
-        let hr = unsafe {
-            D3D11CreateDevice(
-                &adapter,
-                windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN,
-                None,
-                windows::Win32::Graphics::Direct3D11::D3D11_CREATE_DEVICE_FLAG(0),
-                None,
-                D3D11_SDK_VERSION,
-                Some(&mut specific_device),
-                Some(&mut fl),
-                Some(&mut specific_context),
-            )
-        };
+    let hr = unsafe {
+        D3D11CreateDevice(
+            &adapter,
+            windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN,
+            None,
+            windows::Win32::Graphics::Direct3D11::D3D11_CREATE_DEVICE_FLAG(0),
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut device_opt),
+            Some(&mut feature_level),
+            Some(&mut context_opt),
+        )
+    };
 
-        // Use the adapter-specific device when possible; fall back to the
-        // already-created WARP device otherwise.
-        let (dup_device, _dup_context) = if hr.is_ok() {
-            let d = specific_device.ok_or_else(|| {
+    // Fall back to a generic hardware/WARP device if adapter-specific
+    // creation fails (can happen on some hybrid GPU configurations).
+    let (device, context) = if hr.is_ok() {
+        (
+            device_opt.ok_or_else(|| {
                 WindowsMcpError::ScreenshotError(
                     "D3D11CreateDevice (adapter) returned null device".into(),
                 )
-            })?;
-            let c = specific_context.ok_or_else(|| {
+            })?,
+            context_opt.ok_or_else(|| {
                 WindowsMcpError::ScreenshotError(
                     "D3D11CreateDevice (adapter) returned null context".into(),
                 )
-            })?;
-            (d, c)
-        } else {
-            (device.clone(), context.clone())
-        };
-
-        unsafe {
-            output1
-                .DuplicateOutput(&dup_device)
-                .map_err(|e| {
-                    WindowsMcpError::ScreenshotError(format!("DuplicateOutput failed: {e}"))
-                })?
-        }
+            })?,
+        )
+    } else {
+        create_d3d11_device()?
     };
 
-    // Acquire and read one frame.
+    // Open the output duplication session.
+    let duplication: IDXGIOutputDuplication = unsafe {
+        output1
+            .DuplicateOutput(&device)
+            .map_err(|e| {
+                WindowsMcpError::ScreenshotError(format!("DuplicateOutput failed: {e}"))
+            })?
+    };
+
+    // Capture one frame.
     let pixels = read_frame(&device, &context, &duplication, width, height)?;
 
     Ok(ScreenshotData {
@@ -450,42 +457,42 @@ fn capture_dxgi(monitor_index: u32) -> Result<ScreenshotData, WindowsMcpError> {
 
 /// Capture the primary monitor using GDI `BitBlt`.
 ///
-/// This fallback is used when DXGI Output Duplication is unavailable
-/// (Remote Desktop sessions, some virtual machines, Windows Server
-/// without a display driver).  It captures only the primary monitor
-/// regardless of `monitor_index`.
+/// Used when DXGI Output Duplication is unavailable (Remote Desktop
+/// sessions, virtual machines without GPU access, Windows Server SKUs
+/// that lack a hardware display driver).  Only the primary monitor
+/// (`monitor_index == 0`) is supported.
 ///
-/// Returns BGRA pixels (GDI DIBSection in `BI_RGB` 32-bit mode produces
-/// `BGRA` layout with the alpha channel set to 0; we force alpha to 255).
+/// GDI `BI_RGB` 32-bit mode stores pixels as BGRA with alpha == 0;
+/// this function sets alpha to 255 (fully opaque) before returning.
 fn capture_gdi(monitor_index: u32) -> Result<ScreenshotData, WindowsMcpError> {
-    // GDI can only capture the primary monitor; warn if index > 0.
     if monitor_index > 0 {
         return Err(WindowsMcpError::ScreenshotError(format!(
             "GDI fallback does not support monitor index {monitor_index}; \
-             only monitor 0 (primary) is supported"
+             only monitor 0 (primary) is supported via GDI BitBlt"
         )));
     }
 
-    let width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
-    let height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    let width_i = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+    let height_i = unsafe { GetSystemMetrics(SM_CYSCREEN) };
 
-    if width <= 0 || height <= 0 {
+    if width_i <= 0 || height_i <= 0 {
         return Err(WindowsMcpError::ScreenshotError(format!(
-            "GetSystemMetrics returned invalid screen size: {width}x{height}"
+            "GetSystemMetrics returned invalid screen size: {width_i}x{height_i}"
         )));
     }
 
-    let (width, height) = (width as u32, height as u32);
+    let width = width_i as u32;
+    let height = height_i as u32;
 
     unsafe {
-        // Get the screen DC.
         let screen_dc = GetDC(HWND(std::ptr::null_mut()));
         if screen_dc.is_invalid() {
             return Err(WindowsMcpError::ScreenshotError(
-                "GetDC(NULL) failed".into(),
+                "GetDC(NULL) returned an invalid DC".into(),
             ));
         }
-        // RAII-style cleanup via a guard closure at the end.
+
+        // Use a nested closure so we can call ReleaseDC unconditionally.
         let result = (|| -> Result<ScreenshotData, WindowsMcpError> {
             let mem_dc = CreateCompatibleDC(screen_dc);
             if mem_dc.is_invalid() {
@@ -493,6 +500,7 @@ fn capture_gdi(monitor_index: u32) -> Result<ScreenshotData, WindowsMcpError> {
                     "CreateCompatibleDC failed".into(),
                 ));
             }
+
             let bitmap = CreateCompatibleBitmap(screen_dc, width as i32, height as i32);
             if bitmap.is_invalid() {
                 let _ = DeleteDC(mem_dc);
@@ -503,24 +511,23 @@ fn capture_gdi(monitor_index: u32) -> Result<ScreenshotData, WindowsMcpError> {
 
             let old_bitmap = SelectObject(mem_dc, bitmap);
 
-            // Copy from screen DC to memory DC.
-            BitBlt(mem_dc, 0, 0, width as i32, height as i32, screen_dc, 0, 0, SRCCOPY)
-                .map_err(|e| {
-                    SelectObject(mem_dc, old_bitmap);
-                    let _ = DeleteObject(bitmap);
-                    let _ = DeleteDC(mem_dc);
-                    WindowsMcpError::ScreenshotError(format!("BitBlt failed: {e}"))
-                })?;
+            let bitblt_result =
+                BitBlt(mem_dc, 0, 0, width as i32, height as i32, screen_dc, 0, 0, SRCCOPY);
 
-            // Retrieve pixels in 32-bit BGRA format.
-            let pixel_count = (width * height) as usize;
-            let mut pixels = vec![0u8; pixel_count * 4];
+            if bitblt_result.is_err() {
+                SelectObject(mem_dc, old_bitmap);
+                let _ = DeleteObject(bitmap);
+                let _ = DeleteDC(mem_dc);
+                return Err(WindowsMcpError::ScreenshotError("BitBlt failed".into()));
+            }
 
-            let bmi = BITMAPINFO {
+            // GetDIBits expects *mut BITMAPINFO.
+            let mut pixels = vec![0u8; (width * height * 4) as usize];
+            let mut bmi = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
                     biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
                     biWidth: width as i32,
-                    // Negative height = top-down bitmap (row 0 at top).
+                    // Negative height = top-down row order (row 0 at top).
                     biHeight: -(height as i32),
                     biPlanes: 1,
                     biBitCount: 32,
@@ -539,8 +546,8 @@ fn capture_gdi(monitor_index: u32) -> Result<ScreenshotData, WindowsMcpError> {
                 bitmap,
                 0,
                 height,
-                Some(pixels.as_mut_ptr() as *mut _),
-                &bmi as *const _ as *mut _,
+                Some(pixels.as_mut_ptr().cast()),
+                &mut bmi,
                 DIB_RGB_COLORS,
             );
 
@@ -549,10 +556,10 @@ fn capture_gdi(monitor_index: u32) -> Result<ScreenshotData, WindowsMcpError> {
             let _ = DeleteDC(mem_dc);
 
             if lines == 0 {
-                return Err(WindowsMcpError::ScreenshotError("GetDIBits failed".into()));
+                return Err(WindowsMcpError::ScreenshotError("GetDIBits returned 0".into()));
             }
 
-            // GDI BI_RGB 32-bit has alpha = 0; set it to 255 (fully opaque).
+            // GDI BI_RGB 32-bit sets alpha to 0; force it to 255 (opaque).
             for chunk in pixels.chunks_exact_mut(4) {
                 chunk[3] = 255;
             }
@@ -587,6 +594,7 @@ fn capture_gdi(monitor_index: u32) -> Result<ScreenshotData, WindowsMcpError> {
 /// # Returns
 ///
 /// A [`ScreenshotData`] with `width`, `height`, and `data` (BGRA bytes).
+/// `data.len() == width * height * 4` is always true on success.
 ///
 /// # Errors
 ///
@@ -618,7 +626,7 @@ pub fn capture_raw(monitor_index: u32) -> Result<ScreenshotData, WindowsMcpError
 ///
 /// Internally calls [`capture_raw`] and encodes the BGRA pixel data
 /// using the [`image`] crate.  The PNG is returned as a `Vec<u8>` in
-/// memory -- write it to a file or send it over the network directly.
+/// memory -- write it to a file or transmit it directly.
 ///
 /// # Parameters
 ///
@@ -644,12 +652,12 @@ pub fn capture_raw(monitor_index: u32) -> Result<ScreenshotData, WindowsMcpError
 pub fn capture_png(monitor_index: u32) -> Result<Vec<u8>, WindowsMcpError> {
     let frame = capture_raw(monitor_index)?;
 
-    // Convert BGRA -> RGBA for the `image` crate (which uses RGBA layout).
+    // Convert BGRA -> RGBA for the `image` crate (its RgbaImage uses RGBA).
     let rgba_pixels: Vec<u8> = frame
         .data
         .chunks_exact(4)
         .flat_map(|px| {
-            // px = [B, G, R, A]
+            // px layout: [B, G, R, A]
             [px[2], px[1], px[0], px[3]]
         })
         .collect();
@@ -657,7 +665,7 @@ pub fn capture_png(monitor_index: u32) -> Result<Vec<u8>, WindowsMcpError> {
     let img = image::RgbaImage::from_raw(frame.width, frame.height, rgba_pixels)
         .ok_or_else(|| {
             WindowsMcpError::ScreenshotError(
-                "image::RgbaImage::from_raw failed: buffer size mismatch".into(),
+                "image::RgbaImage::from_raw failed: pixel buffer size mismatch".into(),
             )
         })?;
 
