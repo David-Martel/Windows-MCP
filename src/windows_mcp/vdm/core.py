@@ -428,7 +428,7 @@ class VirtualDesktopManager:
         except Exception:
             return ""
 
-    def _get_name_from_registry(self, guid_str: str) -> str:
+    def _get_name_from_registry(self, guid_str: str) -> str | None:
         """
         Retrieves the user-friendly name of a desktop from the Registry.
         Returns None if no custom name is set.

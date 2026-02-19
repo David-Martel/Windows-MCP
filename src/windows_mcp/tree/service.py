@@ -60,6 +60,7 @@ class Tree:
         )
         self.tree_state = None
         self._state_lock = threading.Lock()
+        self._last_focus_event: tuple[tuple, float] | None = None
 
     def get_state(
         self,
@@ -363,7 +364,8 @@ class Tree:
                     except Exception as e:
                         retry_counts[handle] += 1
                         logger.debug(
-                            f"Error in processing handle {handle}, retry attempt {retry_counts[handle]}\nError: {e}"
+                            "Error in processing handle %s, retry attempt %d\nError: %s",
+                            handle, retry_counts[handle], e,
                         )
                         if retry_counts[handle] < THREAD_MAX_RETRIES:
                             # Need to find is_browser again for retry
@@ -374,7 +376,8 @@ class Tree:
                             future_to_handle[new_future] = handle
                         else:
                             logger.error(
-                                f"Task failed completely for handle {handle} after {THREAD_MAX_RETRIES} retries"
+                                "Task failed completely for handle %s after %d retries",
+                                handle, THREAD_MAX_RETRIES,
                             )
         return interactive_nodes, scrollable_nodes, dom_informative_nodes, dom_node
 
@@ -427,10 +430,12 @@ class Tree:
         if self.element_has_child_element(
             node, "list item", "link"
         ) or self.element_has_child_element(node, "item", "link"):
-            dom_interactive_nodes.pop()
+            if dom_interactive_nodes:
+                dom_interactive_nodes.pop()
             return None
         elif node.ControlTypeName == "GroupControl":
-            dom_interactive_nodes.pop()
+            if dom_interactive_nodes:
+                dom_interactive_nodes.pop()
             # Inlined is_keyboard_focusable logic for correction
             control_type_name_check = node.CachedControlTypeName
             is_kb_focusable = False
@@ -480,7 +485,8 @@ class Tree:
                     )
                 )
         elif self.element_has_child_element(node, "link", "heading"):
-            dom_interactive_nodes.pop()
+            if dom_interactive_nodes:
+                dom_interactive_nodes.pop()
             node = node.GetFirstChildControl()
             control_type = "link"
             legacy_pattern = node.GetLegacyIAccessiblePattern()
@@ -588,7 +594,7 @@ class Tree:
                                 )
                             )
                     except Exception:
-                        pass
+                        logger.debug("Scroll pattern query failed for node", exc_info=True)
 
             # Interactive and Informative checks
             # Pre-calculate common properties
@@ -1033,7 +1039,7 @@ class Tree:
         element = Control.CreateControlFromElement(sender)
         runtime_id = element.GetRuntimeId()
         event_key = tuple(runtime_id)
-        if hasattr(self, "_last_focus_event") and self._last_focus_event:
+        if self._last_focus_event is not None:
             last_key, last_time = self._last_focus_event
             if last_key == event_key and (current_time - last_time) < 1.0:
                 return None
@@ -1041,7 +1047,8 @@ class Tree:
 
         try:
             logger.debug(
-                f"[WatchDog] Focus changed to: '{element.Name}' ({element.ControlTypeName})"
+                "[WatchDog] Focus changed to: '%s' (%s)",
+                element.Name, element.ControlTypeName,
             )
         except Exception:
             pass
@@ -1051,7 +1058,8 @@ class Tree:
         try:
             element = Control.CreateControlFromElement(sender)
             logger.debug(
-                f"[WatchDog] Property changed: ID={propertyId} Value={newValue} Element: '{element.Name}' ({element.ControlTypeName})"
+                "[WatchDog] Property changed: ID=%s Value=%s Element: '%s' (%s)",
+                propertyId, newValue, element.Name, element.ControlTypeName,
             )
         except Exception:
             pass

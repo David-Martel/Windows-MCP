@@ -61,9 +61,11 @@ class Desktop:
         # Cache for start menu app list (avoids repeated PowerShell subprocess)
         self._app_cache: dict[str, str] | None = None
         self._app_cache_time: float = 0.0
+        self._app_cache_lock = threading.Lock()
         self._APP_CACHE_TTL: float = 3600.0  # 1 hour
         # Cache for process name lookups (avoids psutil.Process() per window)
         self._process_name_cache: dict[int, str] = {}
+        self._process_cache_lock = threading.Lock()
 
     @staticmethod
     def _ps_quote(value: str) -> str:
@@ -180,33 +182,40 @@ class Desktop:
     def get_apps_from_start_menu(self) -> dict[str, str]:
         """Get installed apps with caching. Tries Get-StartApps first, falls back to shortcut scanning."""
         now = time()
+        # Fast path: check cache without lock (atomic read on CPython)
         if self._app_cache is not None and (now - self._app_cache_time) < self._APP_CACHE_TTL:
             return self._app_cache
 
-        command = "Get-StartApps | ConvertTo-Csv -NoTypeInformation"
-        apps_info, status = self.execute_command(command)
+        with self._app_cache_lock:
+            # Double-check after acquiring lock
+            now = time()
+            if self._app_cache is not None and (now - self._app_cache_time) < self._APP_CACHE_TTL:
+                return self._app_cache
 
-        if status == 0 and apps_info and apps_info.strip():
-            try:
-                reader = csv.DictReader(io.StringIO(apps_info.strip()))
-                apps = {
-                    row.get("Name", "").lower(): row.get("AppID", "")
-                    for row in reader
-                    if row.get("Name") and row.get("AppID")
-                }
-                if apps:
-                    self._app_cache = apps
-                    self._app_cache_time = now
-                    return apps
-            except Exception as e:
-                logger.warning("Error parsing Get-StartApps output: %s", e)
+            command = "Get-StartApps | ConvertTo-Csv -NoTypeInformation"
+            apps_info, status = self.execute_command(command)
 
-        # Fallback: scan Start Menu shortcut folders (works on all Windows versions)
-        logger.info("Get-StartApps unavailable, falling back to Start Menu folder scan")
-        apps = self._get_apps_from_shortcuts()
-        self._app_cache = apps
-        self._app_cache_time = now
-        return apps
+            if status == 0 and apps_info and apps_info.strip():
+                try:
+                    reader = csv.DictReader(io.StringIO(apps_info.strip()))
+                    apps = {
+                        row.get("Name", "").lower(): row.get("AppID", "")
+                        for row in reader
+                        if row.get("Name") and row.get("AppID")
+                    }
+                    if apps:
+                        self._app_cache = apps
+                        self._app_cache_time = now
+                        return apps
+                except Exception as e:
+                    logger.warning("Error parsing Get-StartApps output: %s", e)
+
+            # Fallback: scan Start Menu shortcut folders (works on all Windows versions)
+            logger.info("Get-StartApps unavailable, falling back to Start Menu folder scan")
+            apps = self._get_apps_from_shortcuts()
+            self._app_cache = apps
+            self._app_cache_time = now
+            return apps
 
     def _get_apps_from_shortcuts(self) -> dict[str, str]:
         """Scan Start Menu folders for .lnk shortcuts as a fallback for Get-StartApps."""
@@ -243,14 +252,21 @@ class Desktop:
     def execute_command(self, command: str, timeout: int = 10) -> tuple[str, int]:
         return self._shell.execute(command, timeout)
 
+    _PROCESS_CACHE_MAX = 256
+
     def is_window_browser(self, node: uia.Control):
         """Give any node of the app and it will return True if the app is a browser, False otherwise."""
         try:
             pid = node.ProcessId
-            proc_name = self._process_name_cache.get(pid)
+            with self._process_cache_lock:
+                proc_name = self._process_name_cache.get(pid)
             if proc_name is None:
                 proc_name = Process(pid).name()
-                self._process_name_cache[pid] = proc_name
+                with self._process_cache_lock:
+                    # Evict if cache grows too large (PIDs are recycled by OS)
+                    if len(self._process_name_cache) >= self._PROCESS_CACHE_MAX:
+                        self._process_name_cache.clear()
+                    self._process_name_cache[pid] = proc_name
             return Browser.has_process(proc_name)
         except Exception:
             return False
@@ -266,9 +282,15 @@ class Desktop:
         return "Unknown"
 
     def resize_app(
-        self, size: tuple[int, int] = None, loc: tuple[int, int] = None
+        self,
+        size: tuple[int, int] | None = None,
+        loc: tuple[int, int] | None = None,
     ) -> tuple[str, int]:
-        active_window = self.desktop_state.active_window
+        with self._state_lock:
+            state = self.desktop_state
+        if state is None:
+            return "No desktop state available", 1
+        active_window = state.active_window
         if active_window is None:
             return "No active window found", 1
         if active_window.status == Status.MINIMIZED:
@@ -373,14 +395,18 @@ class Desktop:
     def switch_app(self, name: str):
         try:
             # Refresh state if desktop_state is None or has no windows
-            if self.desktop_state is None or not self.desktop_state.windows:
+            with self._state_lock:
+                state = self.desktop_state
+            if state is None or not state.windows:
                 self.get_state()
-            if self.desktop_state is None:
+                with self._state_lock:
+                    state = self.desktop_state
+            if state is None:
                 return ("Failed to get desktop state. Please try again.", 1)
 
             window_list = [
                 w
-                for w in [self.desktop_state.active_window] + self.desktop_state.windows
+                for w in [state.active_window] + state.windows
                 if w is not None
             ]
             if not window_list:
@@ -459,7 +485,16 @@ class Desktop:
             logger.exception("Failed to bring window to top: %s", e)
 
     def get_element_handle_from_label(self, label: int) -> uia.Control:
-        tree_state = self.desktop_state.tree_state
+        with self._state_lock:
+            state = self.desktop_state
+        if state is None or state.tree_state is None:
+            raise ValueError("No desktop state available. Call get_state() first.")
+        tree_state = state.tree_state
+        if label < 0 or label >= len(tree_state.interactive_nodes):
+            raise ValueError(
+                f"Label {label} out of range (0-{len(tree_state.interactive_nodes) - 1}). "
+                "The UI may have changed since last snapshot."
+            )
         element_node = tree_state.interactive_nodes[label]
         xpath = element_node.xpath
         element_handle = self.get_element_from_xpath(xpath)
@@ -606,15 +641,23 @@ class Desktop:
         active_window = self.get_window_from_element_handle(handle)
         return active_window
 
+    _MAX_PARENT_DEPTH = 64
+
     def get_window_from_element_handle(self, element_handle: int) -> uia.Control:
         current = uia.ControlFromHandle(element_handle)
         root_handle = uia.GetRootControl().NativeWindowHandle
 
-        while True:
+        for _ in range(self._MAX_PARENT_DEPTH):
             parent = current.GetParentControl()
             if parent is None or parent.NativeWindowHandle == root_handle:
                 return current
             current = parent
+        logger.warning(
+            "get_window_from_element_handle exceeded depth limit (%d) for handle %s",
+            self._MAX_PARENT_DEPTH,
+            element_handle,
+        )
+        return current
 
     def get_windows(
         self, controls_handles: set[int] | None = None
@@ -713,7 +756,18 @@ class Desktop:
             index = int(index) if index else None
             children = element.GetChildren()
             same_type_children = list(filter(lambda x: x.ControlTypeName == control_type, children))
+            if not same_type_children:
+                raise ValueError(
+                    f"XPath resolution failed: no children of type '{control_type}' found. "
+                    "The UI may have changed since last snapshot."
+                )
             if index:
+                if index - 1 >= len(same_type_children):
+                    raise ValueError(
+                        f"XPath resolution failed: index {index} exceeds "
+                        f"{len(same_type_children)} children of type '{control_type}'. "
+                        "The UI may have changed since last snapshot."
+                    )
                 element = same_type_children[index - 1]
             else:
                 element = same_type_children[0]
@@ -1025,9 +1079,11 @@ class Desktop:
 
     @contextmanager
     def auto_minimize(self):
+        handle = None
         try:
             handle = uia.GetForegroundWindow()
             uia.ShowWindow(handle, win32con.SW_MINIMIZE)
             yield
         finally:
-            uia.ShowWindow(handle, win32con.SW_RESTORE)
+            if handle is not None:
+                uia.ShowWindow(handle, win32con.SW_RESTORE)

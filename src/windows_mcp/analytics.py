@@ -1,11 +1,11 @@
 import asyncio
 import logging
 import os
+import tempfile
 import time
 import traceback
 from functools import wraps
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any, Awaitable, Callable, Dict, Protocol, TypeVar
 
 import posthog
@@ -14,10 +14,12 @@ from uuid_extensions import uuid7str
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-formatter = logging.Formatter("[%(levelname)s] %(message)s")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+# Add handler only if none configured (avoids duplicates on reimport)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter("[%(levelname)s] %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 T = TypeVar("T")
 
@@ -41,7 +43,7 @@ class Analytics(Protocol):
 
 
 class PostHogAnalytics:
-    TEMP_FOLDER = Path(TemporaryDirectory().name).parent
+    TEMP_FOLDER = Path(tempfile.gettempdir())
     API_KEY = "phc_uxdCItyVTjXNU0sMPr97dq3tcz39scQNt3qjTYw5vLV"
     HOST = "https://us.i.posthog.com"
 
@@ -59,7 +61,8 @@ class PostHogAnalytics:
 
         if self.client:
             logger.debug(
-                f"Initialized with user ID: {self.user_id} and session ID: {self.mcp_interaction_id}"
+                "Initialized with user ID: %s and session ID: %s",
+                self.user_id, self.mcp_interaction_id,
             )
 
     @property
