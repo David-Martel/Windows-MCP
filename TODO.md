@@ -1,6 +1,7 @@
 # Windows-MCP TODO
 
 **Generated:** 2026-02-18 from REVIEW.md findings
+**Last updated:** 2026-02-19 -- 1671 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports)
 **Reference:** See [REVIEW.md](REVIEW.md) for full context on each item.
 
 ---
@@ -17,7 +18,7 @@
 
 ## P1 -- High Impact Performance & Safety
 
-- [ ] **[P6] Cache Start Menu app list** -- Add TTL-based cache (30-60s) to `get_apps_from_start_menu`. Currently shells out to PowerShell on every `launch_app` call.
+- [x] **[P6] Cache Start Menu app list** -- Added thread-safe TTL cache (1 hour) to `get_apps_from_start_menu()` with double-checked locking pattern.
 - [ ] **[P5] Eliminate duplicate VDM desktop enumeration** -- `get_state` calls `get_current_desktop()` and `get_all_desktops()` separately; both enumerate all desktops. Combine into a single call.
 - [x] **[P2] Bound ThreadPoolExecutor** -- Added `max_workers=min(8, os.cpu_count() or 4)` to tree traversal executor in `tree/service.py`.
 - [ ] **[P3] Convert tree_traversal to iterative** -- Replace recursion with an explicit stack to avoid Python's 1000-frame limit on complex UIs.
@@ -30,13 +31,14 @@
 
 ## P2 -- Architectural Improvements
 
-- [ ] **[A1] Decompose Desktop God Object** -- Extract into focused services (4/6 done):
+- [x] **[A1] Decompose Desktop God Object** -- All 6 services extracted (Desktop down from 1039 to 752 lines):
   - [x] `RegistryService` -- registry_get/set/delete/list (`registry/service.py`)
   - [x] `ShellService` -- execute, check_blocklist, ps_quote (`shell/service.py`)
   - [x] `ScraperService` -- validate_url, scrape (`scraper/service.py`)
   - [x] `InputService` -- click, type, scroll, drag, move, shortcut, multi_select, multi_edit (`input/service.py`)
-  - [ ] `WindowService` -- get_windows, get_active_window, switch_app, resize_app
-  - [ ] `ScreenService` -- get_screenshot, get_annotated_screenshot
+  - [x] `WindowService` -- get_windows, get_active_window, bring_window_to_top, auto_minimize (`window/service.py`)
+  - [x] `ScreenService` -- get_screenshot, get_annotated_screenshot, get_screen_size, get_dpi_scaling (`screen/service.py`)
+  - [x] `VisionService` -- LLM-powered screenshot analysis via OpenAI-compatible API (`vision/service.py`)
 - [ ] **[A3] Replace module globals with dependency injection** -- Use FastMCP's lifespan context to pass `desktop`, `watchdog`, `analytics` via `ctx.request_context.lifespan_context`.
 - [ ] **[A2] Decompose __main__.py** -- Extract tool registrations into domain modules (e.g., `tools/input_tools.py`, `tools/window_tools.py`, `tools/file_tools.py`).
 - [ ] **[P5] Parallelize get_state** -- Run window enumeration, VDM queries, and tree traversal concurrently with `asyncio.gather`.
@@ -60,11 +62,11 @@
 
 ## P4 -- Test Coverage
 
-- [x] **[A7] Add MCP tool handler integration tests** -- Done. 145 headless integration tests in `test_mcp_integration.py` covering all 22 tools via `tool.fn()`. 4 tiers: server structure, tool dispatch, error handling, transport+auth.
+- [x] **[A7] Add MCP tool handler integration tests** -- Done. 145 headless integration tests in `test_mcp_integration.py` covering all 23 tools via `tool.fn()`. 4 tiers: server structure, tool dispatch, error handling, transport+auth.
 - [ ] **Add WatchDog service tests** -- Test threading, COM event handling, callback dispatch.
 - [ ] **Add Desktop.get_state orchestration tests** -- Test the composition of windows, tree state, screenshots, VDM.
 - [ ] **Add tree_traversal unit tests** -- Test with mock UIA trees. Cover DOM/interactive/scrollable classification.
-- [ ] **Achieve 85% overall test coverage** -- Current coverage unknown (only data model tests exist).
+- [ ] **Achieve 85% overall test coverage** -- Currently at 64% overall (1671 tests). Testable modules at 82-100%. COM/UIA modules at 14-42% (require live desktop).
 
 ---
 
@@ -77,7 +79,7 @@
 - [ ] **[P10] Cache COM pattern calls in tree traversal** -- Store `GetLegacyIAccessiblePattern()` result in local variable instead of calling 3 times per node.
 - [ ] **[P10] Fix BuildUpdatedCache** -- Check for existing cached state before issuing round-trip in `get_cached_children`.
 - [ ] **Use set literals in tree/config.py** -- Replace `set([...])` with `{...}`.
-- [ ] **[A6] Consolidate input simulation** -- Choose pyautogui OR uia for mouse/keyboard. Remove dual-path confusion.
+- [x] **[A6] Consolidate input simulation** -- Rust Win32 `SendInput` is primary path in `InputService` (click, type, scroll, drag, move, shortcut). Falls back to pyautogui when native unavailable.
 - [ ] **Add type annotations to all public APIs**.
 - [ ] **[T3] Fix singleton TOCTOU in _AutomationClient** -- Add threading lock to `instance()`.
 
@@ -102,14 +104,19 @@
 - [ ] **Cache Start Menu app list with filesystem watcher** -- Build app map once at init, monitor Start Menu folders via `ReadDirectoryChangesW`. Invalidate on change.
 - [ ] **Element coordinate cache** -- Reuse `TreeElementNode.bounding_box` for click/type instead of re-querying XPath. Invalidate on window move/resize.
 - [ ] **Cache VDM desktop list with TTL** -- `get_current_desktop()` calls `get_all_desktops()` redundantly. Cache with 5s TTL, invalidated by WatchDog.
-- [ ] **Replace `ImageGrab.grab` with `mss` library** -- DirectX DDA on Windows is 2-5x faster than PIL/GDI for multi-monitor capture.
+- [x] **Replace `ImageGrab.grab` with Rust DXGI** -- Rust DXGI Output Duplication used as primary screenshot path in `ScreenService.get_screenshot()`. Falls back to ImageGrab then pyautogui.
 
 ---
 
-## P3.5 -- Rust Acceleration (PyO3 Extension)
+## P3.5 -- Rust Acceleration (Cargo Workspace)
 
-- [ ] **Rust tree traversal module** -- `windows_mcp_core.capture_tree(handles, opts)` via PyO3. Uses `windows-rs` IUIAutomation + `rayon` for true parallel window traversal. Estimated: 200-800ms -> 50-200ms. *(PyO3 scaffold in `native/` ready -- `system_info()` function implemented as Phase 1)*
-- [ ] **Rust screenshot module** -- DXGI Output Duplication + `image` crate for capture + annotation. 55-150ms -> 12-35ms.
+*Workspace: `native/` with 4 crates -- wmcp-core (pure Rust lib), wmcp-pyo3 (PyO3 bindings), wmcp-ffi (C ABI DLL), wmcp-cli (standalone tools). 15 PyO3 functions + 12 FFI exports. Clippy clean with `-D warnings`.*
+
+- [x] **Rust tree traversal module** -- `windows_mcp_core.capture_tree(handles, max_depth)` via PyO3. Uses `windows-rs` IUIAutomation + `rayon` per-HWND parallel traversal. COMGuard RAII for per-thread COM init. Wired into Python via `native_capture_tree()`.
+- [x] **Rust screenshot module** -- DXGI Output Duplication + GDI BitBlt fallback + `image` crate PNG encoding. Wired into `ScreenService.get_screenshot()` as fast-path. `capture_png()` and `capture_raw()` exposed via PyO3 and FFI.
+- [x] **Rust input module** -- `send_text`, `send_click`, `send_key`, `send_mouse_move`, `send_hotkey`, `send_scroll`, `send_drag` via Win32 `SendInput`. Wired into `InputService` as fast-path with pyautogui fallback.
+- [x] **Rust window module** -- `enumerate_visible_windows`, `get_window_info`, `get_foreground_window`, `list_windows` with Alt+Tab filter + DWM cloaked detection. Exposed via PyO3 and FFI.
+- [x] **Rust system_info** -- Wired into `Desktop.get_system_info()` as fast-path (avoids 1s blocking `cpu_percent`). Falls back to psutil.
 - [x] **Replace PowerShell registry with `winreg`** -- All 4 registry methods (`registry_get/set/delete/list`) rewritten to use `winreg` stdlib. 200-500ms saved per operation.
 - [x] **Replace PowerShell sysinfo with Python stdlib** -- `get_windows_version()` uses `winreg`, `get_default_language()` uses `locale.getlocale()`, `get_user_account_type()` uses `winreg`.
 - [ ] **Eliminate remaining PowerShell** -- Toast notifications via WinRT COM, app launch via `CreateProcessW`, culture via `GetUserDefaultLocaleName`.
