@@ -79,6 +79,7 @@ class ScraperService:
         (validating each hop), and converts HTML to markdown.
         """
         self.validate_url(url)
+        response = None
         try:
             response = requests.get(url, timeout=10, allow_redirects=False)
             # Follow redirects manually to validate each hop
@@ -88,9 +89,12 @@ class ScraperService:
                 if not redirect_url:
                     break
                 self.validate_url(redirect_url)
+                prev = response
                 response = requests.get(redirect_url, timeout=10, allow_redirects=False)
+                prev.close()
                 redirects += 1
             response.raise_for_status()
+            html = response.text
         except (ValueError, ConnectionError, TimeoutError):
             raise  # Re-raise our own validation errors
         except requests.exceptions.HTTPError as e:
@@ -99,6 +103,7 @@ class ScraperService:
             raise ConnectionError(f"Failed to connect to {url}: {e}") from e
         except requests.exceptions.Timeout as e:
             raise TimeoutError(f"Request timed out for {url}: {e}") from e
-        html = response.text
-        content = markdownify(html=html)
-        return content
+        finally:
+            if response is not None:
+                response.close()
+        return markdownify(html=html)
