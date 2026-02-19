@@ -20,9 +20,8 @@ Design follows the patterns established in test_mcp_integration.py:
   - asyncio_mode = "auto" in pyproject.toml so bare async def test_* works
 """
 
-import asyncio
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -34,6 +33,54 @@ from windows_mcp.tree.views import (
     TreeElementNode,
     TreeState,
 )
+
+# ---------------------------------------------------------------------------
+# _coerce_bool unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestCoerceBool:
+    """Tests for _coerce_bool() utility that normalises bool|str MCP params."""
+
+    def test_true_bool_returns_true(self):
+        assert main_module._coerce_bool(True) is True
+
+    def test_false_bool_returns_false(self):
+        assert main_module._coerce_bool(False) is False
+
+    def test_string_true_returns_true(self):
+        assert main_module._coerce_bool("true") is True
+
+    def test_string_false_returns_false(self):
+        assert main_module._coerce_bool("false") is False
+
+    def test_string_TRUE_case_insensitive(self):
+        assert main_module._coerce_bool("TRUE") is True
+
+    def test_string_True_mixed_case(self):
+        assert main_module._coerce_bool("True") is True
+
+    def test_string_FALSE_case_insensitive(self):
+        assert main_module._coerce_bool("FALSE") is False
+
+    def test_empty_string_returns_false(self):
+        assert main_module._coerce_bool("") is False
+
+    def test_arbitrary_string_returns_false(self):
+        assert main_module._coerce_bool("yes") is False
+
+    def test_none_returns_default_false(self):
+        assert main_module._coerce_bool(None) is False
+
+    def test_none_returns_custom_default_true(self):
+        assert main_module._coerce_bool(None, default=True) is True
+
+    def test_int_returns_default(self):
+        assert main_module._coerce_bool(1) is False
+
+    def test_int_returns_custom_default(self):
+        assert main_module._coerce_bool(1, default=True) is True
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers (local copies so this file is self-contained)

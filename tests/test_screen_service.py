@@ -5,7 +5,6 @@ interaction occurs.  Covers happy paths, fallback paths, edge cases, and
 dimension arithmetic for get_annotated_screenshot.
 """
 
-import ctypes
 from unittest.mock import MagicMock, patch
 
 import pytest

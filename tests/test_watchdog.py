@@ -675,3 +675,367 @@ class TestWatchDogRunLoop:
             focus_handler
         )
         mock_comtypes.CoUninitialize.assert_called_once()
+
+    # --- Exception paths: handler add/remove failures (lines 97-195) ---
+
+    def test_add_focus_handler_exception_is_caught(self):
+        """AddFocusChangedEventHandler raises → exception logged, handler stays None."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        wd._focus_callback = MagicMock()
+        fake_uia_client.IUIAutomation.AddFocusChangedEventHandler.side_effect = OSError("COM fail")
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        # Handler should remain None because add failed
+        assert wd._focus_handler is None
+
+    def test_remove_focus_handler_exception_is_caught(self):
+        """RemoveFocusChangedEventHandler raises → exception logged, handler set to None."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        existing_handler = MagicMock()
+        wd._focus_handler = existing_handler
+        wd._focus_callback = None  # want to remove
+        fake_uia_client.IUIAutomation.RemoveFocusChangedEventHandler.side_effect = OSError("fail")
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        # Handler should be cleared even though remove raised
+        assert wd._focus_handler is None
+
+    def test_add_structure_handler_exception_is_caught(self):
+        """AddStructureChangedEventHandler raises → exception logged, no handler set."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        wd._structure_callback = MagicMock()
+        fake_uia_client.IUIAutomation.AddStructureChangedEventHandler.side_effect = (
+            OSError("COM fail")
+        )
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        # Handler stays None because add failed
+        assert wd._structure_handler is None
+
+    def test_remove_structure_handler_exception_is_caught(self):
+        """RemoveStructureChangedEventHandler raises during disable → caught, handler cleared."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        existing_handler = MagicMock()
+        wd._structure_handler = existing_handler
+        wd._active_structure_element = MagicMock()
+        wd._structure_callback = None  # want to remove
+        fake_uia_client.IUIAutomation.RemoveStructureChangedEventHandler.side_effect = (
+            OSError("fail")
+        )
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        assert wd._structure_handler is None
+        assert wd._active_structure_element is None
+
+    def test_add_property_handler_exception_is_caught(self):
+        """AddPropertyChangedEventHandler raises → exception logged, no handler set."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        wd._property_callback = MagicMock()
+        fake_uia_client.IUIAutomation.AddPropertyChangedEventHandler.side_effect = (
+            OSError("COM fail")
+        )
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        assert wd._property_handler is None
+
+    def test_remove_property_handler_exception_is_caught(self):
+        """RemovePropertyChangedEventHandler raises during disable → caught, handler cleared."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        existing_handler = MagicMock()
+        wd._property_handler = existing_handler
+        wd._active_property_element = MagicMock()
+        wd._active_property_ids = [30005]
+        wd._property_callback = None  # want to remove
+        fake_uia_client.IUIAutomation.RemovePropertyChangedEventHandler.side_effect = (
+            OSError("fail")
+        )
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        assert wd._property_handler is None
+        assert wd._active_property_element is None
+        assert wd._active_property_ids is None
+
+    # --- Exception paths: finally block cleanup (lines 203-238) ---
+
+    def _run_with_crash(self, wd, service_mod, comtypes_stub):
+        """Run _run() with PumpEvents raising, then return mock_comtypes for assertions."""
+        mock_comtypes = MagicMock()
+        mock_comtypes.CoInitialize = MagicMock()
+        mock_comtypes.CoUninitialize = MagicMock()
+        mock_comtypes.client = comtypes_stub.client
+
+        comtypes_stub.client.PumpEvents.side_effect = RuntimeError("crash")
+
+        orig_comtypes = service_mod.comtypes
+        orig_focus = service_mod.FocusChangedEventHandler
+        orig_struct = service_mod.StructureChangedEventHandler
+        orig_prop = service_mod.PropertyChangedEventHandler
+
+        service_mod.comtypes = mock_comtypes
+        service_mod.FocusChangedEventHandler = MagicMock(return_value=MagicMock())
+        service_mod.StructureChangedEventHandler = MagicMock(return_value=MagicMock())
+        service_mod.PropertyChangedEventHandler = MagicMock(return_value=MagicMock())
+
+        wd.is_running.set()
+        try:
+            wd._run()
+        finally:
+            service_mod.comtypes = orig_comtypes
+            service_mod.FocusChangedEventHandler = orig_focus
+            service_mod.StructureChangedEventHandler = orig_struct
+            service_mod.PropertyChangedEventHandler = orig_prop
+
+        return mock_comtypes
+
+    def test_finally_cleans_up_structure_handler_on_crash(self):
+        """On PumpEvents crash, finally block removes structure handler."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        structure_handler = MagicMock()
+        active_element = MagicMock()
+        wd._structure_handler = structure_handler
+        wd._active_structure_element = active_element
+
+        self._run_with_crash(wd, service_mod, comtypes_stub)
+
+        fake_uia_client.IUIAutomation.RemoveStructureChangedEventHandler.assert_called_with(
+            active_element, structure_handler
+        )
+        assert wd._structure_handler is None
+        assert wd._active_structure_element is None
+
+    def test_finally_cleans_up_property_handler_on_crash(self):
+        """On PumpEvents crash, finally block removes property handler."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        property_handler = MagicMock()
+        active_element = MagicMock()
+        wd._property_handler = property_handler
+        wd._active_property_element = active_element
+        wd._active_property_ids = [30005]
+
+        self._run_with_crash(wd, service_mod, comtypes_stub)
+
+        fake_uia_client.IUIAutomation.RemovePropertyChangedEventHandler.assert_called_with(
+            active_element, property_handler
+        )
+        assert wd._property_handler is None
+        assert wd._active_property_element is None
+        assert wd._active_property_ids is None
+
+    def test_finally_focus_remove_exception_swallowed(self):
+        """If RemoveFocusChangedEventHandler raises in finally, exception is swallowed.
+
+        We set _focus_callback so the loop body doesn't enter the 'elif remove' branch.
+        The pre-existing _focus_handler + callback means the 'if add' branch is also
+        skipped (handler already exists). PumpEvents crashes → finally tries Remove → raises.
+        """
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        wd._focus_callback = MagicMock()  # keeps elif-remove from triggering in loop
+        wd._focus_handler = MagicMock()   # already exists, so if-add is skipped
+        fake_uia_client.IUIAutomation.RemoveFocusChangedEventHandler.side_effect = (
+            OSError("COM dead")
+        )
+
+        self._run_with_crash(wd, service_mod, comtypes_stub)
+
+        # Should not propagate, handler cleared despite exception
+        assert wd._focus_handler is None
+
+    def test_finally_structure_remove_exception_swallowed(self):
+        """If RemoveStructureChangedEventHandler raises in finally, exception is swallowed."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        element = MagicMock()
+        wd._structure_callback = MagicMock()
+        wd._structure_element = element
+        wd._structure_handler = MagicMock()
+        wd._active_structure_element = element
+        fake_uia_client.IUIAutomation.RemoveStructureChangedEventHandler.side_effect = (
+            OSError("COM dead")
+        )
+
+        self._run_with_crash(wd, service_mod, comtypes_stub)
+
+        assert wd._structure_handler is None
+        assert wd._active_structure_element is None
+
+    def test_finally_property_remove_exception_swallowed(self):
+        """If RemovePropertyChangedEventHandler raises in finally, exception is swallowed."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        element = MagicMock()
+        wd._property_callback = MagicMock()
+        wd._property_element = element
+        wd._property_ids = [30005]
+        wd._property_handler = MagicMock()
+        wd._active_property_element = element
+        wd._active_property_ids = [30005]
+        fake_uia_client.IUIAutomation.RemovePropertyChangedEventHandler.side_effect = (
+            OSError("COM dead")
+        )
+
+        self._run_with_crash(wd, service_mod, comtypes_stub)
+
+        assert wd._property_handler is None
+        assert wd._active_property_element is None
+        assert wd._active_property_ids is None
+
+    # --- GetRootElement fallback paths (lines 121, 135, 159, 175) ---
+
+    def test_structure_remove_uses_root_element_when_no_active_element(self):
+        """When active_structure_element is None, removal uses GetRootElement."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        existing_handler = MagicMock()
+        root = MagicMock(name="root")
+        fake_uia_client.IUIAutomation.GetRootElement.return_value = root
+
+        wd._structure_handler = existing_handler
+        wd._active_structure_element = None  # triggers GetRootElement fallback
+        wd._structure_callback = None  # want to remove
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        fake_uia_client.IUIAutomation.RemoveStructureChangedEventHandler.assert_any_call(
+            root, existing_handler
+        )
+
+    def test_property_remove_uses_root_element_when_no_active_element(self):
+        """When active_property_element is None, removal uses GetRootElement."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        existing_handler = MagicMock()
+        root = MagicMock(name="root")
+        fake_uia_client.IUIAutomation.GetRootElement.return_value = root
+
+        wd._property_handler = existing_handler
+        wd._active_property_element = None  # triggers GetRootElement fallback
+        wd._active_property_ids = [30005]
+        wd._property_callback = None  # want to remove
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        fake_uia_client.IUIAutomation.RemovePropertyChangedEventHandler.assert_any_call(
+            root, existing_handler
+        )
+
+    def test_structure_add_uses_root_element_when_no_element_specified(self):
+        """When _structure_element is None, registration uses GetRootElement."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        root = MagicMock(name="root")
+        fake_uia_client.IUIAutomation.GetRootElement.return_value = root
+
+        wd._structure_callback = MagicMock()
+        wd._structure_element = None  # triggers GetRootElement
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        call_args = fake_uia_client.IUIAutomation.AddStructureChangedEventHandler.call_args
+        assert call_args is not None
+        assert call_args[0][0] is root
+
+    def test_property_add_uses_root_element_when_no_element_specified(self):
+        """When _property_element is None, registration uses GetRootElement."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        root = MagicMock(name="root")
+        fake_uia_client.IUIAutomation.GetRootElement.return_value = root
+
+        wd._property_callback = MagicMock()
+        wd._property_element = None  # triggers GetRootElement
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        call_args = fake_uia_client.IUIAutomation.AddPropertyChangedEventHandler.call_args
+        assert call_args is not None
+        assert call_args[0][0] is root
+
+    # --- Property handler with custom IDs (line 181-184) ---
+
+    def test_property_handler_with_custom_ids(self):
+        """When custom property_ids are set, they're passed instead of defaults."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        wd._property_callback = MagicMock()
+        wd._property_ids = [30005, 30045]  # custom IDs
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        add_call = fake_uia_client.IUIAutomation.AddPropertyChangedEventHandler.call_args
+        assert add_call is not None
+        prop_ids_arg = add_call[0][-1]
+        assert prop_ids_arg == [30005, 30045]
+
+    # --- Property deregistration on config change (lines 148-168) ---
+
+    def test_property_deregisters_on_element_change(self):
+        """Changing property_element triggers deregister of old + register of new."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        old_element = MagicMock(name="old")
+        new_element = MagicMock(name="new")
+        existing_handler = MagicMock()
+
+        wd._property_handler = existing_handler
+        wd._active_property_element = old_element
+        wd._active_property_ids = [30005]
+        wd._property_callback = MagicMock()
+        wd._property_element = new_element  # config changed
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        fake_uia_client.IUIAutomation.RemovePropertyChangedEventHandler.assert_any_call(
+            old_element, existing_handler
+        )
+
+    def test_property_deregisters_on_ids_change(self):
+        """Changing property_ids triggers deregister of old + register of new."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        element = MagicMock()
+        existing_handler = MagicMock()
+
+        wd._property_handler = existing_handler
+        wd._active_property_element = element
+        wd._active_property_ids = [30005]
+        wd._property_callback = MagicMock()
+        wd._property_element = element  # same element
+        wd._property_ids = [30005, 30045]  # different IDs → config changed
+
+        self._run_one_iteration(wd, service_mod, comtypes_stub)
+
+        fake_uia_client.IUIAutomation.RemovePropertyChangedEventHandler.assert_any_call(
+            element, existing_handler
+        )
+
+    # --- Finally block with no active element (GetRootElement fallback) ---
+
+    def test_finally_structure_uses_root_when_no_active_element(self):
+        """In finally cleanup, if active_structure_element is None, uses GetRootElement."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        root = MagicMock(name="root")
+        fake_uia_client.IUIAutomation.GetRootElement.return_value = root
+
+        structure_handler = MagicMock()
+        wd._structure_handler = structure_handler
+        wd._active_structure_element = None
+
+        self._run_with_crash(wd, service_mod, comtypes_stub)
+
+        fake_uia_client.IUIAutomation.RemoveStructureChangedEventHandler.assert_called_with(
+            root, structure_handler
+        )
+
+    def test_finally_property_uses_root_when_no_active_element(self):
+        """In finally cleanup, if active_property_element is None, uses GetRootElement."""
+        wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
+        root = MagicMock(name="root")
+        fake_uia_client.IUIAutomation.GetRootElement.return_value = root
+
+        property_handler = MagicMock()
+        wd._property_handler = property_handler
+        wd._active_property_element = None
+        wd._active_property_ids = [30005]
+
+        self._run_with_crash(wd, service_mod, comtypes_stub)
+
+        fake_uia_client.IUIAutomation.RemovePropertyChangedEventHandler.assert_called_with(
+            root, property_handler
+        )
