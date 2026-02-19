@@ -26,12 +26,15 @@ uv run windows-mcp --transport sse --port 8000  # Launch server (SSE)
 
 ## Current Optimization Goals (Priority Order)
 
-### Phase 1: Python Quick Wins (Highest Impact)
-1. `pg.PAUSE = 0.05` in `desktop/service.py:45` (1 line, saves 1-6s per input op)
-2. Fix ImageDraw thread safety: remove `ThreadPoolExecutor` from `get_annotated_screenshot`
-3. Replace PowerShell subprocess with `winreg`/`platform`/`locale` stdlib calls
-4. Single `TreeScope_Subtree` CacheRequest on window root instead of per-node `BuildUpdatedCache`
-5. Deduplicate `LegacyIAccessiblePattern` calls (called up to 3x per element)
+### Phase 1: Python Quick Wins -- DONE
+1. ~~`pg.PAUSE = 0.05`~~ -- Done (both `desktop/service.py:45` and `__main__.py:33`)
+2. ~~Fix ImageDraw thread safety~~ -- Done (sequential loop replaces ThreadPoolExecutor)
+3. ~~Replace PowerShell subprocess with stdlib~~ -- Done (winreg, locale, platform)
+4. ~~Fix analytics print() corrupting stdout~~ -- Done
+5. ~~Fix watchdog event_handlers.py print() calls~~ -- Done (replaced with logger.debug)
+6. ~~Bound ThreadPoolExecutor in tree/service.py~~ -- Done (max_workers=min(8, cpu_count))
+7. Single `TreeScope_Subtree` CacheRequest on window root instead of per-node `BuildUpdatedCache` -- DEFERRED (needs live UIA testing)
+8. Deduplicate `LegacyIAccessiblePattern` calls (called up to 3x per element) -- DEFERRED
 
 ### Phase 2: Capability Gaps to Fill
 1. **WaitFor tool** -- event-driven waiting (like Playwright's `waitForSelector`)
@@ -86,7 +89,29 @@ Pre-built context for specialist agents in `.claude/context/slices/`:
 
 - **Service pattern**: Each module has a `service.py` with a class that owns the logic, `views.py` for data models
 - **Tool registration**: `@mcp.tool()` decorator in `__main__.py`, delegates to `Desktop` methods
-- **Analytics wrapping**: `@with_analytics(analytics, "tool_name")` on each tool (NOTE: currently broken)
+- **Analytics wrapping**: `@with_analytics(analytics, "tool_name")` on each tool (NOTE: captures None at decoration time)
 - **Error handling**: FastMCP handles exceptions and returns them as tool errors
 - **Browser detection**: Check window title for Chrome/Edge/Firefox to enable DOM mode
 - **Element classification**: `tree/config.py` classifies UIA control types as interactive, scrollable, or informative
+- **Registry ops**: Use `winreg` stdlib (not PowerShell) -- supports PS-style paths (HKCU:\, HKLM:\)
+- **No print() to stdout**: Use `logging` module only -- print corrupts MCP protocol stream
+- **Auth (local HTTP)**: API key auth via DPAPI storage, Starlette middleware for SSE/HTTP transports
+
+## Recommended Agents & Tools
+
+| Task Domain | Agent/Tool | When to Use |
+|-------------|-----------|-------------|
+| Python code changes | `python-pro` | Refactoring service.py, fixing bugs |
+| Rust extension dev | `rust-pro` | PyO3 crate work in `native/` |
+| Security review | `security-auditor` | Auth system, registry ops, shell execution |
+| Performance tuning | `performance-engineer` | Profiling tree traversal, COM overhead |
+| Test generation | `test-automator` | Adding coverage for new auth/native modules |
+| Code review | `superpowers:code-reviewer` | After completing major steps |
+| Context7 MCP | `context7:resolve-library-id` + `query-docs` | Latest FastMCP, PyO3, maturin docs |
+| Architecture | `architect-reviewer` | Reviewing auth middleware, Rust FFI design |
+
+### MCP Servers Available
+- **context7** -- Up-to-date library docs (FastMCP, PyO3, maturin, windows-rs)
+- **Cloudflare** -- Remote deployment (D1, KV, Workers) if cloud hosting needed
+- **Hugging Face** -- ML model integration if AI features added
+- **Notion** -- Documentation/project management integration

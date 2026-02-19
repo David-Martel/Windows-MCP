@@ -15,7 +15,6 @@ from windows_mcp.filesystem.views import (
     MAX_RESULTS,
     File,
     Directory,
-    format_size,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,7 +99,7 @@ def copy_path(source: str, destination: str, overwrite: bool = False) -> str:
         else:
             return f'Error: Unsupported file type: {src}'
     except PermissionError:
-        return f'Error: Permission denied.'
+        return 'Error: Permission denied.'
     except Exception as e:
         return f'Error copying: {e}'
 
@@ -126,7 +125,7 @@ def move_path(source: str, destination: str, overwrite: bool = False) -> str:
         shutil.move(str(src), str(dst))
         return f'Moved: {src} -> {dst}'
     except PermissionError:
-        return f'Error: Permission denied.'
+        return 'Error: Permission denied.'
     except Exception as e:
         return f'Error moving: {e}'
 
@@ -278,7 +277,7 @@ def get_file_info(path: str) -> str:
         if target.is_dir():
             try:
                 items = list(target.iterdir())
-                file.contents_dirs = sum(1 for i in items if i.is_dir())    
+                file.contents_dirs = sum(1 for i in items if i.is_dir())
                 file.contents_files = sum(1 for i in items if i.is_file())
             except PermissionError:
                 pass

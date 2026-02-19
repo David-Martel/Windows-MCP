@@ -7,11 +7,11 @@
 
 ## P0 -- Must Fix Before Any Shared Deployment
 
-- [ ] **[S2] Add authentication for SSE/HTTP transport** -- Token-based auth at minimum. Warn loudly on `--host 0.0.0.0`.
+- [x] **[S2] Add authentication for SSE/HTTP transport** -- Bearer token auth via `BearerAuthMiddleware`. DPAPI key storage via `AuthKeyManager`. CLI: `--api-key`, `--generate-key`, `--rotate-key`. Refuses `0.0.0.0` without auth.
 - [ ] **[A4] Fix analytics decorator binding bug** -- `@with_analytics(analytics, ...)` captures `None` at decoration time. Pass a callable/lambda that resolves the global at call time, or use DI through FastMCP context.
-- [ ] **[P4] Fix PIL ImageDraw thread safety** -- Remove `ThreadPoolExecutor` from `get_annotated_screenshot`. PIL `ImageDraw` is not thread-safe; draw sequentially.
+- [x] **[P4] Fix PIL ImageDraw thread safety** -- Removed `ThreadPoolExecutor` from `get_annotated_screenshot`. Now draws sequentially (<5ms).
 - [ ] **[A5] Remove `ipykernel` from dependencies** -- Unused, pulls in jupyter/zmq/tornado. Move to `[dev]` optional deps if needed.
-- [ ] **[Q6] Remove debug `print()` from analytics.py:97** -- Interleaves with MCP protocol stdout.
+- [x] **[Q6] Remove debug `print()` from analytics.py:97** -- Removed. Also fixed 3 `print()` calls in `watchdog/event_handlers.py` (replaced with `logger.debug()`).
 
 ---
 
@@ -19,9 +19,9 @@
 
 - [ ] **[P6] Cache Start Menu app list** -- Add TTL-based cache (30-60s) to `get_apps_from_start_menu`. Currently shells out to PowerShell on every `launch_app` call.
 - [ ] **[P5] Eliminate duplicate VDM desktop enumeration** -- `get_state` calls `get_current_desktop()` and `get_all_desktops()` separately; both enumerate all desktops. Combine into a single call.
-- [ ] **[P2] Bound ThreadPoolExecutor** -- Add `max_workers=min(8, os.cpu_count())` to tree traversal executor.
+- [x] **[P2] Bound ThreadPoolExecutor** -- Added `max_workers=min(8, os.cpu_count() or 4)` to tree traversal executor in `tree/service.py`.
 - [ ] **[P3] Convert tree_traversal to iterative** -- Replace recursion with an explicit stack to avoid Python's 1000-frame limit on complex UIs.
-- [ ] **[P9] Make pyautogui.PAUSE configurable** -- Expose as env var or config. Reduce default from 1.0s.
+- [x] **[P9] Make pyautogui.PAUSE configurable** -- Reduced from 1.0s to 0.05s in both `desktop/service.py` and `__main__.py`. Saves 1-6s per input operation.
 - [ ] **[S7] Block SSRF in Scrape tool** -- Validate URL scheme (http/https only), block private IP ranges (10.x, 172.16-31.x, 192.168.x, 169.254.x, 127.x), block cloud metadata endpoints.
 - [ ] **[T1] Fix COM apartment threading violations** -- Make `self.dom` and `self.dom_bounding_box` local variables in traversal context, not shared instance fields.
 - [ ] **[T2] Add synchronization to shared mutable state** -- Lock or per-request context for `Tree.tree_state`, `Desktop.desktop_state`.
@@ -89,7 +89,7 @@
 
 - [ ] **Replace `Wait(duration)` with event-driven `WaitFor`** -- Extract the pattern already used in `App` tool (lines 299-311) into a general `WaitFor(mode="window"|"element", name=..., timeout=...)` tool backed by `uia.Exists(maxSearchSeconds=N)`. Deprecate fixed-sleep `Wait`.
 - [ ] **Add `ValuePattern.SetValue()` as primary text input** -- In `type()` method, attempt `ValuePattern.SetValue(text)` before falling back to `pg.typewrite()`. Eliminates 20ms/char typing for all UIA-compliant text fields.
-- [ ] **Reduce `pg.PAUSE` from 1.0 to 0.05** -- Single line change at `desktop/service.py:45`. Saves 1-6s per input operation. The 1.0s pause is a safety margin, not a technical requirement.
+- [x] **Reduce `pg.PAUSE` from 1.0 to 0.05** -- Done. Changed in both `desktop/service.py:45` and `__main__.py:33`.
 - [ ] **Add `Find` tool for semantic element lookup** -- `Find(name, control_type, window, automation_id)` resolves to coordinates + xpath without full Snapshot traversal.
 - [ ] **Add `Invoke` tool for UIA pattern actions** -- `InvokePattern.Invoke()` for buttons, `TogglePattern.Toggle()` for checkboxes, `ExpandCollapsePattern.Expand()` for dropdowns. More reliable than coordinate clicking.
 - [ ] **Use `TreeScope_Subtree` for single-shot cached traversal** -- Currently `BuildUpdatedCache` called per-node (TWO COM round-trips each). Single `TreeScope_Subtree` on window root would collapse thousands of COM calls into one. Estimated 60-80% tree traversal reduction.
@@ -108,10 +108,10 @@
 
 ## P3.5 -- Rust Acceleration (PyO3 Extension)
 
-- [ ] **Rust tree traversal module** -- `windows_mcp_core.capture_tree(handles, opts)` via PyO3. Uses `windows-rs` IUIAutomation + `rayon` for true parallel window traversal. Estimated: 200-800ms -> 50-200ms.
+- [ ] **Rust tree traversal module** -- `windows_mcp_core.capture_tree(handles, opts)` via PyO3. Uses `windows-rs` IUIAutomation + `rayon` for true parallel window traversal. Estimated: 200-800ms -> 50-200ms. *(PyO3 scaffold in `native/` ready -- `system_info()` function implemented as Phase 1)*
 - [ ] **Rust screenshot module** -- DXGI Output Duplication + `image` crate for capture + annotation. 55-150ms -> 12-35ms.
-- [ ] **Replace PowerShell registry with `winreg`** -- Python stdlib `winreg` module. 200-500ms saved per registry operation.
-- [ ] **Replace PowerShell sysinfo with Python stdlib** -- `platform.platform()`, `locale.getlocale()`, `sys.getwindowsversion()`. 200-500ms per call.
+- [x] **Replace PowerShell registry with `winreg`** -- All 4 registry methods (`registry_get/set/delete/list`) rewritten to use `winreg` stdlib. 200-500ms saved per operation.
+- [x] **Replace PowerShell sysinfo with Python stdlib** -- `get_windows_version()` uses `winreg`, `get_default_language()` uses `locale.getlocale()`, `get_user_account_type()` uses `winreg`.
 - [ ] **Eliminate remaining PowerShell** -- Toast notifications via WinRT COM, app launch via `CreateProcessW`, culture via `GetUserDefaultLocaleName`.
 
 ---
