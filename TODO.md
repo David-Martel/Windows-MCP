@@ -44,15 +44,15 @@
 - [x] **[A2] Decompose __main__.py** -- Extracted 23 tool registrations into `tools/` package: `input_tools.py` (9), `state_tools.py` (4), `system_tools.py` (10). Shared state via `tools/_state.py`. Reduced __main__.py from 1122 to 207 lines (81%).
 - [x] **[P5] Parallelize get_state** -- VDM desktop query runs in parallel with window enumeration chain via ThreadPoolExecutor. Saves ~100-200ms per get_state call.
 - [ ] **[Q1] Deduplicate UIA constants** -- Extract 13 shared constants from `uia/core.py`, `uia/controls.py`, `uia/patterns.py` into `uia/constants.py`.
-- [ ] **[Q2] Extract boolean coercion utility** -- Replace 6+ instances of `x is True or (isinstance(x, str) and x.lower() == "true")` with a single `to_bool()` helper.
+- [x] **[Q2] Extract boolean coercion utility** -- `_coerce_bool()` in `tools/_helpers.py` used by all 23 tool handlers. Service layer callers (input, desktop) use simplified checks since tool layer already coerces.
 
 ---
 
 ## P3 -- Security Hardening
 
 - [x] **[S1] Implement Shell tool sandboxing** -- Done. `ShellService.check_blocklist()` with 16 regex patterns (format, diskpart, bcdedit, rm -rf, net user/localgroup, IEX+DownloadString, etc). Configurable via `WINDOWS_MCP_SHELL_BLOCKLIST` env var. Extracted to `shell/service.py`.
-- [ ] **[S4] Add path-scoping to File tool** -- Define allowed directory scope. Validate resolved paths remain within scope.
-- [ ] **[S3] Restrict Registry tool access** -- Deny security-sensitive keys (Run, RunOnce, Services, Policies, SAM). Require confirmation for write/delete.
+- [x] **[S4] Add path-scoping to File tool** -- `WINDOWS_MCP_ALLOWED_PATHS` env var (semicolon-separated). All 8 filesystem functions validate resolved paths against allowed scope. 28 new tests.
+- [x] **[S3] Restrict Registry tool access** -- 11 regex patterns block writes to Run/RunOnce/Services/Policies/SAM/SECURITY. `WINDOWS_MCP_REGISTRY_UNRESTRICTED=true` bypasses. 51 new tests.
 - [ ] **[S5] Rotate PostHog API key** -- Move to environment variable. Disable GeoIP, disable exception auto-capture. Default telemetry to opt-in.
 - [ ] **[S6] Enforce HTTPS for auth client** -- Change default from `http://` to `https://`. Add certificate verification. Reduce `__repr__` key exposure to 4 chars.
 - [x] **[S8] Add protected process list** -- `ProcessService.is_protected()` blocks csrss, lsass, services, svchost, winlogon, MsMpEng, smss, wininit, system, registry. Extracted to `process/service.py`.
