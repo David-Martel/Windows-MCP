@@ -1604,9 +1604,7 @@ class TestEnumerateDesktopsDirectly:
 
         # Only the middle desktop has a custom name
         name_map = {guid1: None, guid2: "Gaming", guid3: None}
-        with patch.object(
-            vdm, "_get_name_from_registry", side_effect=lambda g: name_map.get(g)
-        ):
+        with patch.object(vdm, "_get_name_from_registry", side_effect=lambda g: name_map.get(g)):
             result = vdm._enumerate_desktops()
 
         assert result[0]["name"] == "Desktop 1"
@@ -1954,9 +1952,7 @@ class TestResolveToGuidViaEnumerateDesktops:
         """If two entries share the same name, the first one is returned."""
         guid_first = "{DUP-FIRST-GUID}"
         guid_second = "{DUP-SECOND-GUID}"
-        entries = self._make_entries(
-            [(guid_first, "Shared Name"), (guid_second, "Shared Name")]
-        )
+        entries = self._make_entries([(guid_first, "Shared Name"), (guid_second, "Shared Name")])
 
         vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
 
@@ -2038,9 +2034,7 @@ class TestResolveToGuidViaEnumerateDesktops:
         guid_other = "{PRIORITY-OTHER}"
         # First entry: input matches guid_str
         # Second entry: input matches name but guid_str is different
-        entries = self._make_entries(
-            [(guid_target, "Different Name"), (guid_other, guid_target)]
-        )
+        entries = self._make_entries([(guid_target, "Different Name"), (guid_other, guid_target)])
 
         vdm = _make_vdm(manager_mock=MagicMock(), internal_mock=MagicMock())
 

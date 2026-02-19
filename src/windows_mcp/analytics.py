@@ -62,7 +62,8 @@ class PostHogAnalytics:
         if self.client:
             logger.debug(
                 "Initialized with user ID: %s and session ID: %s",
-                self.user_id, self.mcp_interaction_id,
+                self.user_id,
+                self.mcp_interaction_id,
             )
 
     @property

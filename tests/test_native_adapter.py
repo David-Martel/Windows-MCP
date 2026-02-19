@@ -313,9 +313,10 @@ class TestNativeSystemInfoExceptionFallback:
 
     def test_returns_none_on_os_error(self):
         """OSError from extension must also be swallowed."""
-        with patch.object(_native_module, "HAS_NATIVE", True), patch.object(
-            _native_module, "windows_mcp_core", _make_fake_core()
-        ) as mock_core:
+        with (
+            patch.object(_native_module, "HAS_NATIVE", True),
+            patch.object(_native_module, "windows_mcp_core", _make_fake_core()) as mock_core,
+        ):
             mock_core.system_info.side_effect = OSError("access denied")
             result = _native_module.native_system_info()
         assert result is None
@@ -429,17 +430,19 @@ class TestNativeSendHotkeyExceptionFallback:
     """native_send_hotkey() must return None on any extension exception."""
 
     def test_returns_none_on_runtime_error(self):
-        with patch.object(_native_module, "HAS_NATIVE", True), patch.object(
-            _native_module, "windows_mcp_core", _make_fake_core()
-        ) as mock_core:
+        with (
+            patch.object(_native_module, "HAS_NATIVE", True),
+            patch.object(_native_module, "windows_mcp_core", _make_fake_core()) as mock_core,
+        ):
             mock_core.send_hotkey.side_effect = RuntimeError("hotkey_failure")
             result = _native_module.native_send_hotkey([0x11, 0x43])
         assert result is None
 
     def test_returns_none_on_value_error(self):
-        with patch.object(_native_module, "HAS_NATIVE", True), patch.object(
-            _native_module, "windows_mcp_core", _make_fake_core()
-        ) as mock_core:
+        with (
+            patch.object(_native_module, "HAS_NATIVE", True),
+            patch.object(_native_module, "windows_mcp_core", _make_fake_core()) as mock_core,
+        ):
             mock_core.send_hotkey.side_effect = ValueError("bad vk_codes")
             result = _native_module.native_send_hotkey([])
         assert result is None
@@ -520,9 +523,10 @@ class TestNativeCaptureTreeNotAvailable:
 
     def test_returns_none_on_capture_tree_exception(self):
         """Exception from extension is swallowed; None returned."""
-        with patch.object(_native_module, "HAS_NATIVE", True), patch.object(
-            _native_module, "windows_mcp_core", _make_fake_core()
-        ) as mock_core:
+        with (
+            patch.object(_native_module, "HAS_NATIVE", True),
+            patch.object(_native_module, "windows_mcp_core", _make_fake_core()) as mock_core,
+        ):
             mock_core.capture_tree.side_effect = OSError("COM error")
             result = _native_module.native_capture_tree([1])
         assert result is None

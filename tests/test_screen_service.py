@@ -546,9 +546,7 @@ class TestGetAnnotatedScreenshot:
             (1, 1),
         ],
     )
-    def test_padded_dimensions_for_various_resolutions(
-        self, svc: ScreenService, w: int, h: int
-    ):
+    def test_padded_dimensions_for_various_resolutions(self, svc: ScreenService, w: int, h: int):
         """Padding of 5 px is always applied on each side for any resolution."""
         base_img = _make_rgb_image(w, h)
         with patch(_IMAGE_GRAB) as mock_grab, patch(_UIA) as mock_uia, patch(_PG):

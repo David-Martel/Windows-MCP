@@ -22,9 +22,7 @@ from windows_mcp.scraper.service import ScraperService
 # Helpers
 # ---------------------------------------------------------------------------
 
-_PUBLIC_DNS_RESPONSE = [
-    (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))
-]
+_PUBLIC_DNS_RESPONSE = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
 
 _PUBLIC_URL = "https://example.com"
 
@@ -127,9 +125,7 @@ class TestScrapeRedirectHandling:
                 result = scraper.scrape(_PUBLIC_URL)
 
         assert mock_get.call_count == 2
-        assert mock_get.call_args_list[1] == call(
-            redirect_url, timeout=10, allow_redirects=False
-        )
+        assert mock_get.call_args_list[1] == call(redirect_url, timeout=10, allow_redirects=False)
         assert "Redirected page" in result
 
     def test_redirect_to_private_ip_is_blocked(self):

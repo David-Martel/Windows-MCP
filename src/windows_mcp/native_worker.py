@@ -178,7 +178,8 @@ class NativeWorker:
                 # gets a clear error rather than a response-ID mismatch.
                 logger.warning(
                     "Worker call '%s' timed out after %ss, killing worker",
-                    method, self._call_timeout,
+                    method,
+                    self._call_timeout,
                 )
                 try:
                     self._process.kill()

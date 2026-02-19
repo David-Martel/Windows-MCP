@@ -180,14 +180,18 @@ class TestExecuteTimeout:
     """execute() handles subprocess.TimeoutExpired gracefully."""
 
     def test_timeout_returns_error_tuple(self, svc: ShellService):
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="powershell", timeout=10)):
+        with patch(
+            "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="powershell", timeout=10)
+        ):
             output, code = svc.execute("Start-Sleep -Seconds 60")
 
         assert "timed out" in output.lower()
         assert code == 1
 
     def test_timeout_does_not_propagate_exception(self, svc: ShellService):
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="powershell", timeout=10)):
+        with patch(
+            "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="powershell", timeout=10)
+        ):
             # Must not raise -- exception must be swallowed and converted to tuple.
             result = svc.execute("Start-Sleep -Seconds 60")
 

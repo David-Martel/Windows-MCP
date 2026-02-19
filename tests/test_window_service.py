@@ -570,9 +570,10 @@ class TestGetForegroundWindow:
 
     def test_calls_get_foreground_window_and_delegates(self, svc):
         ctrl = _make_control(handle=777)
-        with patch(_UIA) as mock_uia, patch.object(
-            svc, "get_window_from_element_handle", return_value=ctrl
-        ) as mock_gwfeh:
+        with (
+            patch(_UIA) as mock_uia,
+            patch.object(svc, "get_window_from_element_handle", return_value=ctrl) as mock_gwfeh,
+        ):
             mock_uia.GetForegroundWindow.return_value = 777
             result = svc.get_foreground_window()
         mock_uia.GetForegroundWindow.assert_called_once()

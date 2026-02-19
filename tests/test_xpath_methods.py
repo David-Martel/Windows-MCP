@@ -18,8 +18,14 @@ _UIA = "windows_mcp.desktop.service.uia"
 # ---------------------------------------------------------------------------
 
 
-def _make_control(name="Ctrl", control_type=50000, control_type_name="Button",
-                  runtime_id=None, parent=None, children=None):
+def _make_control(
+    name="Ctrl",
+    control_type=50000,
+    control_type_name="Button",
+    runtime_id=None,
+    parent=None,
+    children=None,
+):
     """Create a mock UIA control with the given properties."""
     ctrl = MagicMock()
     ctrl.Name = name
@@ -53,10 +59,10 @@ class TestGetXpathFromElement:
     def test_single_child_element(self):
         """Parent -> Child produces 'ParentType/ChildType[1]'."""
         d = make_bare_desktop()
-        parent = _make_control(control_type_name="Window", parent=None,
-                               runtime_id=[42, 1])
-        child = _make_control(control_type_name="Button", control_type=50000,
-                              parent=parent, runtime_id=[42, 2])
+        parent = _make_control(control_type_name="Window", parent=None, runtime_id=[42, 1])
+        child = _make_control(
+            control_type_name="Button", control_type=50000, parent=parent, runtime_id=[42, 2]
+        )
         # Parent has one child of type Button
         parent.GetChildren.return_value = [child]
         result = d.get_xpath_from_element(child)
@@ -65,12 +71,13 @@ class TestGetXpathFromElement:
     def test_multi_level_path(self):
         """Root -> Pane -> Button produces correct path."""
         d = make_bare_desktop()
-        root = _make_control(control_type_name="Pane", parent=None,
-                             runtime_id=[42, 0])
-        pane = _make_control(control_type_name="Pane", control_type=50033,
-                             parent=root, runtime_id=[42, 1])
-        button = _make_control(control_type_name="Button", control_type=50000,
-                               parent=pane, runtime_id=[42, 2])
+        root = _make_control(control_type_name="Pane", parent=None, runtime_id=[42, 0])
+        pane = _make_control(
+            control_type_name="Pane", control_type=50033, parent=root, runtime_id=[42, 1]
+        )
+        button = _make_control(
+            control_type_name="Button", control_type=50000, parent=pane, runtime_id=[42, 2]
+        )
         root.GetChildren.return_value = [pane]
         pane.GetChildren.return_value = [button]
 
@@ -80,12 +87,13 @@ class TestGetXpathFromElement:
     def test_sibling_indexing(self):
         """Second sibling of same type gets index [2]."""
         d = make_bare_desktop()
-        parent = _make_control(control_type_name="Window", parent=None,
-                               runtime_id=[42, 0])
-        btn1 = _make_control(control_type_name="Button", control_type=50000,
-                             parent=parent, runtime_id=[42, 1])
-        btn2 = _make_control(control_type_name="Button", control_type=50000,
-                             parent=parent, runtime_id=[42, 2])
+        parent = _make_control(control_type_name="Window", parent=None, runtime_id=[42, 0])
+        btn1 = _make_control(
+            control_type_name="Button", control_type=50000, parent=parent, runtime_id=[42, 1]
+        )
+        btn2 = _make_control(
+            control_type_name="Button", control_type=50000, parent=parent, runtime_id=[42, 2]
+        )
         parent.GetChildren.return_value = [btn1, btn2]
 
         result = d.get_xpath_from_element(btn2)
@@ -94,13 +102,14 @@ class TestGetXpathFromElement:
     def test_runtime_id_not_found_defaults_to_index_zero(self):
         """When RuntimeId doesn't match any sibling, index defaults to 0 -> [1]."""
         d = make_bare_desktop()
-        parent = _make_control(control_type_name="Window", parent=None,
-                               runtime_id=[42, 0])
-        child = _make_control(control_type_name="Edit", control_type=50004,
-                              parent=parent, runtime_id=[42, 99])
+        parent = _make_control(control_type_name="Window", parent=None, runtime_id=[42, 0])
+        child = _make_control(
+            control_type_name="Edit", control_type=50004, parent=parent, runtime_id=[42, 99]
+        )
         # Sibling has a different RuntimeId
-        sibling = _make_control(control_type_name="Edit", control_type=50004,
-                                parent=parent, runtime_id=[42, 1])
+        sibling = _make_control(
+            control_type_name="Edit", control_type=50004, parent=parent, runtime_id=[42, 1]
+        )
         parent.GetChildren.return_value = [sibling]
 
         result = d.get_xpath_from_element(child)
