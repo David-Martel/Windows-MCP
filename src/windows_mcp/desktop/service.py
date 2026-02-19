@@ -41,9 +41,6 @@ import pyautogui as pg  # noqa: E402
 
 import windows_mcp.uia as uia  # noqa: E402
 
-pg.FAILSAFE = False
-pg.PAUSE = 0.05
-
 
 class Desktop:
     def __init__(self):
@@ -470,7 +467,7 @@ class Desktop:
 
     def scroll(
         self,
-        loc: tuple[int, int] = None,
+        loc: tuple[int, int] | None = None,
         type: Literal["horizontal", "vertical"] = "vertical",
         direction: Literal["up", "down", "left", "right"] = "down",
         wheel_times: int = 1,
@@ -486,7 +483,9 @@ class Desktop:
     def shortcut(self, shortcut: str):
         return self._input.shortcut(shortcut)
 
-    def multi_select(self, press_ctrl: bool | str = False, locs: list[tuple[int, int]] = []):
+    def multi_select(
+        self, press_ctrl: bool | str = False, locs: list[tuple[int, int]] | None = None
+    ):
         return self._input.multi_select(press_ctrl, locs)
 
     def multi_edit(self, locs: list[tuple[int, int, str]]):

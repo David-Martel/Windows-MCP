@@ -11,9 +11,6 @@ import pyautogui as pg  # noqa: E402
 
 import windows_mcp.uia as uia  # noqa: E402
 
-pg.FAILSAFE = False
-pg.PAUSE = 0.05
-
 
 class InputService:
     """Simulate mouse clicks, keyboard input, scrolling, and drag operations."""
@@ -146,23 +143,30 @@ class InputService:
         else:
             pg.press("".join(keys))
 
-    def multi_select(self, press_ctrl: bool | str = False, locs: list[tuple[int, int]] = []):
+    def multi_select(
+        self, press_ctrl: bool | str = False, locs: list[tuple[int, int]] | None = None
+    ):
         """Click multiple locations, optionally holding Ctrl for multi-selection.
 
         Args:
             press_ctrl: If True or "true", hold Ctrl while clicking each location.
             locs: List of (x, y) coordinate pairs to click.
         """
+        if locs is None:
+            locs = []
         hold_ctrl = press_ctrl is True or (
             isinstance(press_ctrl, str) and press_ctrl.lower() == "true"
         )
         if hold_ctrl:
             pg.keyDown("ctrl")
-        for loc in locs:
-            x, y = loc
-            pg.click(x, y, duration=0.2)
-            pg.sleep(0.5)
-        pg.keyUp("ctrl")
+        try:
+            for loc in locs:
+                x, y = loc
+                pg.click(x, y, duration=0.2)
+                pg.sleep(0.5)
+        finally:
+            if hold_ctrl:
+                pg.keyUp("ctrl")
 
     def multi_edit(self, locs: list[tuple[int, int, str]]):
         """Type text into multiple fields, clearing each before typing.
