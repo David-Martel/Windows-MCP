@@ -477,12 +477,28 @@ MCP Client (Claude Desktop, Cursor, etc.)
     |
 FastMCP Server (__main__.py)
     |
+    +-- Auth Middleware (auth/middleware.py)
+    |     +-- BearerAuthMiddleware for SSE/HTTP
+    |     +-- DPAPI key storage (auth/key_manager.py)
+    |     +-- Bypass for stdio transport
+    |
     +-- Desktop Service (desktop/service.py)
     |     +-- Input simulation (pyautogui)
     |     +-- Window management (win32gui)
     |     +-- Process management (psutil)
-    |     +-- Registry (PowerShell subprocess)
-    |     +-- Web scraping (requests + markdownify)
+    |     +-- Facade delegates to extracted services
+    |
+    +-- Registry Service (registry/service.py)
+    |     +-- CRUD operations via winreg stdlib
+    |     +-- PowerShell-style path support (HKCU:\, HKLM:\)
+    |
+    +-- Shell Service (shell/service.py)
+    |     +-- PowerShell execution with timeout
+    |     +-- Safety blocklist (16 patterns, env-configurable)
+    |
+    +-- Scraper Service (scraper/service.py)
+    |     +-- URL fetch + HTML-to-markdown
+    |     +-- SSRF protection (private IP, DNS rebinding, scheme)
     |
     +-- Tree Service (tree/service.py)
     |     +-- Accessibility tree traversal
@@ -505,8 +521,10 @@ FastMCP Server (__main__.py)
     +-- Filesystem Service (filesystem/service.py)
     |     +-- File CRUD operations
     |
-    +-- Auth Client (auth/service.py)
-    |     +-- Remote mode authentication
+    +-- Native Extension (native/ -- optional)
+    |     +-- PyO3 Rust crate (windows_mcp_core)
+    |     +-- system_info() via sysinfo crate
+    |     +-- Tree traversal acceleration (planned)
     |
     +-- Analytics (analytics.py)
           +-- PostHog telemetry (opt-out via env var)
@@ -563,20 +581,27 @@ The first run installs dependencies and may timeout. Restart the MCP server.
 
 ## 9. Security Considerations
 
-**Windows-MCP operates with full system access.** There is no sandboxing or permission model.
+**Windows-MCP operates with full system access.** Defense-in-depth measures mitigate risk but do not eliminate it.
+
+### Built-in Security Features
+
+- **API key authentication** -- Bearer token auth for SSE/HTTP transports via `BearerAuthMiddleware`. Keys encrypted at rest with Windows DPAPI. Generate with `--generate-key`, rotate with `--rotate-key`.
+- **Shell command blocklist** -- 16 regex patterns block destructive commands (format, diskpart, bcdedit, rm -rf, net user /add, IEX+DownloadString, etc). Configurable via `WINDOWS_MCP_SHELL_BLOCKLIST` env var.
+- **SSRF protection** -- Scrape tool validates URLs: blocks non-HTTP schemes, private/reserved IP ranges (RFC 1918, link-local, loopback), DNS rebinding attacks, and cloud metadata endpoints (169.254.169.254).
+- **Localhost binding** -- Server refuses to bind to `0.0.0.0` without auth configured.
 
 ### Recommendations
 
 1. **Run in a VM or Windows Sandbox** for untrusted agents
 2. **Use stdio transport** (default) rather than SSE/HTTP to limit exposure
-3. **Never bind to 0.0.0.0** unless you've added your own authentication layer
+3. **Enable authentication** when using network transports: `--generate-key` then `--api-key <key>`
 4. **Disable telemetry** if operating in sensitive environments: `ANONYMIZED_TELEMETRY=false`
 5. **Review SECURITY.md** for comprehensive security guidelines
 
 ### What the AI Agent Can Do
 
 With Windows-MCP, a connected AI agent has the ability to:
-- Execute any PowerShell command
+- Execute PowerShell commands (filtered by safety blocklist)
 - Read, write, and delete any file
 - Modify the Windows Registry
 - Kill any process
@@ -598,10 +623,11 @@ Understanding latency is important for designing effective automation workflows.
 |-----------|----------------|------------|
 | `Snapshot()` (no vision) | 0.5-5s | UIAutomation tree traversal (COM round-trips) |
 | `Snapshot(use_vision=True)` | 0.6-5.4s | Tree traversal + screenshot capture + PNG encode |
-| `Click(loc)` | ~1.1s | `pyautogui.PAUSE = 1.0` (configurable) |
-| `Type(loc, text, clear=True)` | 4-7s | Multiple pyautogui calls, each with 1s pause |
+| `Click(loc)` | ~0.1s | `pyautogui.PAUSE = 0.05` (reduced from 1.0s) |
+| `Type(loc, text, clear=True)` | 0.2-0.5s | Multiple pyautogui calls, 0.05s pause each |
 | `App(mode="launch")` | 0.5-2s | PowerShell subprocess for Start Menu lookup |
 | `Shell(command)` | 0.2-0.5s + exec | PowerShell process initialization overhead |
+| `Registry(mode="get")` | <5ms | Direct winreg stdlib (was 200-500ms via PowerShell) |
 | `File(mode="read")` | <10ms | Direct filesystem I/O |
 
 ### Why Latency Varies
@@ -626,16 +652,28 @@ Each UI element requires cross-process COM calls to the target application's UIA
 
 The following optimizations are planned (see TODO.md for full details):
 
-**Near-term (Python-only):**
+**Completed:**
+- Reduced `pyautogui.PAUSE` from 1.0s to 0.05s (10-20x faster input operations)
+- Replaced PowerShell subprocess with `winreg`/stdlib for registry and sysinfo (200-500ms saved per op)
+- Fixed PIL ImageDraw thread safety (sequential drawing)
+- Bounded ThreadPoolExecutor (max_workers=min(8, cpu_count))
+- Added shell command safety blocklist (16 patterns)
+- Added SSRF protection for Scrape tool
+- Added API key auth for SSE/HTTP (DPAPI-encrypted storage)
+- Extracted 3 modules from Desktop God Object (Registry, Shell, Scraper)
+- PyO3 Rust extension scaffold with `system_info()` function
+
+**Near-term (Python):**
 - Event-driven `WaitFor` tool replacing fixed-sleep `Wait`
 - `ValuePattern.SetValue()` for instant text input (vs character-by-character)
-- Reduced `pyautogui.PAUSE` from 1.0s to 0.05s
+- `Find` tool for semantic element lookup by role/name/property
+- `Invoke` tool for UIA pattern actions (InvokePattern, TogglePattern, ExpandCollapsePattern)
 - Single-shot `TreeScope_Subtree` cache (60-80% tree traversal reduction)
-- Elimination of PowerShell subprocess for registry/sysinfo operations
 
-**Medium-term (Caching):**
+**Medium-term (Caching + LLM Vision):**
 - Per-window tree cache with WatchDog-based invalidation
 - Start Menu app cache with filesystem watcher
+- LLM vision integration for intelligent screenshot analysis
 - Element coordinate cache reusing stored bounding boxes
 
 **Longer-term (Rust acceleration via PyO3):**

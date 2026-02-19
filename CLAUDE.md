@@ -12,7 +12,7 @@ Windows-MCP is a Python MCP (Model Context Protocol) server that bridges AI LLM 
 uv sync                              # Install dependencies
 uv sync --extra dev                  # Install with dev deps (ruff, pytest)
 uv run windows-mcp                   # Run the MCP server (stdio transport)
-uv run python -m pytest tests/       # Run all tests (140 tests, ~6s)
+uv run python -m pytest tests/       # Run all tests (537 tests, ~6s)
 uv run python -m pytest tests/test_foo.py  # Run a single test file
 ruff format .                        # Format code
 ruff check .                         # Lint code
@@ -27,13 +27,21 @@ The codebase follows a layered service architecture under `src/windows_mcp/`:
 
 **Entry point** -- `__main__.py` (~700 lines): Registers all 19 MCP tools on a FastMCP server instance. Uses an async lifespan to initialize Desktop, WatchDog, and Analytics services. Each tool function delegates to `Desktop` methods. The `@with_analytics` decorator wraps tools for telemetry.
 
-**Desktop service** -- `desktop/service.py` (~1087 lines): High-level orchestrator (God Object -- refactor target). Manages window operations (launch, resize, switch), screenshots, mouse/keyboard actions, clipboard, registry, and shell execution. `desktop/views.py` defines data models: `DesktopState`, `Window`, `Size`, `BoundingBox`, `Status`.
+**Desktop service** -- `desktop/service.py` (~1039 lines): High-level orchestrator (partially decomposed). Manages window operations (launch, resize, switch), screenshots, mouse/keyboard actions, clipboard. Delegates to extracted services: `RegistryService`, `ShellService`, `ScraperService`. `desktop/views.py` defines data models: `DesktopState`, `Window`, `Size`, `BoundingBox`, `Status`.
 
-**Tree service** -- `tree/service.py`: Captures the Windows accessibility tree from active and background windows. Identifies interactive, informative, and scrollable elements. Uses `ThreadPoolExecutor` for multi-threaded UI traversal. `tree/views.py` defines `TreeElementNode`, `ScrollElementNode`, `TreeState`. `tree/config.py` has control type classifications. `tree/cache_utils.py` has CacheRequest factory.
+**Registry service** -- `registry/service.py`: CRUD operations on Windows Registry via `winreg` stdlib. Supports PowerShell-style paths (HKCU:\, HKLM:\). Extracted from Desktop.
+
+**Shell service** -- `shell/service.py`: PowerShell command execution with safety blocklist (16 patterns for destructive commands). Configurable via `WINDOWS_MCP_SHELL_BLOCKLIST` env var. Extracted from Desktop.
+
+**Scraper service** -- `scraper/service.py`: Web page fetching with SSRF protection. Validates URLs against private IP ranges, DNS rebinding, non-HTTP schemes. Returns markdown via `markdownify`. Extracted from Desktop.
+
+**Tree service** -- `tree/service.py`: Captures the Windows accessibility tree from active and background windows. Identifies interactive, informative, and scrollable elements. Uses bounded `ThreadPoolExecutor` (max_workers=min(8, cpu_count)) for multi-threaded UI traversal. `tree/views.py` defines `TreeElementNode`, `ScrollElementNode`, `TreeState`. `tree/config.py` has control type classifications. `tree/cache_utils.py` has CacheRequest factory.
 
 **UIAutomation wrapper** -- `uia/`: Low-level abstraction over the Windows UIAutomation COM API via `comtypes`. `core.py` wraps the main automation object, `controls.py` has control-specific logic, `patterns.py` wraps UIAutomation patterns, `enums.py` has COM enumerations, `events.py` handles event subscriptions.
 
-**Auth** -- `auth/service.py`: Authentication client for remote mode (windowsmcp.io). HTTP-based API key validation.
+**Auth** -- `auth/key_manager.py`: DPAPI-encrypted API key storage for local HTTP auth. `auth/middleware.py`: `BearerAuthMiddleware` for SSE/HTTP transports. `auth/service.py`: Remote mode auth client (windowsmcp.io).
+
+**Native extension** -- `native/`: Optional PyO3 Rust crate (`windows_mcp_core`) built with Maturin. Currently provides `system_info()` via `sysinfo` crate. Tree traversal acceleration planned.
 
 **Filesystem** -- `filesystem/service.py`: Stateless file operations. Well-designed module with pure functions and clean error handling. `filesystem/views.py` has data models.
 
@@ -53,7 +61,7 @@ The codebase follows a layered service architecture under `src/windows_mcp/`:
 
 ## Testing
 
-- 140 tests, all passing (~6s runtime)
+- 537 tests, all passing (~17s runtime)
 - Framework: pytest + pytest-asyncio (asyncio_mode = "auto")
 - Test directory: `tests/`
 - Must run via `uv run python -m pytest` (not bare `pytest`)

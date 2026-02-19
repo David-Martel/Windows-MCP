@@ -6,7 +6,7 @@ Agent-facing reference for code development standards, optimization goals, and a
 
 ```bash
 uv sync --extra dev                        # Install all deps
-uv run python -m pytest tests/             # Run tests (140 tests, ~6s)
+uv run python -m pytest tests/             # Run tests (537 tests, ~17s)
 uv run python -m pytest tests/ -x -v       # Stop on first failure, verbose
 uv run python -m pytest tests/ --cov       # With coverage
 ruff check . --fix && ruff format .        # Lint + format
@@ -69,11 +69,14 @@ uv run windows-mcp --transport sse --port 8000  # Launch server (SSE)
 | COM / UIAutomation | `src/windows_mcp/uia/core.py`, `uia/patterns.py`, `uia/controls.py` |
 | Input simulation | `src/windows_mcp/uia/core.py` (mouse_event, keybd_event calls) |
 | Screenshot | `src/windows_mcp/desktop/service.py` (~line 875) |
-| Shell execution | `src/windows_mcp/desktop/service.py` (~line 209) |
+| Shell execution | `src/windows_mcp/shell/service.py` |
 | File operations | `src/windows_mcp/filesystem/service.py` |
 | Virtual desktops | `src/windows_mcp/vdm/core.py` |
 | Focus monitoring | `src/windows_mcp/watchdog/service.py` |
 | Telemetry | `src/windows_mcp/analytics.py` |
+| Web scraping / SSRF | `src/windows_mcp/scraper/service.py` |
+| Registry operations | `src/windows_mcp/registry/service.py` |
+| Auth (local HTTP) | `src/windows_mcp/auth/key_manager.py`, `auth/middleware.py` |
 | Auth (remote mode) | `src/windows_mcp/auth/service.py` |
 | Tests | `tests/` |
 

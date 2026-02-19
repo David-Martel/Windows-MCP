@@ -22,7 +22,7 @@
 - [x] **[P2] Bound ThreadPoolExecutor** -- Added `max_workers=min(8, os.cpu_count() or 4)` to tree traversal executor in `tree/service.py`.
 - [ ] **[P3] Convert tree_traversal to iterative** -- Replace recursion with an explicit stack to avoid Python's 1000-frame limit on complex UIs.
 - [x] **[P9] Make pyautogui.PAUSE configurable** -- Reduced from 1.0s to 0.05s in both `desktop/service.py` and `__main__.py`. Saves 1-6s per input operation.
-- [ ] **[S7] Block SSRF in Scrape tool** -- Validate URL scheme (http/https only), block private IP ranges (10.x, 172.16-31.x, 192.168.x, 169.254.x, 127.x), block cloud metadata endpoints.
+- [x] **[S7] Block SSRF in Scrape tool** -- Done. `ScraperService.validate_url()` blocks non-HTTP schemes, private/reserved IPs, DNS rebinding, cloud metadata endpoints. Extracted to `scraper/service.py`.
 - [ ] **[T1] Fix COM apartment threading violations** -- Make `self.dom` and `self.dom_bounding_box` local variables in traversal context, not shared instance fields.
 - [ ] **[T2] Add synchronization to shared mutable state** -- Lock or per-request context for `Tree.tree_state`, `Desktop.desktop_state`.
 
@@ -30,13 +30,13 @@
 
 ## P2 -- Architectural Improvements
 
-- [ ] **[A1] Decompose Desktop God Object** -- Extract into focused services:
-  - `InputService` -- click, type, scroll, drag, move, shortcut, multi_select, multi_edit
-  - `WindowService` -- get_windows, get_active_window, switch_app, resize_app
-  - `AppService` -- launch_app, get_apps_from_start_menu
-  - `RegistryService` -- registry_get/set/delete/list (new `registry/` module)
-  - `ProcessService` -- list_processes, kill_process, get_system_info
-  - `ScreenService` -- get_screenshot, get_annotated_screenshot
+- [ ] **[A1] Decompose Desktop God Object** -- Extract into focused services (3/6 done):
+  - [x] `RegistryService` -- registry_get/set/delete/list (`registry/service.py`)
+  - [x] `ShellService` -- execute, check_blocklist, ps_quote (`shell/service.py`)
+  - [x] `ScraperService` -- validate_url, scrape (`scraper/service.py`)
+  - [ ] `InputService` -- click, type, scroll, drag, move, shortcut, multi_select, multi_edit
+  - [ ] `WindowService` -- get_windows, get_active_window, switch_app, resize_app
+  - [ ] `ScreenService` -- get_screenshot, get_annotated_screenshot
 - [ ] **[A3] Replace module globals with dependency injection** -- Use FastMCP's lifespan context to pass `desktop`, `watchdog`, `analytics` via `ctx.request_context.lifespan_context`.
 - [ ] **[A2] Decompose __main__.py** -- Extract tool registrations into domain modules (e.g., `tools/input_tools.py`, `tools/window_tools.py`, `tools/file_tools.py`).
 - [ ] **[P5] Parallelize get_state** -- Run window enumeration, VDM queries, and tree traversal concurrently with `asyncio.gather`.
@@ -47,7 +47,7 @@
 
 ## P3 -- Security Hardening
 
-- [ ] **[S1] Implement Shell tool sandboxing** -- Command allowlist/blocklist with deny-by-default. Consider PowerShell Constrained Language Mode.
+- [x] **[S1] Implement Shell tool sandboxing** -- Done. `ShellService.check_blocklist()` with 16 regex patterns (format, diskpart, bcdedit, rm -rf, net user/localgroup, IEX+DownloadString, etc). Configurable via `WINDOWS_MCP_SHELL_BLOCKLIST` env var. Extracted to `shell/service.py`.
 - [ ] **[S4] Add path-scoping to File tool** -- Define allowed directory scope. Validate resolved paths remain within scope.
 - [ ] **[S3] Restrict Registry tool access** -- Deny security-sensitive keys (Run, RunOnce, Services, Policies, SAM). Require confirmation for write/delete.
 - [ ] **[S5] Rotate PostHog API key** -- Move to environment variable. Disable GeoIP, disable exception auto-capture. Default telemetry to opt-in.
@@ -60,7 +60,7 @@
 
 ## P4 -- Test Coverage
 
-- [ ] **[A7] Add MCP tool handler integration tests** -- Mock Desktop, verify return formats and error handling for all 19 tools.
+- [x] **[A7] Add MCP tool handler integration tests** -- Done. 145 headless integration tests in `test_mcp_integration.py` covering all 22 tools via `tool.fn()`. 4 tiers: server structure, tool dispatch, error handling, transport+auth.
 - [ ] **Add WatchDog service tests** -- Test threading, COM event handling, callback dispatch.
 - [ ] **Add Desktop.get_state orchestration tests** -- Test the composition of windows, tree state, screenshots, VDM.
 - [ ] **Add tree_traversal unit tests** -- Test with mock UIA trees. Cover DOM/interactive/scrollable classification.
