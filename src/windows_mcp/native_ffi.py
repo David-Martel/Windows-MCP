@@ -128,6 +128,7 @@ class NativeFFI:
             return json.loads(raw_bytes.decode("utf-8"))
         finally:
             self._dll.wmcp_free_string(out)
+            out.value = None  # Prevent double-free
 
     def send_text(self, text: str) -> int:
         """Type text via SendInput, returns event count."""
@@ -156,3 +157,4 @@ class NativeFFI:
             return json.loads(raw_bytes.decode("utf-8"))
         finally:
             self._dll.wmcp_free_string(out)
+            out.value = None  # Prevent double-free

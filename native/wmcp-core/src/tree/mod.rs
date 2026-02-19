@@ -42,6 +42,10 @@ use windows::Win32::Foundation::HWND;
 use crate::com::COMGuard;
 use crate::errors::WindowsMcpError;
 
+/// Maximum tree recursion depth.  Clamped to stay within Rayon's ~2MB
+/// thread stack (~1-2 KB per level, so 50 levels ≈ 50-100 KB).
+pub const MAX_TREE_DEPTH: usize = 50;
+
 // ---------------------------------------------------------------------------
 // Control-type ID -> name mapping
 // ---------------------------------------------------------------------------
@@ -259,10 +263,10 @@ fn capture_window(handle: isize, max_depth: usize) -> Option<TreeElementSnapshot
 /// Windows are traversed in parallel using Rayon.  Each thread initialises
 /// its own COM apartment.  Invalid/inaccessible handles are silently skipped.
 ///
-/// `max_depth` is clamped to 50 to stay within Rayon's ~2MB thread stack.
-/// Each recursion level uses ~1-2 KB of stack, so 50 levels ≈ 50-100 KB.
+/// `max_depth` is clamped to [`MAX_TREE_DEPTH`] to stay within Rayon's
+/// ~2MB thread stack.
 pub fn capture_tree_raw(window_handles: &[isize], max_depth: usize) -> Vec<TreeElementSnapshot> {
-    let max_depth = max_depth.min(50);
+    let max_depth = max_depth.min(MAX_TREE_DEPTH);
 
     window_handles
         .par_iter()

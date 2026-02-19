@@ -35,6 +35,8 @@ class InputService:
         if clicks == 1:
             result = native_send_click(x, y, button)
             if result is not None:
+                if result == 0:
+                    logger.warning("SendInput returned 0 events for click at (%d,%d) -- UIPI?", x, y)
                 return
         # Fall back to pyautogui for double-click and when native is unavailable
         pg.click(x, y, button=button, clicks=clicks, duration=0.1)

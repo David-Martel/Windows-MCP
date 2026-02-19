@@ -55,8 +55,8 @@ fn dispatch(method: &str, params: &serde_json::Value) -> Result<serde_json::Valu
             let max_depth: usize = params
                 .get("max_depth")
                 .and_then(|v| v.as_u64())
-                .map(|d| d.min(200) as usize)
-                .unwrap_or(50);
+                .map(|d| (d as usize).min(wmcp_core::tree::MAX_TREE_DEPTH))
+                .unwrap_or(wmcp_core::tree::MAX_TREE_DEPTH);
             let snapshots = wmcp_core::tree::capture_tree_raw(&handles, max_depth);
             serde_json::to_value(snapshots).map_err(|e| e.to_string())
         }
