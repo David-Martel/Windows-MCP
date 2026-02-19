@@ -64,14 +64,27 @@ class InputService:
             press_enter: If True or "true", press Enter after typing.
         """
         x, y = loc
+        is_clear = clear is True or (isinstance(clear, str) and clear.lower() == "true")
+        is_enter = press_enter is True or (
+            isinstance(press_enter, str) and press_enter.lower() == "true"
+        )
+
+        # UIA ValuePattern fast-path: instant text set for compliant fields.
+        # Only used when caret_position is "idle" (full replacement semantics).
+        if caret_position == "idle":
+            if self._try_value_pattern(x, y, text, is_clear):
+                if is_enter:
+                    pg.press("enter")
+                return
+
+        # Standard path: click, position caret, optionally clear, then type
         pg.leftClick(x, y)
         if caret_position == "start":
             pg.press("home")
         elif caret_position == "end":
             pg.press("end")
-        # else "idle" -- no movement needed
 
-        if clear is True or (isinstance(clear, str) and clear.lower() == "true"):
+        if is_clear:
             pg.sleep(0.5)
             pg.hotkey("ctrl", "a")
             pg.press("backspace")
@@ -82,8 +95,30 @@ class InputService:
         if result is None:
             pg.typewrite(text, interval=0.02)
 
-        if press_enter is True or (isinstance(press_enter, str) and press_enter.lower() == "true"):
+        if is_enter:
             pg.press("enter")
+
+    @staticmethod
+    def _try_value_pattern(x: int, y: int, text: str, clear: bool) -> bool:
+        """Attempt to set text via UIA ValuePattern. Returns True on success."""
+        try:
+            element = uia.ControlFromPoint(x, y)
+            if not element:
+                return False
+            pattern = element.GetPattern(uia.PatternId.ValuePattern)
+            if not pattern:
+                return False
+            if pattern.IsReadOnly:
+                return False
+            if clear:
+                pattern.SetValue(text)
+            else:
+                # Append to existing value when not clearing
+                current = pattern.Value or ""
+                pattern.SetValue(current + text)
+            return True
+        except Exception:
+            return False
 
     def scroll(
         self,
