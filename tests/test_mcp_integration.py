@@ -1275,6 +1275,21 @@ class TestBoolStringCoercion:
         result = await tools["Snapshot"].fn(use_vision="true", use_dom="false")
         assert isinstance(result, list)
 
+    async def test_snapshot_vision_with_screenshot_returns_image(self, patched_desktop):
+        """When use_vision=True and screenshot exists, result includes Image data."""
+        from PIL import Image as PILImage
+
+        # Create a small real PIL Image to test bytes conversion path
+        img = PILImage.new("RGB", (100, 100), color=(255, 0, 0))
+        ds = _make_desktop_state()
+        ds.screenshot = img
+        patched_desktop.get_state.return_value = ds
+
+        tools = await _get_tools()
+        result = await tools["Snapshot"].fn(use_vision=True, use_dom=False)
+        assert isinstance(result, list)
+        assert len(result) >= 2  # text + Image
+
 
 class TestWaitForTimeoutCapping:
     async def test_waitfor_negative_timeout_capped_to_1_second(self, patched_desktop):
