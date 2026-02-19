@@ -110,146 +110,66 @@ def _inject_thefuzz_fuzz(mock_fuzz_obj):
 
 
 class TestSendNotification:
-    """send_notification builds a PowerShell script, calls execute_command,
-    and returns a formatted string based on the exit status."""
+    """send_notification uses Shell_NotifyIconW to display a balloon notification."""
 
     def test_success_returns_formatted_string(self):
         d = _make_bare_desktop()
-        d.execute_command = MagicMock(return_value=("", 0))
-        with patch.object(type(d), "_ps_quote", staticmethod(lambda v: f"'{v}'")):
-            result = d.send_notification("Hello", "World")
+        with patch("ctypes.windll.shell32.Shell_NotifyIconW", return_value=1):
+            with patch("ctypes.windll.user32.GetForegroundWindow", return_value=12345):
+                with patch("ctypes.windll.user32.GetDesktopWindow", return_value=1):
+                    with patch("ctypes.windll.user32.LoadIconW", return_value=0):
+                        with patch("threading.Thread"):
+                            result = d.send_notification("Hello", "World")
         assert result == 'Notification sent: "Hello" - World'
 
-    def test_failure_returns_fallback_string(self):
+    def test_failure_returns_error_string(self):
         d = _make_bare_desktop()
-        d.execute_command = MagicMock(return_value=("some error output", 1))
-        with patch.object(type(d), "_ps_quote", staticmethod(lambda v: f"'{v}'")):
-            result = d.send_notification("Title", "Body")
-        assert "Notification may have been sent" in result
-        assert "PowerShell output" in result
-
-    def test_failure_truncates_response_at_200_chars(self):
-        d = _make_bare_desktop()
-        long_output = "x" * 500
-        d.execute_command = MagicMock(return_value=(long_output, 2))
-        with patch.object(type(d), "_ps_quote", staticmethod(lambda v: f"'{v}'")):
-            result = d.send_notification("T", "M")
-        # The truncated portion should not exceed 200 characters embedded in result
-        assert "x" * 201 not in result
-        assert "x" * 200 in result
-
-    def test_xml_escapes_ampersand_in_title(self):
-        d = _make_bare_desktop()
-        captured_scripts = []
-
-        def capture_cmd(script, timeout=10):
-            captured_scripts.append(script)
-            return ("", 0)
-
-        d.execute_command = capture_cmd
-        with patch.object(type(d), "_ps_quote", staticmethod(lambda v: f"'{v}'")):
-            d.send_notification("Tom & Jerry", "Message")
-        assert "&amp;" in captured_scripts[0]
-        assert "&" not in captured_scripts[0].replace("&amp;", "").replace("&quot;", "").replace(
-            "&apos;", ""
-        )
-
-    def test_xml_escapes_less_than_in_message(self):
-        d = _make_bare_desktop()
-        captured_scripts = []
-
-        def capture_cmd(script, timeout=10):
-            captured_scripts.append(script)
-            return ("", 0)
-
-        d.execute_command = capture_cmd
-        with patch.object(type(d), "_ps_quote", staticmethod(lambda v: f"'{v}'")):
-            d.send_notification("Title", "a < b")
-        assert "&lt;" in captured_scripts[0]
-
-    def test_xml_escapes_greater_than_in_message(self):
-        d = _make_bare_desktop()
-        captured_scripts = []
-
-        def capture_cmd(script, timeout=10):
-            captured_scripts.append(script)
-            return ("", 0)
-
-        d.execute_command = capture_cmd
-        with patch.object(type(d), "_ps_quote", staticmethod(lambda v: f"'{v}'")):
-            d.send_notification("Title", "a > b")
-        assert "&gt;" in captured_scripts[0]
-
-    def test_xml_escapes_double_quote_in_title(self):
-        d = _make_bare_desktop()
-        captured_scripts = []
-
-        def capture_cmd(script, timeout=10):
-            captured_scripts.append(script)
-            return ("", 0)
-
-        d.execute_command = capture_cmd
-        with patch.object(type(d), "_ps_quote", staticmethod(lambda v: f"'{v}'")):
-            d.send_notification('Say "hello"', "body")
-        assert "&quot;" in captured_scripts[0]
-
-    def test_xml_escapes_single_quote_in_title(self):
-        d = _make_bare_desktop()
-        captured_scripts = []
-
-        def capture_cmd(script, timeout=10):
-            captured_scripts.append(script)
-            return ("", 0)
-
-        d.execute_command = capture_cmd
-        with patch.object(type(d), "_ps_quote", staticmethod(lambda v: f"'{v}'")):
-            d.send_notification("It's here", "body")
-        assert "&apos;" in captured_scripts[0]
-
-    def test_execute_command_called_once(self):
-        d = _make_bare_desktop()
-        d.execute_command = MagicMock(return_value=("", 0))
-        with patch.object(type(d), "_ps_quote", staticmethod(lambda v: f"'{v}'")):
-            d.send_notification("Title", "Body")
-        d.execute_command.assert_called_once()
-
-    def test_ps_quote_called_for_title_and_message(self):
-        d = _make_bare_desktop()
-        d.execute_command = MagicMock(return_value=("", 0))
-        ps_quote_calls = []
-
-        def recording_ps_quote(v):
-            ps_quote_calls.append(v)
-            return f"'{v}'"
-
-        with patch.object(type(d), "_ps_quote", staticmethod(recording_ps_quote)):
-            d.send_notification("My Title", "My Body")
-        # ps_quote must have been called with the xml-escaped title and message
-        assert any("My Title" in c for c in ps_quote_calls)
-        assert any("My Body" in c for c in ps_quote_calls)
+        with patch("ctypes.windll.shell32.Shell_NotifyIconW", return_value=0):
+            with patch("ctypes.windll.user32.GetForegroundWindow", return_value=12345):
+                with patch("ctypes.windll.user32.LoadIconW", return_value=0):
+                    result = d.send_notification("Title", "Body")
+        assert "Failed to send notification" in result
 
     def test_success_title_appears_in_result(self):
         d = _make_bare_desktop()
-        d.execute_command = MagicMock(return_value=("", 0))
-        with patch.object(type(d), "_ps_quote", staticmethod(lambda v: f"'{v}'")):
-            result = d.send_notification("Alert", "Done")
+        with patch("ctypes.windll.shell32.Shell_NotifyIconW", return_value=1):
+            with patch("ctypes.windll.user32.GetForegroundWindow", return_value=12345):
+                with patch("ctypes.windll.user32.LoadIconW", return_value=0):
+                    with patch("threading.Thread"):
+                        result = d.send_notification("Alert", "Done")
         assert "Alert" in result
         assert "Done" in result
 
-    def test_status_zero_is_success_not_fallback(self):
+    def test_success_starts_cleanup_thread(self):
         d = _make_bare_desktop()
-        d.execute_command = MagicMock(return_value=("any output", 0))
-        with patch.object(type(d), "_ps_quote", staticmethod(lambda v: f"'{v}'")):
-            result = d.send_notification("T", "M")
-        assert "may have been sent" not in result
+        with patch("ctypes.windll.shell32.Shell_NotifyIconW", return_value=1):
+            with patch("ctypes.windll.user32.GetForegroundWindow", return_value=12345):
+                with patch("ctypes.windll.user32.LoadIconW", return_value=0):
+                    with patch("threading.Thread") as mock_thread:
+                        d.send_notification("T", "M")
+        mock_thread.assert_called_once()
+        mock_thread.return_value.start.assert_called_once()
 
-    def test_non_zero_status_triggers_fallback(self):
-        for status in (1, 2, 127, -1):
-            d = _make_bare_desktop()
-            d.execute_command = MagicMock(return_value=("err", status))
-            with patch.object(type(d), "_ps_quote", staticmethod(lambda v: f"'{v}'")):
-                result = d.send_notification("T", "M")
-            assert "may have been sent" in result, f"Expected fallback for status={status}"
+    def test_failure_does_not_start_cleanup_thread(self):
+        d = _make_bare_desktop()
+        with patch("ctypes.windll.shell32.Shell_NotifyIconW", return_value=0):
+            with patch("ctypes.windll.user32.GetForegroundWindow", return_value=12345):
+                with patch("ctypes.windll.user32.LoadIconW", return_value=0):
+                    with patch("threading.Thread") as mock_thread:
+                        d.send_notification("T", "M")
+        mock_thread.assert_not_called()
+
+    def test_falls_back_to_desktop_window_when_foreground_is_null(self):
+        d = _make_bare_desktop()
+        with patch("ctypes.windll.shell32.Shell_NotifyIconW", return_value=1) as mock_notify:
+            with patch("ctypes.windll.user32.GetForegroundWindow", return_value=0):
+                with patch("ctypes.windll.user32.GetDesktopWindow", return_value=99):
+                    with patch("ctypes.windll.user32.LoadIconW", return_value=0):
+                        with patch("threading.Thread"):
+                            d.send_notification("T", "M")
+        # Verify Shell_NotifyIconW was called (we can't easily inspect the struct,
+        # but the call succeeding with desktop window handle is the key behavior)
+        mock_notify.assert_called_once()
 
 
 # ===========================================================================
@@ -683,34 +603,64 @@ class TestLaunchApp:
         assert "not found" in msg.lower()
 
     def test_app_found_with_path_launch(self):
-        """App ID is a filesystem path -- uses Start-Process with path."""
+        """App ID is a filesystem path -- uses ShellExecuteExW."""
         d = _make_bare_desktop()
         d.get_apps_from_start_menu = MagicMock(return_value={"notepad": r"C:\Windows\notepad.exe"})
         with (
             patch("windows_mcp.desktop.service.process") as mock_fuzz,
             patch("windows_mcp.desktop.service.os.path.exists", return_value=True),
+            patch.object(type(d), "_shell_execute_with_pid", staticmethod(lambda p: 1234)),
         ):
             mock_fuzz.extractOne.return_value = ("notepad", 90)
-            d.execute_command = MagicMock(return_value=("1234", 0))
             msg, status, pid = d.launch_app("notepad")
         assert pid == 1234
         assert status == 0
 
-    def test_app_found_with_shell_folder_launch(self):
-        """App ID is a UWP AUMID -- uses shell:AppsFolder launch."""
+    def test_app_path_launch_failure(self):
+        """ShellExecuteExW failure returns error tuple."""
         d = _make_bare_desktop()
-        # UWP AUMIDs contain '!' delimiter between package name and entry point
+        d.get_apps_from_start_menu = MagicMock(return_value={"notepad": r"C:\Windows\notepad.exe"})
+        with (
+            patch("windows_mcp.desktop.service.process") as mock_fuzz,
+            patch("windows_mcp.desktop.service.os.path.exists", return_value=True),
+            patch.object(type(d), "_shell_execute_with_pid", staticmethod(lambda p: -1)),
+        ):
+            mock_fuzz.extractOne.return_value = ("notepad", 90)
+            msg, status, pid = d.launch_app("notepad")
+        assert status == 1
+        assert "Failed to launch" in msg
+
+    def test_app_found_with_shell_folder_launch(self):
+        """App ID is a UWP AUMID -- uses os.startfile with shell:AppsFolder."""
+        d = _make_bare_desktop()
         d.get_apps_from_start_menu = MagicMock(
             return_value={"calculator": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"}
         )
         with (
             patch("windows_mcp.desktop.service.process") as mock_fuzz,
             patch("windows_mcp.desktop.service.os.path.exists", return_value=False),
+            patch("windows_mcp.desktop.service.os.startfile") as mock_start,
         ):
             mock_fuzz.extractOne.return_value = ("calculator", 85)
-            d.execute_command = MagicMock(return_value=("", 0))
             msg, status, pid = d.launch_app("calculator")
         assert status == 0
+        mock_start.assert_called_once()
+
+    def test_app_shell_folder_launch_failure(self):
+        """os.startfile failure returns error tuple."""
+        d = _make_bare_desktop()
+        d.get_apps_from_start_menu = MagicMock(
+            return_value={"calculator": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"}
+        )
+        with (
+            patch("windows_mcp.desktop.service.process") as mock_fuzz,
+            patch("windows_mcp.desktop.service.os.path.exists", return_value=False),
+            patch("windows_mcp.desktop.service.os.startfile", side_effect=OSError("not found")),
+        ):
+            mock_fuzz.extractOne.return_value = ("calculator", 85)
+            msg, status, pid = d.launch_app("calculator")
+        assert status == 1
+        assert "Failed to launch" in msg
 
     def test_app_invalid_identifier_returns_error(self):
         """App ID with invalid chars (not alphanumeric/underscore/dot/dash/backslash) rejects."""
@@ -754,34 +704,33 @@ class TestAppCache:
         result = d.get_apps_from_start_menu()
         assert result is cached
 
-    def test_cache_miss_calls_shell(self):
-        """Cold cache triggers Get-StartApps PowerShell command."""
+    def test_cache_miss_uses_shortcut_scan_first(self):
+        """Cold cache triggers shortcut scan as primary path."""
         d = _make_bare_desktop()
         d._app_cache = None
-        csv_output = '"Name","AppID"\n"Notepad","notepad.exe"\n"Calc","calc.exe"'
-        d.execute_command = MagicMock(return_value=(csv_output, 0))
-        result = d.get_apps_from_start_menu()
-        assert "notepad" in result
-        assert "calc" in result
-
-    def test_cache_miss_bad_csv_falls_back_to_shortcuts(self):
-        """Malformed CSV falls back to Start Menu shortcut scanning."""
-        d = _make_bare_desktop()
-        d._app_cache = None
-        d.execute_command = MagicMock(return_value=("not-csv-at-all", 0))
         d._get_apps_from_shortcuts = MagicMock(return_value={"notepad": "notepad.lnk"})
         result = d.get_apps_from_start_menu()
         d._get_apps_from_shortcuts.assert_called_once()
         assert "notepad" in result
 
-    def test_cache_miss_command_fails_falls_back_to_shortcuts(self):
-        """Non-zero exit from Get-StartApps falls back to shortcuts."""
+    def test_shortcut_scan_empty_falls_back_to_powershell(self):
+        """Empty shortcut scan falls back to Get-StartApps PowerShell."""
         d = _make_bare_desktop()
         d._app_cache = None
-        d.execute_command = MagicMock(return_value=("error", 1))
-        d._get_apps_from_shortcuts = MagicMock(return_value={"calc": "calc.lnk"})
+        d._get_apps_from_shortcuts = MagicMock(return_value={})
+        csv_output = '"Name","AppID"\n"Calc","calc.exe"'
+        d.execute_command = MagicMock(return_value=(csv_output, 0))
         result = d.get_apps_from_start_menu()
         assert "calc" in result
+
+    def test_both_empty_returns_empty_dict(self):
+        """No apps from shortcuts or PowerShell returns empty dict."""
+        d = _make_bare_desktop()
+        d._app_cache = None
+        d._get_apps_from_shortcuts = MagicMock(return_value={})
+        d.execute_command = MagicMock(return_value=("error", 1))
+        result = d.get_apps_from_start_menu()
+        assert result == {}
 
     def test_shortcut_scanning(self, tmp_path):
         """_get_apps_from_shortcuts finds .lnk files in Start Menu folders."""

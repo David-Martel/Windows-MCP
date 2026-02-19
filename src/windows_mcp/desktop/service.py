@@ -59,12 +59,6 @@ class Desktop:
         self._app_cache_lock = threading.Lock()
         self._APP_CACHE_TTL: float = 3600.0  # 1 hour
 
-    @staticmethod
-    def _ps_quote(value: str) -> str:
-        from windows_mcp.shell import ShellService
-
-        return ShellService.ps_quote(value)
-
     def get_state(
         self,
         use_annotation: bool | str = True,
@@ -169,7 +163,7 @@ class Desktop:
         return self._window.get_window_status(control)
 
     def get_apps_from_start_menu(self) -> dict[str, str]:
-        """Get installed apps with caching. Tries Get-StartApps first, falls back to shortcut scanning."""
+        """Get installed apps with caching. Shortcut scan first, Get-StartApps fallback."""
         now = time()
         # Fast path: check cache without lock (atomic read on CPython)
         if self._app_cache is not None and (now - self._app_cache_time) < self._APP_CACHE_TTL:
@@ -181,6 +175,15 @@ class Desktop:
             if self._app_cache is not None and (now - self._app_cache_time) < self._APP_CACHE_TTL:
                 return self._app_cache
 
+            # Primary: scan Start Menu shortcut folders (no subprocess, works on all versions)
+            apps = self._get_apps_from_shortcuts()
+            if apps:
+                self._app_cache = apps
+                self._app_cache_time = now
+                return apps
+
+            # Fallback: Get-StartApps for UWP apps (requires PowerShell)
+            logger.info("Shortcut scan found no apps, falling back to Get-StartApps")
             command = "Get-StartApps | ConvertTo-Csv -NoTypeInformation"
             apps_info, status = self.execute_command(command)
 
@@ -199,12 +202,9 @@ class Desktop:
                 except Exception as e:
                     logger.warning("Error parsing Get-StartApps output: %s", e)
 
-            # Fallback: scan Start Menu shortcut folders (works on all Windows versions)
-            logger.info("Get-StartApps unavailable, falling back to Start Menu folder scan")
-            apps = self._get_apps_from_shortcuts()
-            self._app_cache = apps
+            self._app_cache = {}
             self._app_cache_time = now
-            return apps
+            return {}
 
     def _get_apps_from_shortcuts(self) -> dict[str, str]:
         """Scan Start Menu folders for .lnk shortcuts as a fallback for Get-StartApps."""
@@ -329,11 +329,11 @@ class Desktop:
 
         pid = 0
         if os.path.exists(appid) or "\\" in appid:
-            safe = self._ps_quote(appid)
-            command = f"Start-Process {safe} -PassThru | Select-Object -ExpandProperty Id"
-            response, status = self.execute_command(command)
-            if status == 0 and response.strip().isdigit():
-                pid = int(response.strip())
+            # Launch file/executable via ShellExecuteExW (no PowerShell subprocess)
+            pid = self._shell_execute_with_pid(appid)
+            if pid < 0:
+                return (f"Failed to launch {appid}", 1, 0)
+            return ("", 0, pid)
         else:
             if (
                 not appid.replace("\\", "")
@@ -344,11 +344,55 @@ class Desktop:
                 .isalnum()
             ):
                 return (f"Invalid app identifier: {appid}", 1, 0)
-            safe = self._ps_quote(f"shell:AppsFolder\\{appid}")
-            command = f"Start-Process {safe}"
-            response, status = self.execute_command(command)
+            # Launch UWP app via os.startfile (no PowerShell subprocess)
+            try:
+                os.startfile(f"shell:AppsFolder\\{appid}")
+                return ("", 0, 0)
+            except OSError as e:
+                return (f"Failed to launch {appid}: {e}", 1, 0)
 
-        return response, status, pid
+    @staticmethod
+    def _shell_execute_with_pid(path: str) -> int:
+        """Launch a file via ShellExecuteExW, return PID (>0), 0 (no PID), or -1 (failure)."""
+        from ctypes import wintypes
+
+        class SHELLEXECUTEINFOW(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("fMask", ctypes.c_ulong),
+                ("hwnd", wintypes.HWND),
+                ("lpVerb", wintypes.LPCWSTR),
+                ("lpFile", wintypes.LPCWSTR),
+                ("lpParameters", wintypes.LPCWSTR),
+                ("lpDirectory", wintypes.LPCWSTR),
+                ("nShow", ctypes.c_int),
+                ("hInstApp", wintypes.HINSTANCE),
+                ("lpIDList", ctypes.c_void_p),
+                ("lpClass", wintypes.LPCWSTR),
+                ("hkeyClass", wintypes.HKEY),
+                ("dwHotKey", wintypes.DWORD),
+                ("hIcon", wintypes.HANDLE),
+                ("hProcess", wintypes.HANDLE),
+            ]
+
+        SEE_MASK_NOCLOSEPROCESS = 0x00000040
+        SW_SHOWNORMAL = 1
+
+        sei = SHELLEXECUTEINFOW()
+        sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
+        sei.fMask = SEE_MASK_NOCLOSEPROCESS
+        sei.lpVerb = "open"
+        sei.lpFile = path
+        sei.nShow = SW_SHOWNORMAL
+
+        if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei)):
+            return -1
+
+        pid = 0
+        if sei.hProcess:
+            pid = ctypes.windll.kernel32.GetProcessId(sei.hProcess)
+            ctypes.windll.kernel32.CloseHandle(sei.hProcess)
+        return pid
 
     def switch_app(self, name: str):
         try:
@@ -554,37 +598,67 @@ class Desktop:
         return self._screen.get_annotated_screenshot(nodes)
 
     def send_notification(self, title: str, message: str) -> str:
-        from xml.sax.saxutils import escape as xml_escape
+        """Send a Windows balloon/toast notification via Shell_NotifyIconW."""
+        from ctypes import wintypes
 
-        safe_title = xml_escape(title, {'"': "&quot;", "'": "&apos;"})
-        safe_message = xml_escape(message, {'"': "&quot;", "'": "&apos;"})
+        class NOTIFYICONDATAW(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("hWnd", wintypes.HWND),
+                ("uID", wintypes.UINT),
+                ("uFlags", wintypes.UINT),
+                ("uCallbackMessage", wintypes.UINT),
+                ("hIcon", wintypes.HICON),
+                ("szTip", wintypes.WCHAR * 128),
+                ("dwState", wintypes.DWORD),
+                ("dwStateMask", wintypes.DWORD),
+                ("szInfo", wintypes.WCHAR * 256),
+                ("uVersion", wintypes.UINT),
+                ("szInfoTitle", wintypes.WCHAR * 64),
+                ("dwInfoFlags", wintypes.DWORD),
+                ("guidItem", ctypes.c_byte * 16),
+                ("hBalloonIcon", wintypes.HICON),
+            ]
 
-        ps_script = (
-            "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null\n"
-            "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null\n"
-            f"$notifTitle = {self._ps_quote(safe_title)}\n"
-            f"$notifMessage = {self._ps_quote(safe_message)}\n"
-            '$template = @"\n'
-            "<toast>\n"
-            "    <visual>\n"
-            '        <binding template="ToastGeneric">\n'
-            "            <text>$notifTitle</text>\n"
-            "            <text>$notifMessage</text>\n"
-            "        </binding>\n"
-            "    </visual>\n"
-            "</toast>\n"
-            '"@\n'
-            "$xml = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
-            "$xml.LoadXml($template)\n"
-            '$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Windows MCP")\n'
-            "$toast = New-Object Windows.UI.Notifications.ToastNotification $xml\n"
-            "$notifier.Show($toast)"
-        )
-        response, status = self.execute_command(ps_script)
-        if status == 0:
+        NIM_ADD = 0x00000000
+        NIM_DELETE = 0x00000002
+        NIF_ICON = 0x00000002
+        NIF_TIP = 0x00000004
+        NIF_INFO = 0x00000010
+        NIIF_INFO = 0x00000001
+
+        shell32 = ctypes.windll.shell32
+        user32 = ctypes.windll.user32
+
+        # Use the foreground window as notification anchor; fall back to desktop
+        hwnd = user32.GetForegroundWindow() or user32.GetDesktopWindow()
+
+        nid = NOTIFYICONDATAW()
+        nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
+        nid.hWnd = hwnd
+        nid.uID = 0xBEEF
+        nid.uFlags = NIF_ICON | NIF_TIP | NIF_INFO
+        nid.hIcon = user32.LoadIconW(None, 32516)  # IDI_INFORMATION
+        nid.szTip = "Windows MCP"
+        nid.szInfoTitle = title[:63]
+        nid.szInfo = message[:255]
+        nid.dwInfoFlags = NIIF_INFO
+
+        if shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid)):
+            # Clean up the tray icon in a background thread after 10 seconds
+            def _cleanup():
+                import time
+
+                time.sleep(10)
+                try:
+                    shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(nid))
+                except Exception:
+                    pass
+
+            threading.Thread(target=_cleanup, daemon=True).start()
             return f'Notification sent: "{title}" - {message}'
         else:
-            return f"Notification may have been sent. PowerShell output: {response[:200]}"
+            return "Failed to send notification (Shell_NotifyIconW returned 0)"
 
     def list_processes(
         self,
