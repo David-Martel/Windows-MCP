@@ -205,6 +205,56 @@ _USE_MODULE_RATE_LIMITER = object()  # sentinel: resolve _rate_limiter via sys.m
 
 
 # ---------------------------------------------------------------------------
+# Tool permission manifest (allow/deny lists)
+# ---------------------------------------------------------------------------
+
+
+class ToolNotAllowedError(Exception):
+    """Raised when a tool call is blocked by the permission manifest."""
+
+
+def _parse_tool_list(raw: str) -> set[str]:
+    """Parse a comma-separated tool name list (case-insensitive)."""
+    return {t.strip().lower() for t in raw.split(",") if t.strip()}
+
+
+# WINDOWS_MCP_ALLOW: if set, only listed tools are available (allowlist).
+# WINDOWS_MCP_DENY: if set, listed tools are blocked (denylist).
+# If both are set, ALLOW takes precedence (only allowed tools minus denied).
+_allow_tools: set[str] | None = None
+_deny_tools: set[str] = set()
+
+_raw_allow = os.environ.get("WINDOWS_MCP_ALLOW", "").strip()
+_raw_deny = os.environ.get("WINDOWS_MCP_DENY", "").strip()
+if _raw_allow:
+    _allow_tools = _parse_tool_list(_raw_allow)
+    logger.info("Tool allowlist active: %s", _allow_tools)
+if _raw_deny:
+    _deny_tools = _parse_tool_list(_raw_deny)
+    logger.info("Tool denylist active: %s", _deny_tools)
+
+
+def check_tool_permission(tool_name: str) -> None:
+    """Check whether ``tool_name`` is allowed by the permission manifest.
+
+    Raises:
+        ToolNotAllowedError: If the tool is blocked by allow/deny rules.
+    """
+    name_lower = tool_name.lower()
+
+    if _allow_tools is not None and name_lower not in _allow_tools:
+        raise ToolNotAllowedError(
+            f"Tool '{tool_name}' is not in the allowlist (WINDOWS_MCP_ALLOW). "
+            f"Allowed: {', '.join(sorted(_allow_tools))}."
+        )
+
+    if name_lower in _deny_tools:
+        raise ToolNotAllowedError(
+            f"Tool '{tool_name}' is blocked by the denylist (WINDOWS_MCP_DENY)."
+        )
+
+
+# ---------------------------------------------------------------------------
 # Analytics protocol and PostHog implementation
 # ---------------------------------------------------------------------------
 
@@ -364,6 +414,9 @@ def with_analytics(
             # Enforce rate limit before doing any work.
             if effective_limiter is not None:
                 effective_limiter.check(tool_name)
+
+            # Enforce tool permission manifest.
+            check_tool_permission(tool_name)
 
             # Resolve the analytics instance at call time so that late
             # assignment (e.g. inside an async lifespan) is picked up.
