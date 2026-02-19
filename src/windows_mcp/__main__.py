@@ -66,7 +66,6 @@ async def lifespan(app: FastMCP):
 
     try:
         watchdog.start()
-        await asyncio.sleep(1)  # Simulate startup latency
         yield
     finally:
         if watchdog:
@@ -354,11 +353,10 @@ def scroll_tool(
     response = desktop.scroll(loc, type, direction, wheel_times)
     if response:
         return response
-    return (
-        f"Scrolled {type} {direction} by {wheel_times} wheel times" + f" at ({loc[0]},{loc[1]})."
-        if loc
-        else ""
-    )
+    msg = f"Scrolled {type} {direction} by {wheel_times} wheel times"
+    if loc:
+        msg += f" at ({loc[0]},{loc[1]})"
+    return msg + "."
 
 
 @mcp.tool(
