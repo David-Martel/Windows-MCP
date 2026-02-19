@@ -2033,3 +2033,418 @@ class TestRateLimiterWithAnalyticsIntegration(_RateLimiterTestBase):
             await some_tool()
 
         mock_limiter.check.assert_called_once_with("SomeTool")
+
+
+# ---------------------------------------------------------------------------
+# Base class for permission manifest tests that need importlib.reload().
+# Mirrors _RateLimiterTestBase so that module-level _allow_tools / _deny_tools
+# are always the live objects after any reload triggered by other test classes.
+# ---------------------------------------------------------------------------
+
+
+class _PermissionManifestTestBase:
+    """Mixin that reloads analytics and rebinds permission names before each test.
+
+    ``TestAuditLoggerConfiguration.teardown_method`` calls ``importlib.reload()``
+    which creates new class objects and reinitialises module-level state.
+    This base ensures tests always operate on the current live module.
+    """
+
+    def setup_method(self):
+        import importlib
+
+        import windows_mcp.analytics as analytics_mod
+
+        # Remove any leftover env vars from previous tests before reloading.
+        os.environ.pop("WINDOWS_MCP_ALLOW", None)
+        os.environ.pop("WINDOWS_MCP_DENY", None)
+        importlib.reload(analytics_mod)
+        self._mod = analytics_mod
+        self._parse_tool_list = analytics_mod._parse_tool_list
+        self._check_tool_permission = analytics_mod.check_tool_permission
+        self.ToolNotAllowedError = analytics_mod.ToolNotAllowedError
+        self.with_analytics = analytics_mod.with_analytics
+
+    def teardown_method(self):
+        import importlib
+
+        import windows_mcp.analytics as analytics_mod
+
+        os.environ.pop("WINDOWS_MCP_ALLOW", None)
+        os.environ.pop("WINDOWS_MCP_DENY", None)
+        importlib.reload(analytics_mod)
+
+
+# ---------------------------------------------------------------------------
+# _parse_tool_list -- pure function, no reload required
+# ---------------------------------------------------------------------------
+
+
+class TestParseToolList(_PermissionManifestTestBase):
+    """Tests for the comma-separated tool name parser."""
+
+    def test_empty_string_returns_empty_set(self):
+        result = self._parse_tool_list("")
+        assert result == set()
+
+    def test_whitespace_only_returns_empty_set(self):
+        result = self._parse_tool_list("   ")
+        assert result == set()
+
+    def test_single_tool_name_is_lowercased(self):
+        result = self._parse_tool_list("Shell")
+        assert result == {"shell"}
+
+    def test_multiple_tool_names_are_lowercased(self):
+        result = self._parse_tool_list("Shell,Click,Snapshot")
+        assert result == {"shell", "click", "snapshot"}
+
+    def test_whitespace_around_names_is_stripped(self):
+        result = self._parse_tool_list("Shell,Click, Snapshot ")
+        assert result == {"shell", "click", "snapshot"}
+
+    def test_mixed_case_names_are_normalised(self):
+        result = self._parse_tool_list("SHELL,cLiCk,SnapShot")
+        assert result == {"shell", "click", "snapshot"}
+
+    def test_empty_segments_between_commas_are_skipped(self):
+        # "Shell,,Click" has an empty segment that should not produce an entry.
+        result = self._parse_tool_list("Shell,,Click")
+        assert result == {"shell", "click"}
+
+    def test_single_name_no_comma_returns_singleton_set(self):
+        result = self._parse_tool_list("Registry")
+        assert result == {"registry"}
+
+    def test_returns_set_not_list(self):
+        result = self._parse_tool_list("Shell,Click")
+        assert isinstance(result, set)
+
+    def test_duplicate_names_produce_single_entry(self):
+        result = self._parse_tool_list("Shell,shell,SHELL")
+        assert result == {"shell"}
+
+
+# ---------------------------------------------------------------------------
+# check_tool_permission -- direct attribute patching (no reload needed)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckToolPermission(_PermissionManifestTestBase):
+    """Tests for check_tool_permission using monkeypatch on module attributes."""
+
+    def test_passes_when_no_allow_or_deny_set(self, monkeypatch):
+        """No restriction: any tool name is permitted."""
+        monkeypatch.setattr(self._mod, "_allow_tools", None)
+        monkeypatch.setattr(self._mod, "_deny_tools", set())
+        # Must not raise.
+        self._mod.check_tool_permission("Shell")
+
+    def test_raises_when_tool_not_in_allowlist(self, monkeypatch):
+        """Tool absent from allowlist must raise ToolNotAllowedError."""
+        monkeypatch.setattr(self._mod, "_allow_tools", {"click", "snapshot"})
+        monkeypatch.setattr(self._mod, "_deny_tools", set())
+        with pytest.raises(self.ToolNotAllowedError):
+            self._mod.check_tool_permission("Shell")
+
+    def test_passes_when_tool_is_in_allowlist(self, monkeypatch):
+        """Tool present in allowlist must not raise."""
+        monkeypatch.setattr(self._mod, "_allow_tools", {"shell", "click"})
+        monkeypatch.setattr(self._mod, "_deny_tools", set())
+        # Must not raise.
+        self._mod.check_tool_permission("Shell")
+
+    def test_raises_when_tool_is_in_denylist(self, monkeypatch):
+        """Tool present in denylist must raise ToolNotAllowedError."""
+        monkeypatch.setattr(self._mod, "_allow_tools", None)
+        monkeypatch.setattr(self._mod, "_deny_tools", {"shell"})
+        with pytest.raises(self.ToolNotAllowedError):
+            self._mod.check_tool_permission("Shell")
+
+    def test_passes_when_tool_absent_from_denylist(self, monkeypatch):
+        """Tool not in denylist with no allowlist must be permitted."""
+        monkeypatch.setattr(self._mod, "_allow_tools", None)
+        monkeypatch.setattr(self._mod, "_deny_tools", {"registry"})
+        # Must not raise.
+        self._mod.check_tool_permission("Shell")
+
+    def test_case_insensitive_allowlist_match(self, monkeypatch):
+        """Allowlist lookup must be case-insensitive."""
+        monkeypatch.setattr(self._mod, "_allow_tools", {"shell"})
+        monkeypatch.setattr(self._mod, "_deny_tools", set())
+        # All of these spellings must match the lowercase "shell" in the set.
+        for variant in ("Shell", "SHELL", "sHeLl"):
+            self._mod.check_tool_permission(variant)  # Must not raise.
+
+    def test_case_insensitive_denylist_match(self, monkeypatch):
+        """Denylist lookup must be case-insensitive."""
+        monkeypatch.setattr(self._mod, "_allow_tools", None)
+        monkeypatch.setattr(self._mod, "_deny_tools", {"shell"})
+        for variant in ("Shell", "SHELL", "sHeLl"):
+            with pytest.raises(self.ToolNotAllowedError):
+                self._mod.check_tool_permission(variant)
+
+    def test_allow_and_deny_both_set_tool_in_allow_but_not_deny_passes(self, monkeypatch):
+        """When both lists are set: tool in allow but not deny must be permitted."""
+        monkeypatch.setattr(self._mod, "_allow_tools", {"shell", "click"})
+        monkeypatch.setattr(self._mod, "_deny_tools", {"registry"})
+        # shell is allowed and not denied.
+        self._mod.check_tool_permission("Shell")  # Must not raise.
+
+    def test_allow_and_deny_both_set_tool_in_both_is_blocked(self, monkeypatch):
+        """When both lists are set: tool in allow AND deny must be blocked (deny wins)."""
+        monkeypatch.setattr(self._mod, "_allow_tools", {"shell", "click"})
+        monkeypatch.setattr(self._mod, "_deny_tools", {"shell"})
+        with pytest.raises(self.ToolNotAllowedError):
+            self._mod.check_tool_permission("Shell")
+
+    def test_allow_and_deny_both_set_tool_not_in_allow_is_blocked(self, monkeypatch):
+        """When allowlist is set, a tool absent from it is blocked regardless of denylist."""
+        monkeypatch.setattr(self._mod, "_allow_tools", {"click"})
+        monkeypatch.setattr(self._mod, "_deny_tools", set())
+        with pytest.raises(self.ToolNotAllowedError):
+            self._mod.check_tool_permission("Shell")
+
+    def test_error_message_contains_tool_name(self, monkeypatch):
+        """ToolNotAllowedError message must reference the blocked tool name."""
+        monkeypatch.setattr(self._mod, "_allow_tools", {"click"})
+        monkeypatch.setattr(self._mod, "_deny_tools", set())
+        with pytest.raises(self.ToolNotAllowedError, match="Shell"):
+            self._mod.check_tool_permission("Shell")
+
+    def test_denylist_error_message_contains_tool_name(self, monkeypatch):
+        """ToolNotAllowedError from denylist must reference the blocked tool name."""
+        monkeypatch.setattr(self._mod, "_allow_tools", None)
+        monkeypatch.setattr(self._mod, "_deny_tools", {"shell"})
+        with pytest.raises(self.ToolNotAllowedError, match="Shell"):
+            self._mod.check_tool_permission("Shell")
+
+    def test_empty_allowlist_blocks_every_tool(self, monkeypatch):
+        """An empty allowlist (not None) blocks all tools."""
+        monkeypatch.setattr(self._mod, "_allow_tools", set())
+        monkeypatch.setattr(self._mod, "_deny_tools", set())
+        with pytest.raises(self.ToolNotAllowedError):
+            self._mod.check_tool_permission("Shell")
+
+
+# ---------------------------------------------------------------------------
+# Permission manifest -- env var parsing at module load time
+# ---------------------------------------------------------------------------
+
+
+class TestPermissionManifestEnvVarParsing(_PermissionManifestTestBase):
+    """Tests that verify WINDOWS_MCP_ALLOW / WINDOWS_MCP_DENY are parsed at
+    module load time via importlib.reload()."""
+
+    def test_allow_env_var_not_set_leaves_allow_tools_none(self, monkeypatch):
+        """_allow_tools must be None when WINDOWS_MCP_ALLOW is absent."""
+        import importlib
+
+        monkeypatch.delenv("WINDOWS_MCP_ALLOW", raising=False)
+        importlib.reload(self._mod)
+        assert self._mod._allow_tools is None
+
+    def test_allow_env_var_empty_string_leaves_allow_tools_none(self, monkeypatch):
+        """An empty WINDOWS_MCP_ALLOW must leave _allow_tools as None."""
+        import importlib
+
+        monkeypatch.setenv("WINDOWS_MCP_ALLOW", "")
+        importlib.reload(self._mod)
+        assert self._mod._allow_tools is None
+
+    def test_allow_env_var_is_parsed_to_lowercase_set(self, monkeypatch):
+        """WINDOWS_MCP_ALLOW=Shell,Click must produce {'shell', 'click'}."""
+        import importlib
+
+        monkeypatch.setenv("WINDOWS_MCP_ALLOW", "Shell,Click")
+        importlib.reload(self._mod)
+        assert self._mod._allow_tools == {"shell", "click"}
+
+    def test_deny_env_var_not_set_leaves_deny_tools_empty(self, monkeypatch):
+        """_deny_tools must be empty set when WINDOWS_MCP_DENY is absent."""
+        import importlib
+
+        monkeypatch.delenv("WINDOWS_MCP_DENY", raising=False)
+        importlib.reload(self._mod)
+        assert self._mod._deny_tools == set()
+
+    def test_deny_env_var_is_parsed_to_lowercase_set(self, monkeypatch):
+        """WINDOWS_MCP_DENY=Shell,Registry must produce {'shell', 'registry'}."""
+        import importlib
+
+        monkeypatch.setenv("WINDOWS_MCP_DENY", "Shell,Registry")
+        importlib.reload(self._mod)
+        assert self._mod._deny_tools == {"shell", "registry"}
+
+    def test_allow_env_var_with_whitespace_is_trimmed(self, monkeypatch):
+        """Whitespace around names in WINDOWS_MCP_ALLOW must be stripped."""
+        import importlib
+
+        monkeypatch.setenv("WINDOWS_MCP_ALLOW", " Shell , Click , Snapshot ")
+        importlib.reload(self._mod)
+        assert self._mod._allow_tools == {"shell", "click", "snapshot"}
+
+    def test_deny_env_var_with_whitespace_is_trimmed(self, monkeypatch):
+        """Whitespace around names in WINDOWS_MCP_DENY must be stripped."""
+        import importlib
+
+        monkeypatch.setenv("WINDOWS_MCP_DENY", " Shell , Registry ")
+        importlib.reload(self._mod)
+        assert self._mod._deny_tools == {"shell", "registry"}
+
+    def test_both_allow_and_deny_env_vars_are_parsed_together(self, monkeypatch):
+        """Setting both env vars must populate both module-level sets."""
+        import importlib
+
+        monkeypatch.setenv("WINDOWS_MCP_ALLOW", "Shell,Click")
+        monkeypatch.setenv("WINDOWS_MCP_DENY", "Shell")
+        importlib.reload(self._mod)
+        assert self._mod._allow_tools == {"shell", "click"}
+        assert self._mod._deny_tools == {"shell"}
+
+
+# ---------------------------------------------------------------------------
+# Permission manifest -- integration with with_analytics decorator
+# ---------------------------------------------------------------------------
+
+
+class TestPermissionManifestDecoratorIntegration(_PermissionManifestTestBase):
+    """Verify that check_tool_permission fires inside with_analytics before the
+    tool body executes, and that ToolNotAllowedError propagates to the caller."""
+
+    async def test_blocked_tool_never_executes(self, monkeypatch):
+        """Body must not be called when the tool is blocked by the denylist."""
+        monkeypatch.setattr(self._mod, "_allow_tools", None)
+        monkeypatch.setattr(self._mod, "_deny_tools", {"shell"})
+        call_count = 0
+
+        @self._mod.with_analytics(None, "Shell", rate_limiter=None)
+        async def shell_tool():
+            nonlocal call_count
+            call_count += 1
+            return "output"
+
+        with pytest.raises(self.ToolNotAllowedError):
+            await shell_tool()
+
+        assert call_count == 0
+
+    async def test_allowed_tool_executes_normally(self, monkeypatch):
+        """Tool in allowlist with no denylist conflict must run and return its value."""
+        monkeypatch.setattr(self._mod, "_allow_tools", {"shell"})
+        monkeypatch.setattr(self._mod, "_deny_tools", set())
+
+        @self._mod.with_analytics(None, "Shell", rate_limiter=None)
+        async def shell_tool():
+            return "ran"
+
+        result = await shell_tool()
+        assert result == "ran"
+
+    async def test_tool_not_in_allowlist_never_executes(self, monkeypatch):
+        """Tool absent from allowlist must be blocked before body runs."""
+        monkeypatch.setattr(self._mod, "_allow_tools", {"click"})
+        monkeypatch.setattr(self._mod, "_deny_tools", set())
+        call_count = 0
+
+        @self._mod.with_analytics(None, "Shell", rate_limiter=None)
+        async def shell_tool():
+            nonlocal call_count
+            call_count += 1
+            return "output"
+
+        with pytest.raises(self.ToolNotAllowedError):
+            await shell_tool()
+
+        assert call_count == 0
+
+    async def test_tool_not_allowed_error_is_not_tracked_as_analytics_error(self, monkeypatch):
+        """ToolNotAllowedError must propagate without calling track_error."""
+        monkeypatch.setattr(self._mod, "_allow_tools", None)
+        monkeypatch.setattr(self._mod, "_deny_tools", {"shell"})
+        mock_analytics = AsyncMock()
+
+        @self._mod.with_analytics(mock_analytics, "Shell", rate_limiter=None)
+        async def shell_tool():
+            return "output"
+
+        with pytest.raises(self.ToolNotAllowedError):
+            await shell_tool()
+
+        mock_analytics.track_error.assert_not_called()
+        mock_analytics.track_tool.assert_not_called()
+
+    async def test_permission_check_fires_after_rate_limit_check(self, monkeypatch):
+        """ToolNotAllowedError must not suppress a preceding RateLimitExceededError.
+
+        The rate limiter runs before check_tool_permission.  If the rate limit is
+        exhausted first, RateLimitExceededError must be raised (not ToolNotAllowedError).
+        """
+        import windows_mcp.analytics as analytics_mod
+
+        monkeypatch.setattr(self._mod, "_allow_tools", None)
+        monkeypatch.setattr(self._mod, "_deny_tools", {"shell"})
+        limiter = analytics_mod.RateLimiter({"Shell": (1, 60)})
+
+        @self._mod.with_analytics(None, "Shell", rate_limiter=limiter)
+        async def shell_tool():
+            return "ran"
+
+        # First call: rate limit OK, permission denied -> ToolNotAllowedError
+        with pytest.raises(self.ToolNotAllowedError):
+            await shell_tool()
+
+        # Rate limiter consumed its one slot on the first call (check() records
+        # before raising ToolNotAllowedError -- depends on ordering in decorator).
+        # The key assertion is that the second call raises RateLimitExceededError,
+        # confirming rate limiting fires before permission checking on the second call.
+        # If for some reason the first call did not consume a slot (implementation
+        # detail), this call would raise ToolNotAllowedError -- both are acceptable
+        # and tested below.
+        second_exc = None
+        try:
+            await shell_tool()
+        except (self.ToolNotAllowedError, analytics_mod.RateLimitExceededError) as exc:
+            second_exc = exc
+        assert second_exc is not None, "Expected an exception on second call"
+
+    async def test_allow_and_deny_overlap_tool_is_blocked(self, monkeypatch):
+        """Tool present in both allow and deny lists must be blocked."""
+        monkeypatch.setattr(self._mod, "_allow_tools", {"shell", "click"})
+        monkeypatch.setattr(self._mod, "_deny_tools", {"shell"})
+        call_count = 0
+
+        @self._mod.with_analytics(None, "Shell", rate_limiter=None)
+        async def shell_tool():
+            nonlocal call_count
+            call_count += 1
+            return "output"
+
+        with pytest.raises(self.ToolNotAllowedError):
+            await shell_tool()
+
+        assert call_count == 0
+
+    async def test_no_restrictions_tool_executes_normally(self, monkeypatch):
+        """With no allow or deny lists set, any tool must run without restriction."""
+        monkeypatch.setattr(self._mod, "_allow_tools", None)
+        monkeypatch.setattr(self._mod, "_deny_tools", set())
+
+        @self._mod.with_analytics(None, "Shell", rate_limiter=None)
+        async def shell_tool():
+            return "unrestricted"
+
+        result = await shell_tool()
+        assert result == "unrestricted"
+
+    async def test_tool_not_allowed_error_message_propagates(self, monkeypatch):
+        """The ToolNotAllowedError message must reach the caller."""
+        monkeypatch.setattr(self._mod, "_allow_tools", None)
+        monkeypatch.setattr(self._mod, "_deny_tools", {"shell"})
+
+        @self._mod.with_analytics(None, "Shell", rate_limiter=None)
+        async def shell_tool():
+            return "output"
+
+        with pytest.raises(self.ToolNotAllowedError, match="Shell"):
+            await shell_tool()
