@@ -161,13 +161,12 @@ class TestSwitchAppNoneDereference:
 
         d.get_state = MagicMock(side_effect=fake_get_state)
 
-        with patch(_UIA) as mock_uia:
-            mock_uia.IsIconic.return_value = False
+        with patch(_UIA):
             with patch(
                 "windows_mcp.desktop.service.process.extractOne",
                 return_value=("Notepad", 95.0),
             ):
-                d.bring_window_to_top = MagicMock()
+                d._window.bring_window_to_top = MagicMock()
                 result = d.switch_app("Notepad")
 
         d.get_state.assert_called_once()

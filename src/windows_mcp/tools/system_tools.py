@@ -21,7 +21,7 @@ def register(mcp):  # noqa: C901
 
     @mcp.tool(
         name="App",
-        description="Manages Windows applications with three modes: 'launch' (opens the prescibed application), 'resize' (adjusts active window size/position), 'switch' (brings specific window into focus).",
+        description="Manages Windows applications with three modes: 'launch' (opens the prescribed application), 'resize' (adjusts active window size/position), 'switch' (brings specific window into focus).",
         annotations=ToolAnnotations(
             title="App",
             readOnlyHint=False,

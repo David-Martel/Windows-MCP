@@ -6,6 +6,8 @@ Registers: Snapshot, WaitFor, WaitForEvent, Find, VisionAnalyze (5 tools).
 import asyncio
 import io
 import logging
+import threading
+import time
 from textwrap import dedent
 from typing import Literal
 
@@ -127,8 +129,6 @@ def register(mcp):  # noqa: C901
         timeout: int = 10,
         ctx: Context = None,
     ) -> str:
-        import time
-
         # Cap timeout to prevent unbounded task lifetime
         timeout = min(max(timeout, 1), 300)
         poll_interval = 0.5
@@ -197,9 +197,6 @@ def register(mcp):  # noqa: C901
         timeout: int = 30,
         ctx: Context = None,
     ) -> str:
-        import threading
-        import time
-
         from windows_mcp.uia import Control
         from windows_mcp.uia.events import EventId
 

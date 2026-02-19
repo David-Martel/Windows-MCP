@@ -17,8 +17,6 @@ from windows_mcp.analytics import PostHogAnalytics
 from windows_mcp.auth import AuthClient, AuthKeyManager, BearerAuthMiddleware
 from windows_mcp.desktop.service import Desktop
 from windows_mcp.tools import _state, register_all_tools
-from windows_mcp.tools._helpers import _coerce_bool as _coerce_bool  # noqa: F401 -- re-export
-from windows_mcp.tools._helpers import _validate_loc as _validate_loc  # noqa: F401 -- re-export
 from windows_mcp.watchdog.service import WatchDog
 
 load_dotenv()

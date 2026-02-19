@@ -1,24 +1,25 @@
 import csv
 import ctypes
+import glob
 import io
 import logging
 import os
 import re
 import threading
+import time as time_mod
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from locale import getpreferredencoding
 from time import time
 from typing import Literal
 
-import win32con
 from PIL import Image
 from thefuzz import process
 
 from windows_mcp.desktop.config import PROCESS_PER_MONITOR_DPI_AWARE
 from windows_mcp.desktop.views import DesktopState, Size, Status, Window
 from windows_mcp.tree.service import Tree
-from windows_mcp.tree.views import TreeElementNode
+from windows_mcp.tree.views import TreeElementNode, TreeState
 from windows_mcp.vdm.core import get_desktop_info
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,49 @@ except Exception:
 
 import windows_mcp.uia as uia  # noqa: E402
 
+# ctypes structures defined at module level to avoid re-running _fields_ processing on each call
+_wintypes = ctypes.wintypes
+
+
+class _SHELLEXECUTEINFOW(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", _wintypes.DWORD),
+        ("fMask", ctypes.c_ulong),
+        ("hwnd", _wintypes.HWND),
+        ("lpVerb", _wintypes.LPCWSTR),
+        ("lpFile", _wintypes.LPCWSTR),
+        ("lpParameters", _wintypes.LPCWSTR),
+        ("lpDirectory", _wintypes.LPCWSTR),
+        ("nShow", ctypes.c_int),
+        ("hInstApp", _wintypes.HINSTANCE),
+        ("lpIDList", ctypes.c_void_p),
+        ("lpClass", _wintypes.LPCWSTR),
+        ("hkeyClass", _wintypes.HKEY),
+        ("dwHotKey", _wintypes.DWORD),
+        ("hIcon", _wintypes.HANDLE),
+        ("hProcess", _wintypes.HANDLE),
+    ]
+
+
+class _NOTIFYICONDATAW(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", _wintypes.DWORD),
+        ("hWnd", _wintypes.HWND),
+        ("uID", _wintypes.UINT),
+        ("uFlags", _wintypes.UINT),
+        ("uCallbackMessage", _wintypes.UINT),
+        ("hIcon", _wintypes.HICON),
+        ("szTip", _wintypes.WCHAR * 128),
+        ("dwState", _wintypes.DWORD),
+        ("dwStateMask", _wintypes.DWORD),
+        ("szInfo", _wintypes.WCHAR * 256),
+        ("uVersion", _wintypes.UINT),
+        ("szInfoTitle", _wintypes.WCHAR * 64),
+        ("dwInfoFlags", _wintypes.DWORD),
+        ("guidItem", ctypes.c_byte * 16),
+        ("hBalloonIcon", _wintypes.HICON),
+    ]
+
 
 class Desktop:
     def __init__(self) -> None:
@@ -43,7 +87,6 @@ class Desktop:
         from windows_mcp.shell import ShellService
         from windows_mcp.window import WindowService
 
-        self.encoding = getpreferredencoding()
         self._input = InputService()
         self._process = ProcessService()
         self._screen = ScreenService()
@@ -84,8 +127,6 @@ class Desktop:
 
         # Run VDM desktop query in parallel with window enumeration
         # (VDM uses thread-local COM, safe to run from any thread)
-        from concurrent.futures import ThreadPoolExecutor
-
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="vdm") as vdm_pool:
             vdm_future = vdm_pool.submit(get_desktop_info)
 
@@ -120,8 +161,6 @@ class Desktop:
             )
         except Exception:
             logger.exception("Failed to capture tree state")
-            from windows_mcp.tree.views import TreeState
-
             tree_state = TreeState()
 
         if use_vision:
@@ -209,8 +248,6 @@ class Desktop:
 
     def _get_apps_from_shortcuts(self) -> dict[str, str]:
         """Scan Start Menu folders for .lnk shortcuts as a fallback for Get-StartApps."""
-        import glob
-
         apps = {}
         start_menu_paths = [
             os.path.join(
@@ -355,32 +392,11 @@ class Desktop:
     @staticmethod
     def _shell_execute_with_pid(path: str) -> int:
         """Launch a file via ShellExecuteExW, return PID (>0), 0 (no PID), or -1 (failure)."""
-        from ctypes import wintypes
-
-        class SHELLEXECUTEINFOW(ctypes.Structure):
-            _fields_ = [
-                ("cbSize", wintypes.DWORD),
-                ("fMask", ctypes.c_ulong),
-                ("hwnd", wintypes.HWND),
-                ("lpVerb", wintypes.LPCWSTR),
-                ("lpFile", wintypes.LPCWSTR),
-                ("lpParameters", wintypes.LPCWSTR),
-                ("lpDirectory", wintypes.LPCWSTR),
-                ("nShow", ctypes.c_int),
-                ("hInstApp", wintypes.HINSTANCE),
-                ("lpIDList", ctypes.c_void_p),
-                ("lpClass", wintypes.LPCWSTR),
-                ("hkeyClass", wintypes.HKEY),
-                ("dwHotKey", wintypes.DWORD),
-                ("hIcon", wintypes.HANDLE),
-                ("hProcess", wintypes.HANDLE),
-            ]
-
         SEE_MASK_NOCLOSEPROCESS = 0x00000040
         SW_SHOWNORMAL = 1
 
-        sei = SHELLEXECUTEINFOW()
-        sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
+        sei = _SHELLEXECUTEINFOW()
+        sei.cbSize = ctypes.sizeof(_SHELLEXECUTEINFOW)
         sei.fMask = SEE_MASK_NOCLOSEPROCESS
         sei.lpVerb = "open"
         sei.lpFile = path
@@ -423,18 +439,11 @@ class Desktop:
                 return (f"Application {name.title()} not found.", 1)
             target_handle = window.handle
 
-            if uia.IsIconic(target_handle):
-                uia.ShowWindow(target_handle, win32con.SW_RESTORE)
-                content = f"{window_name.title()} restored from Minimized state."
-            else:
-                self._window.bring_window_to_top(target_handle)
-                content = f"Switched to {window_name.title()} window."
+            self._window.bring_window_to_top(target_handle)
+            content = f"Switched to {window_name.title()} window."
             return content, 0
         except Exception as e:
             return (f"Error switching app: {str(e)}", 1)
-
-    def bring_window_to_top(self, target_handle: int) -> None:
-        self._window.bring_window_to_top(target_handle)
 
     def get_element_handle_from_label(self, label: int) -> uia.Control:
         with self._state_lock:
@@ -600,27 +609,6 @@ class Desktop:
 
     def send_notification(self, title: str, message: str) -> str:
         """Send a Windows balloon/toast notification via Shell_NotifyIconW."""
-        from ctypes import wintypes
-
-        class NOTIFYICONDATAW(ctypes.Structure):
-            _fields_ = [
-                ("cbSize", wintypes.DWORD),
-                ("hWnd", wintypes.HWND),
-                ("uID", wintypes.UINT),
-                ("uFlags", wintypes.UINT),
-                ("uCallbackMessage", wintypes.UINT),
-                ("hIcon", wintypes.HICON),
-                ("szTip", wintypes.WCHAR * 128),
-                ("dwState", wintypes.DWORD),
-                ("dwStateMask", wintypes.DWORD),
-                ("szInfo", wintypes.WCHAR * 256),
-                ("uVersion", wintypes.UINT),
-                ("szInfoTitle", wintypes.WCHAR * 64),
-                ("dwInfoFlags", wintypes.DWORD),
-                ("guidItem", ctypes.c_byte * 16),
-                ("hBalloonIcon", wintypes.HICON),
-            ]
-
         NIM_ADD = 0x00000000
         NIM_DELETE = 0x00000002
         NIF_ICON = 0x00000002
@@ -634,8 +622,8 @@ class Desktop:
         # Use the foreground window as notification anchor; fall back to desktop
         hwnd = user32.GetForegroundWindow() or user32.GetDesktopWindow()
 
-        nid = NOTIFYICONDATAW()
-        nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
+        nid = _NOTIFYICONDATAW()
+        nid.cbSize = ctypes.sizeof(_NOTIFYICONDATAW)
         nid.hWnd = hwnd
         nid.uID = 0xBEEF
         nid.uFlags = NIF_ICON | NIF_TIP | NIF_INFO
@@ -648,9 +636,7 @@ class Desktop:
         if shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid)):
             # Clean up the tray icon in a background thread after 10 seconds
             def _cleanup():
-                import time
-
-                time.sleep(10)
+                time_mod.sleep(10)
                 try:
                     shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(nid))
                 except Exception:

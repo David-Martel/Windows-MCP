@@ -28,6 +28,7 @@ import pytest
 import windows_mcp.__main__ as main_module
 from windows_mcp.desktop.views import DesktopState, Size, Status, Window
 from windows_mcp.tools import _state as _state_module
+from windows_mcp.tools._helpers import _coerce_bool, _validate_loc
 from windows_mcp.tree.views import (
     BoundingBox,
     Center,
@@ -44,92 +45,92 @@ class TestCoerceBool:
     """Tests for _coerce_bool() utility that normalises bool|str MCP params."""
 
     def test_true_bool_returns_true(self):
-        assert main_module._coerce_bool(True) is True
+        assert _coerce_bool(True) is True
 
     def test_false_bool_returns_false(self):
-        assert main_module._coerce_bool(False) is False
+        assert _coerce_bool(False) is False
 
     def test_string_true_returns_true(self):
-        assert main_module._coerce_bool("true") is True
+        assert _coerce_bool("true") is True
 
     def test_string_false_returns_false(self):
-        assert main_module._coerce_bool("false") is False
+        assert _coerce_bool("false") is False
 
     def test_string_TRUE_case_insensitive(self):
-        assert main_module._coerce_bool("TRUE") is True
+        assert _coerce_bool("TRUE") is True
 
     def test_string_True_mixed_case(self):
-        assert main_module._coerce_bool("True") is True
+        assert _coerce_bool("True") is True
 
     def test_string_FALSE_case_insensitive(self):
-        assert main_module._coerce_bool("FALSE") is False
+        assert _coerce_bool("FALSE") is False
 
     def test_empty_string_returns_false(self):
-        assert main_module._coerce_bool("") is False
+        assert _coerce_bool("") is False
 
     def test_arbitrary_string_returns_false(self):
-        assert main_module._coerce_bool("yes") is False
+        assert _coerce_bool("yes") is False
 
     def test_none_returns_default_false(self):
-        assert main_module._coerce_bool(None) is False
+        assert _coerce_bool(None) is False
 
     def test_none_returns_custom_default_true(self):
-        assert main_module._coerce_bool(None, default=True) is True
+        assert _coerce_bool(None, default=True) is True
 
     def test_int_returns_default(self):
-        assert main_module._coerce_bool(1) is False
+        assert _coerce_bool(1) is False
 
     def test_int_returns_custom_default(self):
-        assert main_module._coerce_bool(1, default=True) is True
+        assert _coerce_bool(1, default=True) is True
 
 
 class TestValidateLoc:
     """Tests for _validate_loc() coordinate validation helper."""
 
     def test_valid_int_list(self):
-        assert main_module._validate_loc([100, 200]) == (100, 200)
+        assert _validate_loc([100, 200]) == (100, 200)
 
     def test_valid_tuple(self):
-        assert main_module._validate_loc((50, 75)) == (50, 75)
+        assert _validate_loc((50, 75)) == (50, 75)
 
     def test_float_coerced_to_int(self):
         """MCP JSON may send floats; these are coerced to int."""
-        assert main_module._validate_loc([1.5, 2.7]) == (1, 2)
+        assert _validate_loc([1.5, 2.7]) == (1, 2)
 
     def test_string_numbers_coerced(self):
         """String-encoded numbers are coerced to int."""
-        assert main_module._validate_loc(["100", "200"]) == (100, 200)
+        assert _validate_loc(["100", "200"]) == (100, 200)
 
     def test_negative_coords(self):
-        assert main_module._validate_loc([-500, -300]) == (-500, -300)
+        assert _validate_loc([-500, -300]) == (-500, -300)
 
     def test_too_few_elements_raises(self):
         with pytest.raises(ValueError, match="must be \\[x, y\\]"):
-            main_module._validate_loc([100])
+            _validate_loc([100])
 
     def test_too_many_elements_raises(self):
         with pytest.raises(ValueError, match="must be \\[x, y\\]"):
-            main_module._validate_loc([1, 2, 3])
+            _validate_loc([1, 2, 3])
 
     def test_empty_list_raises(self):
         with pytest.raises(ValueError, match="must be \\[x, y\\]"):
-            main_module._validate_loc([])
+            _validate_loc([])
 
     def test_not_a_list_raises(self):
         with pytest.raises(ValueError, match="must be \\[x, y\\]"):
-            main_module._validate_loc("100,200")
+            _validate_loc("100,200")
 
     def test_non_numeric_values_raises(self):
         with pytest.raises(ValueError, match="must be numeric"):
-            main_module._validate_loc(["abc", "def"])
+            _validate_loc(["abc", "def"])
 
     def test_none_value_raises(self):
         with pytest.raises(ValueError, match="must be numeric"):
-            main_module._validate_loc([None, 200])
+            _validate_loc([None, 200])
 
     def test_custom_label_in_error(self):
         with pytest.raises(ValueError, match="locs\\[3\\]"):
-            main_module._validate_loc([1], label="locs[3]")
+            _validate_loc([1], label="locs[3]")
 
 
 # ---------------------------------------------------------------------------
