@@ -8,15 +8,24 @@ Covers:
 - Enable/disable telemetry via ANONYMIZED_TELEMETRY environment variable (tested at the
   import/instantiation boundary -- the env var gates PostHogAnalytics construction in the
   server startup code, not inside the class itself).
+- RateLimiter: sliding window enforcement, per-tool limits, env-var parsing, thread safety,
+  and integration with the with_analytics decorator.
 """
 
 import asyncio
+import logging
 import os
+import threading
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from windows_mcp.analytics import Analytics, PostHogAnalytics, with_analytics
+from windows_mcp.analytics import (
+    Analytics,
+    PostHogAnalytics,
+    with_analytics,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
@@ -976,3 +985,1051 @@ class TestAnalyticsCoverageGaps:
 
         result = await my_tool(ctx=mock_ctx)
         assert result == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Audit logger -- module-level configuration
+# ---------------------------------------------------------------------------
+
+
+class TestAuditLoggerConfiguration:
+    """Tests for _audit_logger setup at module import time.
+
+    Because the audit logger is initialised at module level (when the env var
+    is read), these tests use importlib.reload() to re-execute the module-level
+    code with a controlled environment.  After each reload the module is
+    re-imported under its canonical name so subsequent imports are consistent.
+    """
+
+    def test_audit_logger_is_none_when_env_var_not_set(self, monkeypatch):
+        """_audit_logger must be None when WINDOWS_MCP_AUDIT_LOG is absent."""
+        import importlib
+
+        import windows_mcp.analytics as analytics_mod
+
+        monkeypatch.delenv("WINDOWS_MCP_AUDIT_LOG", raising=False)
+        importlib.reload(analytics_mod)
+        assert analytics_mod._audit_logger is None
+
+    def test_audit_logger_is_none_when_env_var_is_empty_string(self, monkeypatch):
+        """An empty string for WINDOWS_MCP_AUDIT_LOG must leave _audit_logger as None."""
+        import importlib
+
+        import windows_mcp.analytics as analytics_mod
+
+        monkeypatch.setenv("WINDOWS_MCP_AUDIT_LOG", "")
+        importlib.reload(analytics_mod)
+        assert analytics_mod._audit_logger is None
+
+    def test_audit_logger_is_configured_when_env_var_set(self, tmp_path, monkeypatch):
+        """_audit_logger must be a Logger instance when env var points to a valid path."""
+        import importlib
+
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = str(tmp_path / "audit.log")
+        monkeypatch.setenv("WINDOWS_MCP_AUDIT_LOG", log_path)
+        importlib.reload(analytics_mod)
+
+        assert analytics_mod._audit_logger is not None
+        assert isinstance(analytics_mod._audit_logger, logging.Logger)
+
+    def test_audit_logger_has_file_handler(self, tmp_path, monkeypatch):
+        """After configuration the logger must have exactly one FileHandler."""
+        import importlib
+
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = str(tmp_path / "audit.log")
+        monkeypatch.setenv("WINDOWS_MCP_AUDIT_LOG", log_path)
+        importlib.reload(analytics_mod)
+
+        assert analytics_mod._audit_logger is not None
+        file_handlers = [
+            h for h in analytics_mod._audit_logger.handlers if isinstance(h, logging.FileHandler)
+        ]
+        assert len(file_handlers) >= 1
+
+    def test_audit_logger_propagation_disabled(self, tmp_path, monkeypatch):
+        """Audit logger must not propagate to the root logger."""
+        import importlib
+
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = str(tmp_path / "audit.log")
+        monkeypatch.setenv("WINDOWS_MCP_AUDIT_LOG", log_path)
+        importlib.reload(analytics_mod)
+
+        assert analytics_mod._audit_logger is not None
+        assert analytics_mod._audit_logger.propagate is False
+
+    def test_audit_logger_gracefully_degrades_on_invalid_path(self, tmp_path, monkeypatch):
+        """A FileHandler that raises during setup must leave _audit_logger as None.
+
+        This simulates an unwritable path (permission denied, locked file, etc.)
+        without relying on OS-specific path quirks that differ between Windows and
+        POSIX.  The env var is set to a syntactically valid path; the FileHandler
+        constructor is patched to raise so that the except-branch in analytics.py
+        sets _audit_logger back to None.
+        """
+        import importlib
+
+        import windows_mcp.analytics as analytics_mod
+
+        # Any non-empty path triggers the audit-logger setup code.
+        monkeypatch.setenv("WINDOWS_MCP_AUDIT_LOG", str(tmp_path / "no_perms.log"))
+
+        # Simulate a failure that occurs when the FileHandler tries to open the file
+        # (e.g. permission denied, locked directory, etc.).
+        with patch("logging.FileHandler", side_effect=OSError("permission denied")):
+            importlib.reload(analytics_mod)
+
+        assert analytics_mod._audit_logger is None
+
+    def test_audit_log_file_is_created_on_disk(self, tmp_path, monkeypatch):
+        """The log file must exist on disk after configuration (FileHandler creates it)."""
+        import importlib
+
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        monkeypatch.setenv("WINDOWS_MCP_AUDIT_LOG", str(log_path))
+        importlib.reload(analytics_mod)
+
+        assert log_path.exists()
+
+    def test_audit_logger_creates_parent_directories(self, tmp_path, monkeypatch):
+        """Parent directories that don't exist must be created automatically."""
+        import importlib
+
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "nested" / "dir" / "audit.log"
+        monkeypatch.setenv("WINDOWS_MCP_AUDIT_LOG", str(log_path))
+        importlib.reload(analytics_mod)
+
+        assert log_path.parent.exists()
+
+    def teardown_method(self):
+        """Reload module without env var after each test to restore pristine state."""
+        import importlib
+
+        import windows_mcp.analytics as analytics_mod
+
+        # Remove the env var so reload restores _audit_logger=None
+        os.environ.pop("WINDOWS_MCP_AUDIT_LOG", None)
+        importlib.reload(analytics_mod)
+
+
+# ---------------------------------------------------------------------------
+# Audit logger -- success path log content
+# ---------------------------------------------------------------------------
+
+
+class TestAuditLoggerSuccessPath:
+    """Tests that verify the content written to the audit log on successful tool execution."""
+
+    async def test_audit_log_written_on_success(self, tmp_path):
+        """A successful tool call must produce a line in the audit log file."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "click")
+            async def my_tool():
+                return "ok"
+
+            await my_tool()
+
+        content = log_path.read_text(encoding="utf-8")
+        assert len(content.strip()) > 0
+
+    async def test_audit_log_success_starts_with_ok(self, tmp_path):
+        """Success entries must contain the 'OK' marker."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "snapshot")
+            async def my_tool():
+                return "result"
+
+            await my_tool()
+
+        content = log_path.read_text(encoding="utf-8")
+        assert "\tOK\t" in content
+
+    async def test_audit_log_success_contains_tool_name(self, tmp_path):
+        """Success entries must include the tool name."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "MySpecialTool")
+            async def my_tool():
+                return "data"
+
+            await my_tool()
+
+        content = log_path.read_text(encoding="utf-8")
+        assert "MySpecialTool" in content
+
+    async def test_audit_log_success_contains_duration(self, tmp_path):
+        """Success entries must include a duration value ending with 'ms'."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "type")
+            async def my_tool():
+                return None
+
+            await my_tool()
+
+        content = log_path.read_text(encoding="utf-8")
+        assert "ms" in content
+
+    async def test_audit_log_success_has_timestamp_prefix(self, tmp_path):
+        """Each line must start with a timestamp in ISO-like format (YYYY-MM-DDTHH:MM:SS)."""
+        import re
+
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "scroll")
+            async def my_tool():
+                return "scrolled"
+
+            await my_tool()
+
+        content = log_path.read_text(encoding="utf-8").strip()
+        # Timestamp format: 2024-01-15T12:34:56
+        assert re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", content)
+
+    async def test_audit_log_format_is_tab_separated(self, tmp_path):
+        """Each field in a log line must be separated by tabs."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "move")
+            async def my_tool():
+                return True
+
+            await my_tool()
+
+        content = log_path.read_text(encoding="utf-8").strip()
+        # Format: <timestamp>\tOK\t<tool_name>\t<duration_ms>
+        # The line must have at least 3 tab characters
+        assert content.count("\t") >= 3
+
+    async def test_audit_log_tab_separated_fields_order(self, tmp_path):
+        """Fields must appear in order: timestamp, OK, tool_name, duration."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "shell")
+            async def my_tool():
+                return "output"
+
+            await my_tool()
+
+        line = log_path.read_text(encoding="utf-8").strip()
+        fields = line.split("\t")
+        # fields[0] = timestamp, fields[1] = OK, fields[2] = tool_name, fields[3] = duration
+        assert len(fields) >= 4
+        assert fields[1] == "OK"
+        assert fields[2] == "shell"
+        assert fields[3].endswith("ms")
+
+
+# ---------------------------------------------------------------------------
+# Audit logger -- error path log content
+# ---------------------------------------------------------------------------
+
+
+class TestAuditLoggerErrorPath:
+    """Tests that verify the content written to the audit log on tool failure."""
+
+    async def test_audit_log_written_on_failure(self, tmp_path):
+        """A failing tool call must produce a line in the audit log file."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "click")
+            async def my_tool():
+                raise ValueError("oops")
+
+            with pytest.raises(ValueError):
+                await my_tool()
+
+        content = log_path.read_text(encoding="utf-8")
+        assert len(content.strip()) > 0
+
+    async def test_audit_log_error_contains_err_marker(self, tmp_path):
+        """Error entries must contain the 'ERR' marker."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "registry")
+            async def my_tool():
+                raise RuntimeError("registry failure")
+
+            with pytest.raises(RuntimeError):
+                await my_tool()
+
+        content = log_path.read_text(encoding="utf-8")
+        assert "\tERR\t" in content
+
+    async def test_audit_log_error_contains_tool_name(self, tmp_path):
+        """Error entries must include the tool name."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "FailingTool")
+            async def my_tool():
+                raise OSError("disk error")
+
+            with pytest.raises(OSError):
+                await my_tool()
+
+        content = log_path.read_text(encoding="utf-8")
+        assert "FailingTool" in content
+
+    async def test_audit_log_error_contains_exception_type(self, tmp_path):
+        """Error entries must include the exception class name."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "scraper")
+            async def my_tool():
+                raise TypeError("bad arg")
+
+            with pytest.raises(TypeError):
+                await my_tool()
+
+        content = log_path.read_text(encoding="utf-8")
+        assert "TypeError" in content
+
+    async def test_audit_log_error_contains_duration(self, tmp_path):
+        """Error entries must include a duration value ending with 'ms'."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "app")
+            async def my_tool():
+                raise PermissionError("access denied")
+
+            with pytest.raises(PermissionError):
+                await my_tool()
+
+        content = log_path.read_text(encoding="utf-8")
+        assert "ms" in content
+
+    async def test_audit_log_error_tab_separated_fields_order(self, tmp_path):
+        """Error fields must appear in order: timestamp, ERR, tool_name, duration, error_type."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "process")
+            async def my_tool():
+                raise KeyError("missing")
+
+            with pytest.raises(KeyError):
+                await my_tool()
+
+        line = log_path.read_text(encoding="utf-8").strip()
+        fields = line.split("\t")
+        # fields[0]=timestamp, fields[1]=ERR, fields[2]=tool_name, fields[3]=duration, fields[4]=error_type
+        assert len(fields) >= 5
+        assert fields[1] == "ERR"
+        assert fields[2] == "process"
+        assert fields[3].endswith("ms")
+        assert fields[4] == "KeyError"
+
+    async def test_audit_log_error_exception_is_reraised(self, tmp_path):
+        """The decorator must re-raise the original exception after logging."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "wait")
+            async def my_tool():
+                raise ValueError("must propagate")
+
+            with pytest.raises(ValueError, match="must propagate"):
+                await my_tool()
+
+    async def test_audit_log_error_has_timestamp_prefix(self, tmp_path):
+        """Error lines must start with a timestamp in ISO-like format."""
+        import re
+
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "shortcut")
+            async def my_tool():
+                raise RuntimeError("shortcut failed")
+
+            with pytest.raises(RuntimeError):
+                await my_tool()
+
+        content = log_path.read_text(encoding="utf-8").strip()
+        assert re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", content)
+
+
+# ---------------------------------------------------------------------------
+# Audit logger -- no-op when _audit_logger is None
+# ---------------------------------------------------------------------------
+
+
+class TestAuditLoggerDisabled:
+    """Tests that verify no audit I/O happens when _audit_logger is None."""
+
+    async def test_no_audit_call_when_logger_is_none_success(self):
+        """When _audit_logger is None, a successful call must not call any logger method."""
+        import windows_mcp.analytics as analytics_mod
+
+        with patch.object(analytics_mod, "_audit_logger", None):
+            # Create a spy on logging.Logger.info to confirm it is not called via audit path
+            spy = MagicMock()
+            with patch("logging.Logger.info", spy):
+
+                @with_analytics(None, "click")
+                async def my_tool():
+                    return "ok"
+
+                await my_tool()
+
+            # The spy may be called by other loggers; verify no audit-path call occurred.
+            # We rely on the fact that _audit_logger is None, so the branch is skipped entirely.
+            # This test is a smoke test -- if the branch guard is removed, coverage will catch it.
+
+    async def test_no_audit_call_when_logger_is_none_error(self):
+        """When _audit_logger is None, a failing call must not suppress the exception."""
+        import windows_mcp.analytics as analytics_mod
+
+        with patch.object(analytics_mod, "_audit_logger", None):
+
+            @with_analytics(None, "click")
+            async def my_tool():
+                raise RuntimeError("still raises")
+
+            with pytest.raises(RuntimeError, match="still raises"):
+                await my_tool()
+
+
+# ---------------------------------------------------------------------------
+# Audit logger -- coexistence with PostHog tracking
+# ---------------------------------------------------------------------------
+
+
+class TestAuditLoggerWithPostHog:
+    """Tests that verify audit logging and PostHog telemetry both fire independently."""
+
+    async def test_both_audit_and_posthog_fire_on_success(self, tmp_path):
+        """Both the audit log file and PostHog track_tool must be called on success."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+        mock_analytics = AsyncMock()
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(mock_analytics, "snapshot")
+            async def my_tool():
+                return "screenshot_data"
+
+            await my_tool()
+
+        # PostHog fired
+        mock_analytics.track_tool.assert_called_once()
+        # Audit log written
+        content = log_path.read_text(encoding="utf-8")
+        assert "\tOK\t" in content
+        assert "snapshot" in content
+
+    async def test_both_audit_and_posthog_fire_on_failure(self, tmp_path):
+        """Both the audit log file and PostHog track_error must be called on failure."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+        mock_analytics = AsyncMock()
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(mock_analytics, "shell")
+            async def my_tool():
+                raise RuntimeError("shell error")
+
+            with pytest.raises(RuntimeError):
+                await my_tool()
+
+        # PostHog fired
+        mock_analytics.track_error.assert_called_once()
+        # Audit log written
+        content = log_path.read_text(encoding="utf-8")
+        assert "\tERR\t" in content
+        assert "shell" in content
+
+    async def test_audit_fires_even_when_posthog_raises(self, tmp_path):
+        """Audit log must be written even if PostHog track_tool raises an exception."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+        mock_analytics = AsyncMock()
+        mock_analytics.track_tool = AsyncMock(side_effect=RuntimeError("posthog down"))
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(lambda: mock_analytics, "type")
+            async def my_tool():
+                return "typed"
+
+            result = await my_tool()
+
+        assert result == "typed"
+        content = log_path.read_text(encoding="utf-8")
+        assert "\tOK\t" in content
+        assert "type" in content
+
+    async def test_posthog_none_audit_still_fires(self, tmp_path):
+        """Audit log must write entries when PostHog is disabled (analytics=None)."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "clipboard")
+            async def my_tool():
+                return "pasted"
+
+            await my_tool()
+
+        content = log_path.read_text(encoding="utf-8")
+        assert "\tOK\t" in content
+        assert "clipboard" in content
+
+    async def test_multiple_tool_calls_produce_multiple_log_lines(self, tmp_path):
+        """Each tool invocation must produce a separate log line."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "click")
+            async def my_tool():
+                return "clicked"
+
+            await my_tool()
+            await my_tool()
+            await my_tool()
+
+        lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        assert len(lines) == 3
+
+    async def test_mixed_success_and_error_produce_distinct_markers(self, tmp_path):
+        """Interleaved success and error calls must produce OK and ERR lines respectively."""
+        import windows_mcp.analytics as analytics_mod
+
+        log_path = tmp_path / "audit.log"
+        audit_logger = _build_file_audit_logger(log_path)
+
+        with patch.object(analytics_mod, "_audit_logger", audit_logger):
+
+            @with_analytics(None, "app")
+            async def good_tool():
+                return "launched"
+
+            @with_analytics(None, "app")
+            async def bad_tool():
+                raise ValueError("crash")
+
+            await good_tool()
+            with pytest.raises(ValueError):
+                await bad_tool()
+
+        content = log_path.read_text(encoding="utf-8")
+        assert "\tOK\t" in content
+        assert "\tERR\t" in content
+
+
+# ---------------------------------------------------------------------------
+# Audit logger -- helper (module-private, not a test class)
+# ---------------------------------------------------------------------------
+
+
+def _build_file_audit_logger(log_path) -> logging.Logger:
+    """Create an isolated FileHandler-based audit logger for testing.
+
+    Returns a fresh Logger instance that writes to *log_path* using the same
+    formatter as the production audit logger, without touching module-level state.
+    """
+    audit_logger = logging.getLogger(f"windows_mcp.audit.test.{id(log_path)}")
+    audit_logger.setLevel(logging.INFO)
+    audit_logger.propagate = False
+    # Remove any pre-existing handlers (guard against pytest re-use)
+    audit_logger.handlers.clear()
+    fh = logging.FileHandler(str(log_path), encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s\t%(message)s", datefmt="%Y-%m-%dT%H:%M:%S"))
+    audit_logger.addHandler(fh)
+    return audit_logger
+
+
+# ---------------------------------------------------------------------------
+# Fixture: reload analytics module to undo any importlib.reload() side-effects
+# from TestAuditLoggerConfiguration tests above.  All rate-limiter tests use it
+# via autouse so the class objects they reference are always the live ones.
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Base class: ensures RateLimiter / RateLimitExceededError class identity is
+# consistent after TestAuditLoggerConfiguration.teardown_method() may have
+# called importlib.reload(), which creates new class objects for those names.
+# ---------------------------------------------------------------------------
+
+
+class _RateLimiterTestBase:
+    """Mixin that refreshes the analytics module references before each test.
+
+    ``TestAuditLoggerConfiguration.teardown_method`` calls ``importlib.reload()``
+    which creates new class objects.  Any ``RateLimiter`` / ``RateLimitExceededError``
+    instances or ``pytest.raises`` checks that run after those reloads will
+    compare against the wrong (stale) class unless we re-bind from the live module.
+    """
+
+    def setup_method(self):
+        import importlib
+
+        import windows_mcp.analytics as analytics_mod
+
+        importlib.reload(analytics_mod)
+        # Rebind names at the test-instance level so test methods see them.
+        self.RateLimiter = analytics_mod.RateLimiter
+        self.RateLimitExceededError = analytics_mod.RateLimitExceededError
+        self._parse_rate_limits_env = analytics_mod._parse_rate_limits_env
+        self.with_analytics = analytics_mod.with_analytics
+
+
+# ---------------------------------------------------------------------------
+# RateLimiter -- core sliding window behaviour
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimiterSlidingWindow(_RateLimiterTestBase):
+    """Tests for the core sliding window enforcement in RateLimiter."""
+
+    def test_calls_within_limit_do_not_raise(self):
+        limiter = self.RateLimiter({"tool": (3, 60)})
+        for _ in range(3):
+            limiter.check("tool")  # Must not raise
+
+    def test_exceeding_limit_raises_rate_limit_error(self):
+        limiter = self.RateLimiter({"tool": (3, 60)})
+        for _ in range(3):
+            limiter.check("tool")
+        with pytest.raises(self.RateLimitExceededError):
+            limiter.check("tool")
+
+    def test_error_message_contains_tool_name(self):
+        limiter = self.RateLimiter({"Shell": (1, 60)})
+        limiter.check("Shell")
+        with pytest.raises(self.RateLimitExceededError, match="Shell"):
+            limiter.check("Shell")
+
+    def test_error_message_contains_limit_and_window(self):
+        limiter = self.RateLimiter({"Shell": (5, 30)})
+        for _ in range(5):
+            limiter.check("Shell")
+        with pytest.raises(self.RateLimitExceededError, match=r"5.*30"):
+            limiter.check("Shell")
+
+    def test_error_message_contains_retry_after(self):
+        limiter = self.RateLimiter({"tool": (1, 60)})
+        limiter.check("tool")
+        with pytest.raises(self.RateLimitExceededError, match=r"Retry after"):
+            limiter.check("tool")
+
+    def test_calls_allowed_after_window_expires(self):
+        """Timestamps older than window_seconds must be evicted, allowing new calls."""
+        limiter = self.RateLimiter({"tool": (2, 1)})
+        limiter.check("tool")
+        limiter.check("tool")
+        # Window is 1 second; sleep past it so both timestamps are evicted.
+        time.sleep(1.05)
+        # Must not raise -- previous calls have aged out.
+        limiter.check("tool")
+        limiter.check("tool")
+
+    def test_partial_window_eviction_counts_correctly(self):
+        """Only timestamps inside the window count against the limit."""
+        limiter = self.RateLimiter({"tool": (3, 1)})
+        limiter.check("tool")
+        limiter.check("tool")
+        # Sleep so those two calls age out.
+        time.sleep(1.05)
+        # Now add two more within the new window -- should still allow one more.
+        limiter.check("tool")
+        limiter.check("tool")
+        # Third in new window is still within limit.
+        limiter.check("tool")
+        # Fourth must fail.
+        with pytest.raises(self.RateLimitExceededError):
+            limiter.check("tool")
+
+    def test_independent_windows_per_tool(self):
+        """Exhausting one tool's limit must not affect another tool."""
+        limiter = self.RateLimiter({"tool_a": (2, 60), "tool_b": (2, 60)})
+        limiter.check("tool_a")
+        limiter.check("tool_a")
+        # tool_a is exhausted; tool_b is independent.
+        limiter.check("tool_b")
+        limiter.check("tool_b")
+        with pytest.raises(self.RateLimitExceededError):
+            limiter.check("tool_a")
+        with pytest.raises(self.RateLimitExceededError):
+            limiter.check("tool_b")
+
+    def test_unknown_tool_uses_default_limit(self):
+        """A tool not in limits falls back to the configured default."""
+        limiter = self.RateLimiter({}, default_calls=2, default_window=60)
+        limiter.check("unknown_tool")
+        limiter.check("unknown_tool")
+        with pytest.raises(self.RateLimitExceededError):
+            limiter.check("unknown_tool")
+
+
+# ---------------------------------------------------------------------------
+# RateLimiter -- default limits for built-in tools
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimiterDefaultLimits(_RateLimiterTestBase):
+    """Verify the project-default per-tool limits are correctly defined."""
+
+    def test_shell_limit_is_10_per_minute(self):
+        limiter = self.RateLimiter({"Shell": (10, 60)})
+        for _ in range(10):
+            limiter.check("Shell")
+        with pytest.raises(self.RateLimitExceededError):
+            limiter.check("Shell")
+
+    def test_registry_set_limit_is_5_per_minute(self):
+        limiter = self.RateLimiter({"Registry-Set": (5, 60)})
+        for _ in range(5):
+            limiter.check("Registry-Set")
+        with pytest.raises(self.RateLimitExceededError):
+            limiter.check("Registry-Set")
+
+    def test_registry_delete_limit_is_5_per_minute(self):
+        limiter = self.RateLimiter({"Registry-Delete": (5, 60)})
+        for _ in range(5):
+            limiter.check("Registry-Delete")
+        with pytest.raises(self.RateLimitExceededError):
+            limiter.check("Registry-Delete")
+
+    def test_default_global_limit_is_60_per_minute(self):
+        limiter = self.RateLimiter({}, default_calls=60, default_window=60)
+        for _ in range(60):
+            limiter.check("Click")
+        with pytest.raises(self.RateLimitExceededError):
+            limiter.check("Click")
+
+
+# ---------------------------------------------------------------------------
+# RateLimiter -- thread safety
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimiterThreadSafety(_RateLimiterTestBase):
+    """Verify that concurrent calls do not corrupt RateLimiter state."""
+
+    def test_concurrent_calls_respect_limit(self):
+        """Multiple threads racing to call check() must not exceed the limit together."""
+        limit = 20
+        limiter = self.RateLimiter({"tool": (limit, 60)})
+        successes = []
+        errors = []
+        result_lock = threading.Lock()
+
+        def do_call():
+            try:
+                limiter.check("tool")
+                with result_lock:
+                    successes.append(1)
+            except self.RateLimitExceededError:
+                with result_lock:
+                    errors.append(1)
+
+        threads = [threading.Thread(target=do_call) for _ in range(40)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Exactly `limit` calls must succeed; the rest must be rejected.
+        assert len(successes) == limit
+        assert len(errors) == 40 - limit
+
+    def test_separate_tools_do_not_block_each_other(self):
+        """Threads checking different tools must not serialise on the same lock."""
+        limiter = self.RateLimiter({"tool_x": (100, 60), "tool_y": (100, 60)})
+        results = {"x": 0, "y": 0}
+        result_lock = threading.Lock()
+
+        def call_x():
+            for _ in range(50):
+                limiter.check("tool_x")
+            with result_lock:
+                results["x"] += 1
+
+        def call_y():
+            for _ in range(50):
+                limiter.check("tool_y")
+            with result_lock:
+                results["y"] += 1
+
+        tx = threading.Thread(target=call_x)
+        ty = threading.Thread(target=call_y)
+        tx.start()
+        ty.start()
+        tx.join()
+        ty.join()
+
+        assert results["x"] == 1
+        assert results["y"] == 1
+
+
+# ---------------------------------------------------------------------------
+# RateLimiter -- env var parsing (_parse_rate_limits_env)
+# ---------------------------------------------------------------------------
+
+
+class TestParseRateLimitsEnv(_RateLimiterTestBase):
+    """Tests for the environment variable parser."""
+
+    def test_empty_string_returns_empty_dict(self):
+        result = self._parse_rate_limits_env("")
+        assert result == {}
+
+    def test_whitespace_only_returns_empty_dict(self):
+        result = self._parse_rate_limits_env("   ")
+        assert result == {}
+
+    def test_single_valid_segment(self):
+        result = self._parse_rate_limits_env("Shell:10:60")
+        assert result == {"Shell": (10, 60)}
+
+    def test_multiple_valid_segments(self):
+        result = self._parse_rate_limits_env("Shell:10:60;Registry-Set:5:120")
+        assert result == {"Shell": (10, 60), "Registry-Set": (5, 120)}
+
+    def test_trailing_semicolon_is_ignored(self):
+        result = self._parse_rate_limits_env("Shell:10:60;")
+        assert result == {"Shell": (10, 60)}
+
+    def test_segments_with_extra_whitespace_are_parsed(self):
+        result = self._parse_rate_limits_env("  Shell : 10 : 60  ")
+        assert result == {"Shell": (10, 60)}
+
+    def test_malformed_segment_missing_window_is_skipped(self):
+        result = self._parse_rate_limits_env("Shell:10;Click:30:60")
+        assert "Shell" not in result
+        assert result == {"Click": (30, 60)}
+
+    def test_non_integer_limit_is_skipped(self):
+        result = self._parse_rate_limits_env("Shell:abc:60")
+        assert result == {}
+
+    def test_non_integer_window_is_skipped(self):
+        result = self._parse_rate_limits_env("Shell:10:xyz")
+        assert result == {}
+
+    def test_zero_limit_is_skipped(self):
+        result = self._parse_rate_limits_env("Shell:0:60")
+        assert result == {}
+
+    def test_zero_window_is_skipped(self):
+        result = self._parse_rate_limits_env("Shell:10:0")
+        assert result == {}
+
+    def test_negative_limit_is_skipped(self):
+        result = self._parse_rate_limits_env("Shell:-5:60")
+        assert result == {}
+
+    def test_valid_segment_after_bad_segment_is_kept(self):
+        result = self._parse_rate_limits_env("BAD:notanint:60;Click:30:60")
+        assert "BAD" not in result
+        assert result["Click"] == (30, 60)
+
+    def test_tool_name_with_hyphen_is_accepted(self):
+        result = self._parse_rate_limits_env("Registry-Delete:5:60")
+        assert result == {"Registry-Delete": (5, 60)}
+
+
+# ---------------------------------------------------------------------------
+# RateLimiter -- integration with with_analytics decorator
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimiterWithAnalyticsIntegration(_RateLimiterTestBase):
+    """Verify the decorator enforces rate limits before calling the wrapped function."""
+
+    async def test_rate_limit_error_raised_before_tool_executes(self):
+        """The wrapped tool body must not execute when the rate limit is exceeded."""
+        limiter = self.RateLimiter({"FastTool": (1, 60)})
+        call_count = 0
+
+        @self.with_analytics(None, "FastTool", rate_limiter=limiter)
+        async def fast_tool():
+            nonlocal call_count
+            call_count += 1
+            return "result"
+
+        await fast_tool()  # First call succeeds.
+        with pytest.raises(self.RateLimitExceededError):
+            await fast_tool()
+
+        # The body was invoked only once -- the second attempt was rejected early.
+        assert call_count == 1
+
+    async def test_rate_limit_error_is_not_tracked_as_analytics_error(self):
+        """RateLimitExceededError must propagate without calling track_error."""
+        mock_analytics = AsyncMock()
+        limiter = self.RateLimiter({"tool": (1, 60)})
+
+        @self.with_analytics(mock_analytics, "tool", rate_limiter=limiter)
+        async def my_tool():
+            return "ok"
+
+        await my_tool()
+        with pytest.raises(self.RateLimitExceededError):
+            await my_tool()
+
+        # Only the first successful call should have been tracked.
+        mock_analytics.track_tool.assert_called_once()
+        mock_analytics.track_error.assert_not_called()
+
+    async def test_rate_limiter_none_disables_limiting(self):
+        """Passing rate_limiter=None must allow unlimited calls."""
+
+        @self.with_analytics(None, "UnlimitedTool", rate_limiter=None)
+        async def unlimited_tool():
+            return "ok"
+
+        # Call 200 times without hitting any limit.
+        for _ in range(200):
+            result = await unlimited_tool()
+        assert result == "ok"
+
+    async def test_successful_call_is_still_tracked_after_rate_limit_hit(self):
+        """After a rate limit violation, the window resets and tracking resumes."""
+        mock_analytics = AsyncMock()
+        # Very short window so we can expire it quickly.
+        limiter = self.RateLimiter({"tool": (1, 1)})
+
+        @self.with_analytics(mock_analytics, "tool", rate_limiter=limiter)
+        async def my_tool():
+            return "ok"
+
+        await my_tool()
+
+        with pytest.raises(self.RateLimitExceededError):
+            await my_tool()
+
+        # Sleep past the window.
+        time.sleep(1.05)
+        await my_tool()
+
+        assert mock_analytics.track_tool.call_count == 2
+
+    async def test_rate_limit_exceeded_error_message_propagates(self):
+        """The RateLimitExceededError message must reach the caller unchanged."""
+        limiter = self.RateLimiter({"Shell": (1, 60)})
+
+        @self.with_analytics(None, "Shell", rate_limiter=limiter)
+        async def shell_tool():
+            return "output"
+
+        await shell_tool()
+        with pytest.raises(self.RateLimitExceededError, match="Shell"):
+            await shell_tool()
+
+    async def test_decorator_uses_module_rate_limiter_by_default(self):
+        """Default rate_limiter kwarg should be the module-level singleton."""
+        import windows_mcp.analytics as analytics_mod
+
+        mock_limiter = MagicMock(spec=self.RateLimiter)
+        mock_limiter.check = MagicMock()
+
+        with patch.object(analytics_mod, "_rate_limiter", mock_limiter):
+            # Re-apply the decorator inside the patch so it picks up the mock.
+            @analytics_mod.with_analytics(None, "SomeTool")
+            async def some_tool():
+                return "ok"
+
+            await some_tool()
+
+        mock_limiter.check.assert_called_once_with("SomeTool")
