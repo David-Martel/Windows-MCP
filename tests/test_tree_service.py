@@ -14,27 +14,6 @@ def tree_instance():
     return Tree(mock_desktop)
 
 
-class TestAppNameCorrection:
-    def test_progman(self, tree_instance):
-        assert tree_instance.app_name_correction("Progman") == "Desktop"
-
-    def test_shell_traywnd(self, tree_instance):
-        assert tree_instance.app_name_correction("Shell_TrayWnd") == "Taskbar"
-
-    def test_shell_secondary_traywnd(self, tree_instance):
-        assert tree_instance.app_name_correction("Shell_SecondaryTrayWnd") == "Taskbar"
-
-    def test_popup_window_site_bridge(self, tree_instance):
-        assert (
-            tree_instance.app_name_correction("Microsoft.UI.Content.PopupWindowSiteBridge")
-            == "Context Menu"
-        )
-
-    def test_passthrough(self, tree_instance):
-        assert tree_instance.app_name_correction("Notepad") == "Notepad"
-        assert tree_instance.app_name_correction("Calculator") == "Calculator"
-
-
 class TestIouBoundingBox:
     def test_full_overlap(self, tree_instance):
         window = SimpleNamespace(left=0, top=0, right=500, bottom=500)

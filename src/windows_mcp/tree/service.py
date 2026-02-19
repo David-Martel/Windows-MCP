@@ -19,7 +19,7 @@ from windows_mcp.tree.config import (
     STRUCTURAL_CONTROL_TYPE_NAMES,
     THREAD_MAX_RETRIES,
 )
-from windows_mcp.tree.utils import random_point_within_bounding_box
+from windows_mcp.tree.utils import app_name_correction, random_point_within_bounding_box
 from windows_mcp.tree.views import (
     BoundingBox,
     Center,
@@ -328,7 +328,7 @@ class Tree:
                 for snapshot in rust_tree:
                     rect = snapshot.get("bounding_rect", [0, 0, 0, 0])
                     wname = snapshot.get("name", "").strip()
-                    wname = self.app_name_correction(wname)
+                    wname = app_name_correction(wname)
                     self._classify_rust_tree(
                         snapshot, wname, rect, interactive_nodes, scrollable_nodes
                     )
@@ -893,17 +893,6 @@ class Tree:
             logger.error("Error in tree_traversal: %s", e, exc_info=True)
             raise
 
-    def app_name_correction(self, app_name: str) -> str:
-        match app_name:
-            case "Progman":
-                return "Desktop"
-            case "Shell_TrayWnd" | "Shell_SecondaryTrayWnd":
-                return "Taskbar"
-            case "Microsoft.UI.Content.PopupWindowSiteBridge":
-                return "Context Menu"
-            case _:
-                return app_name
-
     def get_nodes(
         self, handle: int, is_browser: bool = False, use_dom: bool = False
     ) -> tuple[
@@ -958,7 +947,7 @@ class Tree:
                 window_name = node.CachedName.strip()
             else:
                 window_name = node.Name.strip()
-            window_name = self.app_name_correction(window_name)
+            window_name = app_name_correction(window_name)
 
             # Thread-local DOM context (avoids cross-thread COM object sharing)
             dom_context: dict = {}
