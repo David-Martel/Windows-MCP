@@ -73,7 +73,7 @@
 
 ## P5 -- Code Quality
 
-- [ ] **[Q3] Remove wildcard imports in controls.py** -- Replace `from .enums import *` with explicit imports.
+- [x] **[Q3] Remove wildcard imports in controls.py** -- Replaced 4 wildcard imports with ~90 explicit named imports from constants, core, enums, patterns.
 - [x] **[Q4] Remove dead config** -- `STRUCTURAL_CONTROL_TYPE_NAMES` is actually used in tree/service.py -- not dead. Verified, no action needed.
 - [x] **[Q5] Fix broken traceback in analytics.py:107** -- Now uses `traceback.format_exception()` for full stack trace string.
 - [x] **[Q7] Fix resource leaks** -- Fixed HTTP response leak in `scrape()` (close intermediate redirect responses and final response in `finally` block). `auto_minimize` handle guard already present. COM init guard deferred (comtypes handles internally).
@@ -120,7 +120,7 @@
 - [x] **Rust system_info** -- Wired into `Desktop.get_system_info()` as fast-path (avoids 1s blocking `cpu_percent`). Falls back to psutil.
 - [x] **Replace PowerShell registry with `winreg`** -- All 4 registry methods (`registry_get/set/delete/list`) rewritten to use `winreg` stdlib. 200-500ms saved per operation.
 - [x] **Replace PowerShell sysinfo with Python stdlib** -- `get_windows_version()` uses `winreg`, `get_default_language()` uses `locale.getlocale()`, `get_user_account_type()` uses `winreg`.
-- [ ] **Eliminate remaining PowerShell** -- Toast notifications via WinRT COM, app launch via `CreateProcessW`, culture via `GetUserDefaultLocaleName`.
+- [x] **Eliminate remaining PowerShell** -- `launch_app` uses `ShellExecuteExW`/`os.startfile`, `send_notification` uses `Shell_NotifyIconW`, `get_apps_from_start_menu` uses shortcut scan as primary path. Only `Shell` tool and `Get-StartApps` fallback remain (intentional).
 
 ---
 
