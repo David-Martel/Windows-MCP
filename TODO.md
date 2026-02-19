@@ -91,7 +91,7 @@
 *Source: Phase 2 comparative analysis (rust-pro, backend-architect, performance-engineer agents)*
 
 - [x] **Replace `Wait(duration)` with event-driven `WaitFor`** -- Done. `WaitFor(mode="window"|"element", name, timeout)` in `tools/state_tools.py`. Polls `get_state()` with 0.5s interval, timeout capped at 300s.
-- [ ] **Add `ValuePattern.SetValue()` as primary text input** -- In `type()` method, attempt `ValuePattern.SetValue(text)` before falling back to `pg.typewrite()`. Eliminates 20ms/char typing for all UIA-compliant text fields.
+- [x] **Add `ValuePattern.SetValue()` as primary text input** -- `_try_value_pattern()` in `InputService.type()` attempts `ControlFromPoint` + `ValuePattern.SetValue()` before falling back to SendInput/pyautogui. Handles clear/append semantics.
 - [x] **Reduce `pg.PAUSE` from 1.0 to 0.05** -- Done. Changed in both `desktop/service.py:45` and `__main__.py:33`.
 - [x] **Add `Find` tool for semantic element lookup** -- Done. `Find(name, control_type, window, limit)` in `tools/state_tools.py`. Searches interactive nodes by name, type, and window.
 - [x] **Add `Invoke` tool for UIA pattern actions** -- Done. `Invoke(loc, action, value)` in `tools/input_tools.py`. Supports invoke, toggle, set_value, expand, collapse, select patterns.
