@@ -1,7 +1,7 @@
 # Windows-MCP TODO
 
 **Generated:** 2026-02-18 from REVIEW.md findings
-**Last updated:** 2026-02-19 -- 1770 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports)
+**Last updated:** 2026-02-19 -- 1770 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete
 **Reference:** See [REVIEW.md](REVIEW.md) for full context on each item.
 
 ---
@@ -21,7 +21,7 @@
 - [x] **[P6] Cache Start Menu app list** -- Added thread-safe TTL cache (1 hour) to `get_apps_from_start_menu()` with double-checked locking pattern.
 - [x] **[P5] Eliminate duplicate VDM desktop enumeration** -- Added `get_desktop_info()` that returns `(current, all)` from a single `_enumerate_desktops()` call. `get_state()` uses it.
 - [x] **[P2] Bound ThreadPoolExecutor** -- Added `max_workers=min(8, os.cpu_count() or 4)` to tree traversal executor in `tree/service.py`.
-- [ ] **[P3] Convert tree_traversal to iterative** -- Replace recursion with an explicit stack to avoid Python's 1000-frame limit on complex UIs.
+- [x] **[P3] Convert tree_traversal to iterative** -- Replaced recursion with explicit stack (7-tuple frames). Eliminates Python's 1000-frame limit on complex UIs.
 - [x] **[P9] Make pyautogui.PAUSE configurable** -- Reduced from 1.0s to 0.05s in both `desktop/service.py` and `__main__.py`. Saves 1-6s per input operation.
 - [x] **[S7] Block SSRF in Scrape tool** -- Done. `ScraperService.validate_url()` blocks non-HTTP schemes, private/reserved IPs, DNS rebinding, cloud metadata endpoints. Extracted to `scraper/service.py`.
 - [x] **[T1] Fix COM apartment threading violations** -- Verified: `dom_context` dict is already thread-local in `get_nodes()`. COM init/uninit properly scoped per-thread. No cross-apartment sharing.
@@ -41,7 +41,7 @@
   - [x] `VisionService` -- LLM-powered screenshot analysis via OpenAI-compatible API (`vision/service.py`)
   - [x] `ProcessService` -- list_processes, kill_process with protected process blocklist (`process/service.py`)
 - [ ] **[A3] Replace module globals with dependency injection** -- Use FastMCP's lifespan context to pass `desktop`, `watchdog`, `analytics` via `ctx.request_context.lifespan_context`.
-- [ ] **[A2] Decompose __main__.py** -- Extract tool registrations into domain modules (e.g., `tools/input_tools.py`, `tools/window_tools.py`, `tools/file_tools.py`).
+- [x] **[A2] Decompose __main__.py** -- Extracted 23 tool registrations into `tools/` package: `input_tools.py` (9), `state_tools.py` (4), `system_tools.py` (10). Shared state via `tools/_state.py`. Reduced __main__.py from 1122 to 207 lines (81%).
 - [ ] **[P5] Parallelize get_state** -- Run window enumeration, VDM queries, and tree traversal concurrently with `asyncio.gather`.
 - [ ] **[Q1] Deduplicate UIA constants** -- Extract 13 shared constants from `uia/core.py`, `uia/controls.py`, `uia/patterns.py` into `uia/constants.py`.
 - [ ] **[Q2] Extract boolean coercion utility** -- Replace 6+ instances of `x is True or (isinstance(x, str) and x.lower() == "true")` with a single `to_bool()` helper.
