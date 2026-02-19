@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.0",
+  "contexts": [
+    {
+      "id": "ctx-windows-mcp-20260218",
+      "file": "windows-mcp-context-20260218.md",
+      "created": "2026-02-18T21:30:00Z",
+      "updated": "2026-02-18T23:30:00Z",
+      "project": "windows-mcp",
+      "agents_involved": ["python-pro", "security-auditor", "architect-reviewer", "rust-pro", "backend-architect", "performance-engineer"],
+      "summary": "Initial clone, build verification, comprehensive code review, comparative framework analysis (Playwright/FlaUI/PAD/Rust), performance optimization roadmap, updated REVIEW.md, TODO.md, USER_MANUAL.md"
+    }
+  ],
+  "latest": "ctx-windows-mcp-20260218",
+  "slices": [
+    "slices/python-slice.md",
+    "slices/security-slice.md",
+    "slices/rust-slice.md",
+    "slices/performance-slice.md"
+  ]
+}
