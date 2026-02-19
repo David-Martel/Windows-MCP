@@ -104,7 +104,7 @@
 - [ ] **Per-window tree cache with WatchDog invalidation** -- Cache TreeState per window handle. On focus change, only re-traverse changed windows. 80-95% reduction on repeated `get_state()` calls.
 - [ ] **Cache Start Menu app list with filesystem watcher** -- Build app map once at init, monitor Start Menu folders via `ReadDirectoryChangesW`. Invalidate on change.
 - [ ] **Element coordinate cache** -- Reuse `TreeElementNode.bounding_box` for click/type instead of re-querying XPath. Invalidate on window move/resize.
-- [ ] **Cache VDM desktop list with TTL** -- `get_current_desktop()` calls `get_all_desktops()` redundantly. Cache with 5s TTL, invalidated by WatchDog.
+- [x] **Cache VDM desktop list with TTL** -- `_enumerate_desktops()` results cached for 5s via `_CACHE_TTL`. Cache invalidated on create/remove/rename/switch. Avoids redundant COM round-trips within rapid `get_state()` calls.
 - [x] **Replace `ImageGrab.grab` with Rust DXGI** -- Rust DXGI Output Duplication used as primary screenshot path in `ScreenService.get_screenshot()`. Falls back to ImageGrab then pyautogui.
 
 ---

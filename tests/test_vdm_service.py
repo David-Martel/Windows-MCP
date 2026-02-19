@@ -67,6 +67,8 @@ def _make_vdm(manager_mock=None, internal_mock=None) -> VirtualDesktopManager:
     vdm = object.__new__(VirtualDesktopManager)
     vdm._manager = manager_mock
     vdm._internal_manager = internal_mock
+    vdm._desktop_cache = None
+    vdm._cache_time = 0.0
     return vdm
 
 

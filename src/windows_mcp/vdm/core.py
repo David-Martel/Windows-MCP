@@ -2,6 +2,7 @@ import ctypes
 import logging
 import sys
 import threading
+import time
 import winreg
 from ctypes import HRESULT, POINTER, byref, c_void_p
 from ctypes.wintypes import BOOL, HWND, UINT
@@ -373,8 +374,12 @@ class VirtualDesktopManager:
     and moving windows between desktops.
     """
 
+    _CACHE_TTL = 5.0  # seconds
+
     def __init__(self):
         self._manager = None
+        self._desktop_cache: list[dict] | None = None
+        self._cache_time: float = 0.0
         try:
             # Ensure COM is initialized on this thread (RPC_E_CHANGED_MODE or S_OK/S_FALSE)
             # COINIT_APARTMENTTHREADED = 0x2, COINIT_MULTITHREADED = 0x0
@@ -441,15 +446,27 @@ class VirtualDesktopManager:
         except Exception:
             return None
 
+    def _invalidate_desktop_cache(self) -> None:
+        """Invalidate the desktop enumeration cache (e.g., after create/remove/rename)."""
+        self._desktop_cache = None
+        self._cache_time = 0.0
+
     def _enumerate_desktops(self) -> list[dict]:
-        """Enumerate all virtual desktops in a single COM round-trip.
+        """Enumerate all virtual desktops, with TTL cache.
 
         Returns a list of dicts with keys: index, guid_str, name, desktop.
         Used internally by _resolve_to_guid, get_all_desktops, get_current_desktop,
         and remove_desktop to avoid redundant GetDesktops() calls.
+
+        Results are cached for _CACHE_TTL seconds to avoid repeated COM round-trips
+        when multiple callers query desktop state in rapid succession.
         """
         if not self._internal_manager:
             return []
+
+        now = time.monotonic()
+        if self._desktop_cache is not None and (now - self._cache_time) < self._CACHE_TTL:
+            return self._desktop_cache
 
         result = []
         try:
@@ -480,6 +497,8 @@ class VirtualDesktopManager:
         except Exception as e:
             logger.error("Error enumerating desktops: %s", e)
 
+        self._desktop_cache = result
+        self._cache_time = time.monotonic()
         return result
 
     def _resolve_to_guid(self, name: str) -> str:
@@ -521,6 +540,7 @@ class VirtualDesktopManager:
         desktop = self._internal_manager.CreateDesktopW()
         guid = desktop.GetID()
         guid_str = str(guid)
+        self._invalidate_desktop_cache()
 
         # If name is provided, set it immediately
         if name:
@@ -568,6 +588,7 @@ class VirtualDesktopManager:
             return
 
         self._internal_manager.RemoveDesktop(target_entry["desktop"], fallback_desktop)
+        self._invalidate_desktop_cache()
 
     def rename_desktop(self, desktop_name: str, new_name: str):
         """
@@ -598,6 +619,7 @@ class VirtualDesktopManager:
         try:
             if hasattr(self._internal_manager, "SetName"):
                 self._internal_manager.SetName(target_desktop, hs_name)
+                self._invalidate_desktop_cache()
             else:
                 logger.warning("Rename desktop is not supported on this Windows build.")
         except Exception as e:
