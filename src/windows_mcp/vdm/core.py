@@ -382,7 +382,7 @@ class VirtualDesktopManager:
             try:
                 ctypes.windll.ole32.CoInitialize(None)
             except Exception:
-                pass  # Already initialized or failed, try proceeding
+                logger.debug("CoInitialize skipped (already initialized or failed)", exc_info=True)
 
             self._manager = comtypes.client.CreateObject(
                 CLSID_VirtualDesktopManager, interface=IVirtualDesktopManager
@@ -511,7 +511,7 @@ class VirtualDesktopManager:
         except Exception as e:
             logger.error("Failed to move window to desktop: %s", e)
 
-    def create_desktop(self, name: str = None) -> str:
+    def create_desktop(self, name: str | None = None) -> str:
         """
         Creates a new virtual desktop and returns its Name.
         """
@@ -591,6 +591,7 @@ class VirtualDesktopManager:
         try:
             target_desktop = self._internal_manager.FindDesktop(target_guid)
         except Exception:
+            logger.debug("FindDesktop failed for GUID %s", guid_str, exc_info=True)
             return
 
         hs_name = create_hstring(new_name)
@@ -670,7 +671,7 @@ class VirtualDesktopManager:
         return {"id": guid_str, "name": "Unknown"}
 
 
-def create_desktop(name: str = None) -> str:
+def create_desktop(name: str | None = None) -> str:
     return _get_manager().create_desktop(name)
 
 

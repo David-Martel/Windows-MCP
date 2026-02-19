@@ -63,6 +63,7 @@ class WindowService:
                     self._process_name_cache[pid] = proc_name
             return Browser.has_process(proc_name)
         except Exception:
+            logger.debug("Failed to determine browser status for node", exc_info=True)
             return False
 
     def get_controls_handles(self, optimized: bool = False) -> set[int]:

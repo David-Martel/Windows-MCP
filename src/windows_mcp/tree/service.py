@@ -312,7 +312,7 @@ class Tree:
                     continue
                 is_browser = self.desktop.is_window_browser(temp_node)
             except Exception:
-                pass
+                logger.debug("Failed to check browser status for handle %s", handle, exc_info=True)
 
             if is_browser or use_dom:
                 # Browser windows need full Python path (DOM mode, pattern queries)
@@ -365,7 +365,9 @@ class Tree:
                         retry_counts[handle] += 1
                         logger.debug(
                             "Error in processing handle %s, retry attempt %d\nError: %s",
-                            handle, retry_counts[handle], e,
+                            handle,
+                            retry_counts[handle],
+                            e,
                         )
                         if retry_counts[handle] < THREAD_MAX_RETRIES:
                             # Need to find is_browser again for retry
@@ -377,7 +379,8 @@ class Tree:
                         else:
                             logger.error(
                                 "Task failed completely for handle %s after %d retries",
-                                handle, THREAD_MAX_RETRIES,
+                                handle,
+                                THREAD_MAX_RETRIES,
                             )
         return interactive_nodes, scrollable_nodes, dom_informative_nodes, dom_node
 
@@ -465,6 +468,7 @@ class Tree:
                     else:
                         return None  # depth limit exceeded
                 except Exception:
+                    logger.debug("Exception during DOM correction child traversal", exc_info=True)
                     return None
                 if child.ControlTypeName != "TextControl":
                     return None
@@ -694,7 +698,7 @@ class Tree:
                                     if legacy_pattern.DefaultAction.title() in DEFAULT_ACTIONS:
                                         is_default_action = True
                                 except Exception:
-                                    pass
+                                    logger.debug("Failed to check DefaultAction", exc_info=True)
 
                                 if is_role_interactive and (
                                     is_default_action or is_keyboard_focusable
@@ -845,7 +849,7 @@ class Tree:
                                 window_pattern = child.GetWindowPattern()
                                 is_modal = window_pattern.IsModal
                             except Exception:
-                                pass
+                                logger.debug("Failed to check IsModal status", exc_info=True)
 
                             if is_modal:
                                 # Because this window element is modal
@@ -1042,10 +1046,11 @@ class Tree:
         try:
             logger.debug(
                 "[WatchDog] Focus changed to: '%s' (%s)",
-                element.Name, element.ControlTypeName,
+                element.Name,
+                element.ControlTypeName,
             )
         except Exception:
-            pass
+            logger.debug("Failed to log focus change event", exc_info=True)
 
     def _on_property_change(self, sender: Any, propertyId: int, newValue):
         """Handle property change events."""
@@ -1053,7 +1058,10 @@ class Tree:
             element = Control.CreateControlFromElement(sender)
             logger.debug(
                 "[WatchDog] Property changed: ID=%s Value=%s Element: '%s' (%s)",
-                propertyId, newValue, element.Name, element.ControlTypeName,
+                propertyId,
+                newValue,
+                element.Name,
+                element.ControlTypeName,
             )
         except Exception:
-            pass
+            logger.debug("Failed to log property change event", exc_info=True)
