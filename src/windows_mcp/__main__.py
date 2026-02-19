@@ -40,6 +40,19 @@ MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT = 1920, 1080
 pg.FAILSAFE = False
 pg.PAUSE = 0.05
 
+
+def _coerce_bool(value: bool | str, default: bool = False) -> bool:
+    """Convert a bool-or-string MCP parameter to a proper bool.
+
+    MCP clients may send boolean parameters as strings ("true"/"false").
+    This normalises both forms to a Python bool.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == "true"
+    return default
+
 desktop: Desktop | None = None
 watchdog: WatchDog | None = None
 analytics: PostHogAnalytics | None = None
@@ -157,16 +170,10 @@ def file_tool(
         if destination and not os.path.isabs(destination):
             destination = os.path.join(default_dir, destination)
 
-        recursive = recursive is True or (
-            isinstance(recursive, str) and recursive.lower() == "true"
-        )
-        append = append is True or (isinstance(append, str) and append.lower() == "true")
-        overwrite = overwrite is True or (
-            isinstance(overwrite, str) and overwrite.lower() == "true"
-        )
-        show_hidden = show_hidden is True or (
-            isinstance(show_hidden, str) and show_hidden.lower() == "true"
-        )
+        recursive = _coerce_bool(recursive)
+        append = _coerce_bool(append)
+        overwrite = _coerce_bool(overwrite)
+        show_hidden = _coerce_bool(show_hidden)
 
         match mode:
             case "read":
@@ -215,10 +222,8 @@ def file_tool(
 @with_analytics(lambda: analytics, "State-Tool")
 def state_tool(use_vision: bool | str = False, use_dom: bool | str = False, ctx: Context = None):
     try:
-        use_vision = use_vision is True or (
-            isinstance(use_vision, str) and use_vision.lower() == "true"
-        )
-        use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == "true")
+        use_vision = _coerce_bool(use_vision)
+        use_dom = _coerce_bool(use_dom)
 
         # Calculate scale factor to cap resolution at 1080p (1920x1080)
         if screen_size is not None:
@@ -327,6 +332,8 @@ def type_tool(
 ) -> str:
     if len(loc) != 2:
         raise ValueError("Location must be a list of exactly 2 integers [x, y]")
+    clear = _coerce_bool(clear)
+    press_enter = _coerce_bool(press_enter)
     x, y = loc[0], loc[1]
     desktop.type(
         loc=loc,
@@ -381,7 +388,7 @@ def scroll_tool(
 )
 @with_analytics(lambda: analytics, "Move-Tool")
 def move_tool(loc: list[int], drag: bool | str = False, ctx: Context = None) -> str:
-    drag = drag is True or (isinstance(drag, str) and drag.lower() == "true")
+    drag = _coerce_bool(drag)
     if len(loc) != 2:
         raise ValueError("loc must be a list of exactly 2 integers [x, y]")
     x, y = loc[0], loc[1]
@@ -440,7 +447,7 @@ def wait_tool(duration: int, ctx: Context = None) -> str:
 )
 @with_analytics(lambda: analytics, "Scrape-Tool")
 def scrape_tool(url: str, use_dom: bool | str = False, ctx: Context = None) -> str:
-    use_dom = use_dom is True or (isinstance(use_dom, str) and use_dom.lower() == "true")
+    use_dom = _coerce_bool(use_dom)
     if not use_dom:
         content = desktop.scrape(url)
         return f"URL:{url}\nContent:\n{content}"
@@ -474,9 +481,7 @@ def scrape_tool(url: str, use_dom: bool | str = False, ctx: Context = None) -> s
 def multi_select_tool(
     locs: list[list[int]], press_ctrl: bool | str = True, ctx: Context = None
 ) -> str:
-    press_ctrl = press_ctrl is True or (
-        isinstance(press_ctrl, str) and press_ctrl.lower() == "true"
-    )
+    press_ctrl = _coerce_bool(press_ctrl, default=True)
     for i, loc in enumerate(locs):
         if not isinstance(loc, (list, tuple)) or len(loc) != 2:
             raise ValueError(f"locs[{i}] must be [x, y], got {loc!r}")
@@ -575,7 +580,7 @@ def process_tool(
         if mode == "list":
             return desktop.list_processes(name=name, sort_by=sort_by, limit=limit)
         elif mode == "kill":
-            force = force is True or (isinstance(force, str) and force.lower() == "true")
+            force = _coerce_bool(force)
             return desktop.kill_process(name=name, pid=pid, force=force)
         else:
             return 'Error: mode must be either "list" or "kill".'

@@ -302,17 +302,11 @@ class Desktop:
                     return f"{name.title()} launched."
                 return f"Launching {name.title()} sent, but window not detected yet."
             case "resize":
-                response, status = self.resize_app(size=size, loc=loc)
-                if status != 0:
-                    return response
-                else:
-                    return response
+                response, _status = self.resize_app(size=size, loc=loc)
+                return response
             case "switch":
-                response, status = self.switch_app(name)
-                if status != 0:
-                    return response
-                else:
-                    return response
+                response, _status = self.switch_app(name)
+                return response
 
     def launch_app(self, name: str) -> tuple[str, int, int]:
         apps_map = self.get_apps_from_start_menu()

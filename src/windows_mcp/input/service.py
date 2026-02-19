@@ -69,7 +69,6 @@ class InputService:
             pg.press("end")
         # else "idle" -- no movement needed
 
-        # Handle both boolean and string 'true'/'false'
         if clear is True or (isinstance(clear, str) and clear.lower() == "true"):
             pg.sleep(0.5)
             pg.hotkey("ctrl", "a")
