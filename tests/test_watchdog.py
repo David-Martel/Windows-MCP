@@ -304,6 +304,64 @@ class TestPropertyChangedEventHandler:
 
 
 # ---------------------------------------------------------------------------
+# Event handler __init__ coverage (lines 19-20, 36-37, 53-54)
+# ---------------------------------------------------------------------------
+
+
+class TestEventHandlerInit:
+    """Cover __init__ methods on all three event handler classes.
+
+    Previous tests used __new__ to bypass __init__, leaving the
+    constructor lines (weakref + super().__init__()) uncovered.
+    """
+
+    def _import_all(self, patches):
+        sys.modules.pop("windows_mcp.watchdog.event_handlers", None)
+        with patch.dict(sys.modules, patches):
+            from windows_mcp.watchdog.event_handlers import (
+                FocusChangedEventHandler,
+                PropertyChangedEventHandler,
+                StructureChangedEventHandler,
+            )
+
+            return (
+                FocusChangedEventHandler,
+                StructureChangedEventHandler,
+                PropertyChangedEventHandler,
+            )
+
+    def test_focus_handler_init_sets_weakref(self):
+        comtypes_stub = _make_comtypes_stub()
+        core_stub, enums_stub, _ = _make_uia_stub()
+        patches = _build_module_patches(comtypes_stub, core_stub, enums_stub)
+
+        Focus, _, _ = self._import_all(patches)
+        parent = MagicMock()
+        handler = Focus(parent)
+        assert handler._parent() is parent
+
+    def test_structure_handler_init_sets_weakref(self):
+        comtypes_stub = _make_comtypes_stub()
+        core_stub, enums_stub, _ = _make_uia_stub()
+        patches = _build_module_patches(comtypes_stub, core_stub, enums_stub)
+
+        _, Structure, _ = self._import_all(patches)
+        parent = MagicMock()
+        handler = Structure(parent)
+        assert handler._parent() is parent
+
+    def test_property_handler_init_sets_weakref(self):
+        comtypes_stub = _make_comtypes_stub()
+        core_stub, enums_stub, _ = _make_uia_stub()
+        patches = _build_module_patches(comtypes_stub, core_stub, enums_stub)
+
+        _, _, Property = self._import_all(patches)
+        parent = MagicMock()
+        handler = Property(parent)
+        assert handler._parent() is parent
+
+
+# ---------------------------------------------------------------------------
 # WatchDog service tests
 # ---------------------------------------------------------------------------
 
@@ -706,8 +764,8 @@ class TestWatchDogRunLoop:
         """AddStructureChangedEventHandler raises → exception logged, no handler set."""
         wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
         wd._structure_callback = MagicMock()
-        fake_uia_client.IUIAutomation.AddStructureChangedEventHandler.side_effect = (
-            OSError("COM fail")
+        fake_uia_client.IUIAutomation.AddStructureChangedEventHandler.side_effect = OSError(
+            "COM fail"
         )
 
         self._run_one_iteration(wd, service_mod, comtypes_stub)
@@ -722,8 +780,8 @@ class TestWatchDogRunLoop:
         wd._structure_handler = existing_handler
         wd._active_structure_element = MagicMock()
         wd._structure_callback = None  # want to remove
-        fake_uia_client.IUIAutomation.RemoveStructureChangedEventHandler.side_effect = (
-            OSError("fail")
+        fake_uia_client.IUIAutomation.RemoveStructureChangedEventHandler.side_effect = OSError(
+            "fail"
         )
 
         self._run_one_iteration(wd, service_mod, comtypes_stub)
@@ -735,8 +793,8 @@ class TestWatchDogRunLoop:
         """AddPropertyChangedEventHandler raises → exception logged, no handler set."""
         wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
         wd._property_callback = MagicMock()
-        fake_uia_client.IUIAutomation.AddPropertyChangedEventHandler.side_effect = (
-            OSError("COM fail")
+        fake_uia_client.IUIAutomation.AddPropertyChangedEventHandler.side_effect = OSError(
+            "COM fail"
         )
 
         self._run_one_iteration(wd, service_mod, comtypes_stub)
@@ -751,8 +809,8 @@ class TestWatchDogRunLoop:
         wd._active_property_element = MagicMock()
         wd._active_property_ids = [30005]
         wd._property_callback = None  # want to remove
-        fake_uia_client.IUIAutomation.RemovePropertyChangedEventHandler.side_effect = (
-            OSError("fail")
+        fake_uia_client.IUIAutomation.RemovePropertyChangedEventHandler.side_effect = OSError(
+            "fail"
         )
 
         self._run_one_iteration(wd, service_mod, comtypes_stub)
@@ -836,9 +894,9 @@ class TestWatchDogRunLoop:
         """
         wd, fake_uia_client, service_mod, comtypes_stub = self._setup()
         wd._focus_callback = MagicMock()  # keeps elif-remove from triggering in loop
-        wd._focus_handler = MagicMock()   # already exists, so if-add is skipped
-        fake_uia_client.IUIAutomation.RemoveFocusChangedEventHandler.side_effect = (
-            OSError("COM dead")
+        wd._focus_handler = MagicMock()  # already exists, so if-add is skipped
+        fake_uia_client.IUIAutomation.RemoveFocusChangedEventHandler.side_effect = OSError(
+            "COM dead"
         )
 
         self._run_with_crash(wd, service_mod, comtypes_stub)
@@ -854,8 +912,8 @@ class TestWatchDogRunLoop:
         wd._structure_element = element
         wd._structure_handler = MagicMock()
         wd._active_structure_element = element
-        fake_uia_client.IUIAutomation.RemoveStructureChangedEventHandler.side_effect = (
-            OSError("COM dead")
+        fake_uia_client.IUIAutomation.RemoveStructureChangedEventHandler.side_effect = OSError(
+            "COM dead"
         )
 
         self._run_with_crash(wd, service_mod, comtypes_stub)
@@ -873,8 +931,8 @@ class TestWatchDogRunLoop:
         wd._property_handler = MagicMock()
         wd._active_property_element = element
         wd._active_property_ids = [30005]
-        fake_uia_client.IUIAutomation.RemovePropertyChangedEventHandler.side_effect = (
-            OSError("COM dead")
+        fake_uia_client.IUIAutomation.RemovePropertyChangedEventHandler.side_effect = OSError(
+            "COM dead"
         )
 
         self._run_with_crash(wd, service_mod, comtypes_stub)

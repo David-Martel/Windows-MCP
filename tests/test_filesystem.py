@@ -541,3 +541,54 @@ class TestGetFileInfoEdgeCases:
         result = get_file_info(str(f))
         # Read-only field present regardless of value
         assert "Read-only:" in result
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap: filesystem lines 110, 164, 312
+# ---------------------------------------------------------------------------
+
+
+class TestUnsupportedFileType:
+    """Cover 'unsupported file type' branches for paths that are neither
+    regular files nor directories (e.g. device nodes, named pipes)."""
+
+    def test_copy_unsupported_file_type(self, tmp_path):
+        """copy_path returns error for a path that exists but is neither file nor dir (line 110)."""
+        src = tmp_path / "special"
+        src.write_text("x", encoding="utf-8")
+        dst = tmp_path / "dest"
+        # Mock is_file and is_dir to return False while exists returns True
+        with (
+            patch.object(Path, "is_file", return_value=False),
+            patch.object(Path, "is_dir", return_value=False),
+        ):
+            result = copy_path(str(src), str(dst))
+        assert "Unsupported file type" in result
+
+    def test_delete_unsupported_file_type(self, tmp_path):
+        """delete_path returns error for unsupported file type (line 164)."""
+        target = tmp_path / "special"
+        target.write_text("x", encoding="utf-8")
+        with (
+            patch.object(Path, "is_file", return_value=False),
+            patch.object(Path, "is_dir", return_value=False),
+            patch.object(Path, "is_symlink", return_value=False),
+        ):
+            result = delete_path(str(target))
+        assert "Unsupported file type" in result
+
+
+class TestGetFileInfoSymlink:
+    """Cover line 312: file.link_target = str(os.readlink(target))."""
+
+    def test_symlink_link_target_reported(self, tmp_path):
+        """get_file_info sets link_target when target.is_symlink() is True."""
+        f = tmp_path / "target.txt"
+        f.write_text("data", encoding="utf-8")
+        # Mock is_symlink to return True and os.readlink to return a path
+        with (
+            patch.object(Path, "is_symlink", return_value=True),
+            patch("windows_mcp.filesystem.service.os.readlink", return_value=str(f)),
+        ):
+            result = get_file_info(str(f))
+        assert str(f) in result

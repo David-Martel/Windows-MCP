@@ -1476,3 +1476,154 @@ class TestInputServiceShortcutBoundaryValues:
         with patch("windows_mcp.input.service.pg.press") as mock_press:
             svc.shortcut("win d")
         mock_press.assert_called_once_with("win d")
+
+
+# ===========================================================================
+# native_ffi.py -- lines 125, 138, 154 (null output, send_text return)
+# ===========================================================================
+
+
+class TestNativeFFIMethodCoverage:
+    """Tests that actually call NativeFFI methods to exercise production lines.
+
+    The earlier TestNativeFFIErrorPaths tests demonstrated guard logic inline
+    but never called system_info() / capture_tree() / send_text(), leaving
+    lines 125, 138, and 154 uncovered.
+    """
+
+    def _make_ffi_with_mock_dll(self) -> tuple:
+        from windows_mcp.native_ffi import NativeFFI
+
+        mock_dll = MagicMock()
+        mock_dll.wmcp_last_error.return_value = b"injected error"
+        ffi = object.__new__(NativeFFI)
+        ffi._dll = mock_dll
+        return ffi, mock_dll
+
+    def test_system_info_null_output_via_real_method(self):
+        """Calling ffi.system_info() when the DLL returns OK but leaves
+        the output pointer null triggers line 125."""
+        ffi, mock_dll = self._make_ffi_with_mock_dll()
+        mock_dll.wmcp_system_info.return_value = 0  # WMCP_OK
+        with pytest.raises(RuntimeError, match="null output"):
+            ffi.system_info()
+
+    def test_capture_tree_null_output_via_real_method(self):
+        """Calling ffi.capture_tree() when the DLL returns OK but leaves
+        the output pointer null triggers line 154."""
+        ffi, mock_dll = self._make_ffi_with_mock_dll()
+        mock_dll.wmcp_capture_tree.return_value = 0  # WMCP_OK
+        with pytest.raises(RuntimeError, match="null output"):
+            ffi.capture_tree([12345], max_depth=10)
+
+    def test_send_text_returns_count_on_success(self):
+        """Calling ffi.send_text() on success path returns out_count.value (line 138)."""
+        ffi, mock_dll = self._make_ffi_with_mock_dll()
+        mock_dll.wmcp_send_text.return_value = 0  # WMCP_OK
+        result = ffi.send_text("hello")
+        # Mock doesn't write to the pointer, so c_uint32() stays at 0
+        assert result == 0
+        assert isinstance(result, int)
+
+
+# ===========================================================================
+# native_worker.py -- lines 86-88, 107, 125-126
+# ===========================================================================
+
+
+class TestNativeWorkerDrainStderr:
+    """Cover _drain_stderr() loop body (lines 86-88) and stderr logging."""
+
+    async def test_drain_stderr_logs_lines_then_exits_on_empty(self):
+        """_drain_stderr reads lines until empty, covering lines 86-88."""
+        from windows_mcp.native_worker import NativeWorker
+
+        w = NativeWorker(exe_path="/fake/exe")
+
+        mock_proc = MagicMock()
+        lines = [b"line1\n", b"line2\n", b""]  # empty = EOF
+        line_iter = iter(lines)
+
+        async def _readline():
+            return next(line_iter)
+
+        mock_proc.stderr = MagicMock()
+        mock_proc.stderr.readline = _readline
+        w._process = mock_proc
+
+        # Run _drain_stderr directly -- it should consume all lines
+        await w._drain_stderr()
+        # If we got here without hanging, the loop exited on b""
+
+
+class TestNativeWorkerVerboseFlag:
+    """Cover line 107: args.append('--verbose') when verbose=True."""
+
+    async def test_start_with_verbose_passes_flag(self, tmp_path):
+        """start() appends --verbose to args when verbose=True."""
+        from windows_mcp.native_worker import NativeWorker
+
+        exe = tmp_path / "wmcp-worker.exe"
+        exe.write_bytes(b"MZ")  # Just needs to be a path
+
+        w = NativeWorker(exe_path=str(exe), verbose=True)
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 42
+        mock_proc.returncode = None
+        mock_proc.stderr = MagicMock()
+        mock_proc.stderr.readline = AsyncMock(return_value=b"")
+
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = mock_proc
+            # Patch _drain_stderr to avoid unawaited coroutine warning
+            with patch.object(w, "_drain_stderr", new_callable=AsyncMock):
+                await w.start()
+
+        # Verify --verbose was in the args
+        call_args = mock_exec.call_args
+        assert "--verbose" in call_args[0]
+
+    async def test_start_without_verbose_omits_flag(self, tmp_path):
+        """start() does NOT pass --verbose when verbose=False."""
+        from windows_mcp.native_worker import NativeWorker
+
+        exe = tmp_path / "wmcp-worker.exe"
+        exe.write_bytes(b"MZ")
+
+        w = NativeWorker(exe_path=str(exe), verbose=False)
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 42
+        mock_proc.returncode = None
+        mock_proc.stderr = MagicMock()
+        mock_proc.stderr.readline = AsyncMock(return_value=b"")
+
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = mock_proc
+            with patch.object(w, "_drain_stderr", new_callable=AsyncMock):
+                await w.start()
+
+        call_args = mock_exec.call_args
+        assert "--verbose" not in call_args[0]
+
+
+class TestNativeWorkerStopCancelsStderrTask:
+    """Cover lines 124-126: await self._stderr_task + CancelledError catch."""
+
+    async def test_stop_cancels_active_stderr_task(self):
+        """stop() cancels _stderr_task and catches CancelledError."""
+        from windows_mcp.native_worker import NativeWorker
+
+        w = NativeWorker(exe_path="/fake/exe")
+
+        # Create a real async task that sleeps forever
+        async def _forever():
+            await asyncio.sleep(9999)
+
+        w._stderr_task = asyncio.create_task(_forever())
+        # No process to stop
+        w._process = None
+
+        await w.stop()
+        assert w._stderr_task is None
