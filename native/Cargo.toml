@@ -1,21 +1,15 @@
-[package]
-name = "windows_mcp_core"
+[workspace]
+members = ["wmcp-core", "wmcp-pyo3", "wmcp-ffi", "wmcp-cli"]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
-description = "PyO3 Rust extension accelerating hot paths in the Windows-MCP server"
 license = "MIT"
 rust-version = "1.80"
 
-[lib]
-name = "windows_mcp_core"
-crate-type = ["cdylib"]
-
-[dependencies]
-pyo3 = { version = "0.23", features = ["extension-module"] }
-sysinfo = "0.33"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-parking_lot = "0.12"
+[workspace.dependencies]
+# Windows APIs
 windows = { version = "0.58", features = [
     "Win32_UI_Accessibility",
     "Win32_System_Com",
@@ -24,7 +18,29 @@ windows = { version = "0.58", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Concurrency
+parking_lot = "0.12"
 rayon = "1.10"
+
+# System info
+sysinfo = "0.33"
+
+# Error handling
+thiserror = "2.0"
+
+# Python bindings
+pyo3 = { version = "0.23", features = ["extension-module"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Core library (internal)
+wmcp-core = { path = "wmcp-core" }
 
 [profile.release]
 opt-level = 3

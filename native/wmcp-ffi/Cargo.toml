@@ -1,0 +1,15 @@
+[package]
+name = "wmcp-ffi"
+description = "C ABI DLL for windows-mcp -- loadable by ctypes, C#, or any FFI consumer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "windows_mcp_ffi"
+crate-type = ["cdylib"]
+
+[dependencies]
+wmcp-core = { workspace = true }
+serde_json = { workspace = true }

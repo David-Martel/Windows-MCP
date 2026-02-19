@@ -1,0 +1,30 @@
+[package]
+name = "wmcp-cli"
+description = "Standalone CLI tools for windows-mcp (tree dump, screenshot, input, IPC worker)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+wmcp-core = { workspace = true }
+windows = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+
+[[bin]]
+name = "wmcp-worker"
+path = "src/bin/wmcp-worker.rs"
+
+[[bin]]
+name = "wmcp-tree"
+path = "src/bin/wmcp-tree.rs"
+
+[[bin]]
+name = "wmcp-screenshot"
+path = "src/bin/wmcp-screenshot.rs"
+
+[[bin]]
+name = "wmcp-input"
+path = "src/bin/wmcp-input.rs"

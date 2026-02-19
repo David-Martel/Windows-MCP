@@ -1,0 +1,15 @@
+[package]
+name = "wmcp-pyo3"
+description = "Thin PyO3 wrappers around wmcp-core for the windows_mcp_core Python module"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "windows_mcp_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+wmcp-core = { workspace = true }
+pyo3 = { workspace = true }
