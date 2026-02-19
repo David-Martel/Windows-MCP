@@ -1,7 +1,7 @@
 # Windows-MCP TODO
 
 **Generated:** 2026-02-18 from REVIEW.md findings
-**Last updated:** 2026-02-19 -- 2127 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete
+**Last updated:** 2026-02-19 -- 2116 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete, 24 tools
 **Reference:** See [REVIEW.md](REVIEW.md) for full context on each item.
 
 ---
