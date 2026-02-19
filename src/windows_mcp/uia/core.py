@@ -48,12 +48,15 @@ from .enums import *  # noqa: E402
 
 class _AutomationClient:
     _instance = None
+    _instance_lock = threading.Lock()
 
     @classmethod
     def instance(cls) -> "_AutomationClient":
-        """Singleton instance (this prevents com creation on import)."""
+        """Thread-safe singleton (double-checked locking)."""
         if cls._instance is None:
-            cls._instance = cls()
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
         return cls._instance
 
     def __init__(self):
