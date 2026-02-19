@@ -15,14 +15,12 @@ Bug fixes covered:
 """
 
 import sys
-import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
 from PIL import Image
 
-from windows_mcp.desktop.views import DesktopState, Status, Window
-from windows_mcp.tree.views import BoundingBox
+from tests.desktop_helpers import make_bare_desktop, make_desktop_state, make_window
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -30,53 +28,10 @@ from windows_mcp.tree.views import BoundingBox
 
 _UIA = "windows_mcp.desktop.service.uia"
 
-
-def _make_bare_desktop():
-    """Return a Desktop instance that bypasses __init__ (no COM/UIA calls).
-
-    Only the attributes accessed by the methods under test are set.
-    """
-    from windows_mcp.desktop.service import Desktop
-
-    d = Desktop.__new__(Desktop)
-    d._state_lock = threading.Lock()
-    d.desktop_state = None
-    d._app_cache = None
-    d._app_cache_time = 0.0
-    d._APP_CACHE_TTL = 3600.0
-    d._app_cache_lock = threading.Lock()
-    # Sub-services - replaced per-test with MagicMock where needed
-    d.tree = MagicMock()
-    d._input = MagicMock()
-    d._registry = MagicMock()
-    d._shell = MagicMock()
-    d._scraper = MagicMock()
-    d._screen = MagicMock()
-    d._window = MagicMock()
-    return d
-
-
-def _make_window(name="Test App", status=Status.NORMAL, handle=1001, process_id=2001):
-    """Create a Window dataclass with sensible defaults."""
-    bbox = BoundingBox(left=0, top=0, right=800, bottom=600, width=800, height=600)
-    return Window(
-        name=name,
-        is_browser=False,
-        depth=0,
-        status=status,
-        bounding_box=bbox,
-        handle=handle,
-        process_id=process_id,
-    )
-
-
-def _make_desktop_state(active_window=None, windows=None):
-    return DesktopState(
-        active_desktop={"id": "1", "name": "Desktop 1"},
-        all_desktops=[{"id": "1", "name": "Desktop 1"}],
-        active_window=active_window,
-        windows=windows or [],
-    )
+# Aliases for backwards compat with existing test code
+_make_bare_desktop = make_bare_desktop
+_make_window = make_window
+_make_desktop_state = make_desktop_state
 
 
 # ===========================================================================

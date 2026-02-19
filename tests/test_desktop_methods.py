@@ -8,40 +8,16 @@ with no live desktop required.
 """
 
 import sys
-import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Shared helper: construct a bare Desktop without __init__ (no COM/UIA)
-# ---------------------------------------------------------------------------
+from tests.desktop_helpers import make_bare_desktop
 
-
-def _make_bare_desktop():
-    """Return a Desktop instance that bypasses __init__ (no COM/UIA calls).
-
-    Only the attributes accessed by the methods under test are populated.
-    """
-    from windows_mcp.desktop.service import Desktop
-
-    d = Desktop.__new__(Desktop)
-    d._state_lock = threading.Lock()
-    d.desktop_state = None
-    d._app_cache = None
-    d._app_cache_time = 0.0
-    d._APP_CACHE_TTL = 3600.0
-    d._app_cache_lock = threading.Lock()
-    d.tree = MagicMock()
-    d._input = MagicMock()
-    d._screen = MagicMock()
-    d._registry = MagicMock()
-    d._shell = MagicMock()
-    d._scraper = MagicMock()
-    d._window = MagicMock()
-    return d
+# Alias for backwards compat with existing test code
+_make_bare_desktop = make_bare_desktop
 
 
 # ---------------------------------------------------------------------------
