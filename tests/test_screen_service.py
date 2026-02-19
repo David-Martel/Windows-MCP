@@ -21,6 +21,7 @@ from windows_mcp.tree.views import BoundingBox, Center, TreeElementNode
 _UIA = "windows_mcp.screen.service.uia"
 _PG = "windows_mcp.screen.service.pg"
 _IMAGE_GRAB = "windows_mcp.screen.service.ImageGrab"
+_NATIVE_SCREENSHOT = "windows_mcp.screen.service.native_capture_screenshot_png"
 _CTYPES_WINDLL = "ctypes.windll.user32.GetDpiForSystem"
 
 
@@ -310,10 +311,41 @@ class TestGetElementUnderCursor:
 class TestGetScreenshot:
     """Tests for ScreenService.get_screenshot()."""
 
+    def test_native_path_returns_pil_image(self, svc: ScreenService):
+        """When Rust native screenshot succeeds, it returns a PIL Image."""
+        # Create a small valid PNG in memory
+        test_img = _make_rgb_image(100, 100)
+        import io
+
+        buf = io.BytesIO()
+        test_img.save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+
+        with patch(_NATIVE_SCREENSHOT, return_value=png_bytes):
+            result = svc.get_screenshot()
+        assert isinstance(result, Image.Image)
+        assert result.size == (100, 100)
+
+    def test_native_failure_falls_through_to_imagegrab(self, svc: ScreenService):
+        """When native screenshot returns None, ImageGrab is used."""
+        fake_img = _make_rgb_image(1920, 1080)
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab_mod,
+            patch(_PG),
+        ):
+            mock_grab_mod.grab.return_value = fake_img
+            result = svc.get_screenshot()
+        assert result is fake_img
+
     def test_normal_path_uses_imagegrab(self, svc: ScreenService):
         """When ImageGrab.grab succeeds its return value is passed through."""
         fake_img = _make_rgb_image(1920, 1080)
-        with patch(_IMAGE_GRAB) as mock_grab_mod, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab_mod,
+            patch(_PG),
+        ):
             mock_grab_mod.grab.return_value = fake_img
             result = svc.get_screenshot()
         assert result is fake_img
@@ -321,7 +353,11 @@ class TestGetScreenshot:
     def test_imagegrab_called_with_all_screens_true(self, svc: ScreenService):
         """ImageGrab.grab must be invoked with all_screens=True."""
         fake_img = _make_rgb_image()
-        with patch(_IMAGE_GRAB) as mock_grab_mod, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab_mod,
+            patch(_PG),
+        ):
             mock_grab_mod.grab.return_value = fake_img
             svc.get_screenshot()
         mock_grab_mod.grab.assert_called_once_with(all_screens=True)
@@ -329,7 +365,11 @@ class TestGetScreenshot:
     def test_fallback_to_pg_screenshot_on_oserror(self, svc: ScreenService):
         """When ImageGrab.grab raises OSError the pyautogui fallback must be used."""
         fallback_img = _make_rgb_image(1280, 720)
-        with patch(_IMAGE_GRAB) as mock_grab_mod, patch(_PG) as mock_pg:
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab_mod,
+            patch(_PG) as mock_pg,
+        ):
             mock_grab_mod.grab.side_effect = OSError("grab failed")
             mock_pg.screenshot.return_value = fallback_img
             result = svc.get_screenshot()
@@ -338,7 +378,11 @@ class TestGetScreenshot:
     def test_fallback_to_pg_screenshot_on_exception(self, svc: ScreenService):
         """Any exception (not just OSError) from ImageGrab triggers the fallback."""
         fallback_img = _make_rgb_image()
-        with patch(_IMAGE_GRAB) as mock_grab_mod, patch(_PG) as mock_pg:
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab_mod,
+            patch(_PG) as mock_pg,
+        ):
             mock_grab_mod.grab.side_effect = RuntimeError("unexpected")
             mock_pg.screenshot.return_value = fallback_img
             result = svc.get_screenshot()
@@ -347,7 +391,11 @@ class TestGetScreenshot:
     def test_fallback_calls_pg_screenshot_no_args(self, svc: ScreenService):
         """The pyautogui fallback calls screenshot() with no positional arguments."""
         fallback_img = _make_rgb_image()
-        with patch(_IMAGE_GRAB) as mock_grab_mod, patch(_PG) as mock_pg:
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab_mod,
+            patch(_PG) as mock_pg,
+        ):
             mock_grab_mod.grab.side_effect = OSError("fail")
             mock_pg.screenshot.return_value = fallback_img
             svc.get_screenshot()
@@ -356,7 +404,11 @@ class TestGetScreenshot:
     def test_pg_screenshot_not_called_on_success(self, svc: ScreenService):
         """The pyautogui fallback must not be invoked when ImageGrab succeeds."""
         fake_img = _make_rgb_image()
-        with patch(_IMAGE_GRAB) as mock_grab_mod, patch(_PG) as mock_pg:
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab_mod,
+            patch(_PG) as mock_pg,
+        ):
             mock_grab_mod.grab.return_value = fake_img
             svc.get_screenshot()
         mock_pg.screenshot.assert_not_called()
@@ -364,7 +416,11 @@ class TestGetScreenshot:
     def test_imagegrab_not_called_after_single_failure(self, svc: ScreenService):
         """Only one ImageGrab.grab attempt is made; no retry loop."""
         fallback_img = _make_rgb_image()
-        with patch(_IMAGE_GRAB) as mock_grab_mod, patch(_PG) as mock_pg:
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab_mod,
+            patch(_PG) as mock_pg,
+        ):
             mock_grab_mod.grab.side_effect = OSError("fail")
             mock_pg.screenshot.return_value = fallback_img
             svc.get_screenshot()
@@ -373,7 +429,11 @@ class TestGetScreenshot:
     def test_returns_pil_image(self, svc: ScreenService):
         """Return type is always Image.Image regardless of which path was taken."""
         fake_img = _make_rgb_image()
-        with patch(_IMAGE_GRAB) as mock_grab_mod, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab_mod,
+            patch(_PG),
+        ):
             mock_grab_mod.grab.return_value = fake_img
             result = svc.get_screenshot()
         assert isinstance(result, Image.Image)
@@ -394,7 +454,12 @@ class TestGetAnnotatedScreenshot:
     def test_output_width_includes_padding(self, svc: ScreenService):
         """Output image width must equal screenshot width + 2*padding (padding=5)."""
         base_img = _make_rgb_image(width=200, height=100)
-        with patch(_IMAGE_GRAB) as mock_grab, patch(_UIA) as mock_uia, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab,
+            patch(_UIA) as mock_uia,
+            patch(_PG),
+        ):
             mock_grab.grab.return_value = base_img
             mock_uia.GetVirtualScreenRect.return_value = (0, 0, 200, 100)
             result = svc.get_annotated_screenshot([])
@@ -403,7 +468,12 @@ class TestGetAnnotatedScreenshot:
     def test_output_height_includes_padding(self, svc: ScreenService):
         """Output image height must equal screenshot height + 2*padding (padding=5)."""
         base_img = _make_rgb_image(width=200, height=100)
-        with patch(_IMAGE_GRAB) as mock_grab, patch(_UIA) as mock_uia, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab,
+            patch(_UIA) as mock_uia,
+            patch(_PG),
+        ):
             mock_grab.grab.return_value = base_img
             mock_uia.GetVirtualScreenRect.return_value = (0, 0, 200, 100)
             result = svc.get_annotated_screenshot([])
@@ -412,7 +482,12 @@ class TestGetAnnotatedScreenshot:
     def test_output_mode_is_rgb(self, svc: ScreenService):
         """The padded output image must use RGB mode."""
         base_img = _make_rgb_image(100, 80)
-        with patch(_IMAGE_GRAB) as mock_grab, patch(_UIA) as mock_uia, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab,
+            patch(_UIA) as mock_uia,
+            patch(_PG),
+        ):
             mock_grab.grab.return_value = base_img
             mock_uia.GetVirtualScreenRect.return_value = (0, 0, 100, 80)
             result = svc.get_annotated_screenshot([])
@@ -421,7 +496,12 @@ class TestGetAnnotatedScreenshot:
     def test_empty_nodes_list_still_returns_image(self, svc: ScreenService):
         """An empty node list must produce a valid padded image without error."""
         base_img = _make_rgb_image(320, 240)
-        with patch(_IMAGE_GRAB) as mock_grab, patch(_UIA) as mock_uia, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab,
+            patch(_UIA) as mock_uia,
+            patch(_PG),
+        ):
             mock_grab.grab.return_value = base_img
             mock_uia.GetVirtualScreenRect.return_value = (0, 0, 320, 240)
             result = svc.get_annotated_screenshot([])
@@ -432,7 +512,12 @@ class TestGetAnnotatedScreenshot:
         """A single TreeElementNode must be annotated without error."""
         base_img = _make_rgb_image(400, 300)
         node = _make_node(10, 20, 110, 70)
-        with patch(_IMAGE_GRAB) as mock_grab, patch(_UIA) as mock_uia, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab,
+            patch(_UIA) as mock_uia,
+            patch(_PG),
+        ):
             mock_grab.grab.return_value = base_img
             mock_uia.GetVirtualScreenRect.return_value = (0, 0, 400, 300)
             result = svc.get_annotated_screenshot([node])
@@ -446,7 +531,12 @@ class TestGetAnnotatedScreenshot:
             _make_node(200, 100, 400, 200),
             _make_node(500, 400, 700, 580),
         ]
-        with patch(_IMAGE_GRAB) as mock_grab, patch(_UIA) as mock_uia, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab,
+            patch(_UIA) as mock_uia,
+            patch(_PG),
+        ):
             mock_grab.grab.return_value = base_img
             mock_uia.GetVirtualScreenRect.return_value = (0, 0, 800, 600)
             result = svc.get_annotated_screenshot(nodes)
@@ -460,7 +550,12 @@ class TestGetAnnotatedScreenshot:
         """GetVirtualScreenRect must be called exactly once per annotated screenshot."""
         base_img = _make_rgb_image(100, 100)
         node = _make_node(0, 0, 50, 50)
-        with patch(_IMAGE_GRAB) as mock_grab, patch(_UIA) as mock_uia, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab,
+            patch(_UIA) as mock_uia,
+            patch(_PG),
+        ):
             mock_grab.grab.return_value = base_img
             mock_uia.GetVirtualScreenRect.return_value = (0, 0, 100, 100)
             svc.get_annotated_screenshot([node])
@@ -470,7 +565,12 @@ class TestGetAnnotatedScreenshot:
         """A negative left/top offset (secondary monitor left of primary) must not raise."""
         base_img = _make_rgb_image(400, 300)
         node = _make_node(50, 50, 200, 150)
-        with patch(_IMAGE_GRAB) as mock_grab, patch(_UIA) as mock_uia, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab,
+            patch(_UIA) as mock_uia,
+            patch(_PG),
+        ):
             mock_grab.grab.return_value = base_img
             # Simulate a monitor layout where the virtual origin is at (-1920, 0)
             mock_uia.GetVirtualScreenRect.return_value = (-1920, 0, -1520, 300)
@@ -501,7 +601,12 @@ class TestGetAnnotatedScreenshot:
                 raise IOError("arial.ttf not found")
             return _original_truetype(path_or_stream, size, **kwargs)
 
-        with patch(_IMAGE_GRAB) as mock_grab, patch(_UIA) as mock_uia, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab,
+            patch(_UIA) as mock_uia,
+            patch(_PG),
+        ):
             mock_grab.grab.return_value = base_img
             mock_uia.GetVirtualScreenRect.return_value = (0, 0, 200, 150)
             with patch("windows_mcp.screen.service.ImageFont.truetype", side_effect=fake_truetype):
@@ -524,7 +629,12 @@ class TestGetAnnotatedScreenshot:
     def test_annotated_screenshot_uses_imagegrab_fallback(self, svc: ScreenService):
         """When ImageGrab raises, the annotated path must still succeed via fallback."""
         fallback_img = _make_rgb_image(640, 480)
-        with patch(_IMAGE_GRAB) as mock_grab, patch(_PG) as mock_pg, patch(_UIA) as mock_uia:
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab,
+            patch(_PG) as mock_pg,
+            patch(_UIA) as mock_uia,
+        ):
             mock_grab.grab.side_effect = OSError("grab unavailable")
             mock_pg.screenshot.return_value = fallback_img
             mock_uia.GetVirtualScreenRect.return_value = (0, 0, 640, 480)
@@ -549,7 +659,12 @@ class TestGetAnnotatedScreenshot:
     def test_padded_dimensions_for_various_resolutions(self, svc: ScreenService, w: int, h: int):
         """Padding of 5 px is always applied on each side for any resolution."""
         base_img = _make_rgb_image(w, h)
-        with patch(_IMAGE_GRAB) as mock_grab, patch(_UIA) as mock_uia, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab,
+            patch(_UIA) as mock_uia,
+            patch(_PG),
+        ):
             mock_grab.grab.return_value = base_img
             mock_uia.GetVirtualScreenRect.return_value = (0, 0, w, h)
             result = svc.get_annotated_screenshot([])
@@ -564,7 +679,12 @@ class TestGetAnnotatedScreenshot:
         """Annotating 20 nodes must not alter the padded output image dimensions."""
         base_img = _make_rgb_image(640, 480)
         nodes = [_make_node(i * 20, i * 10, i * 20 + 15, i * 10 + 10) for i in range(20)]
-        with patch(_IMAGE_GRAB) as mock_grab, patch(_UIA) as mock_uia, patch(_PG):
+        with (
+            patch(_NATIVE_SCREENSHOT, return_value=None),
+            patch(_IMAGE_GRAB) as mock_grab,
+            patch(_UIA) as mock_uia,
+            patch(_PG),
+        ):
             mock_grab.grab.return_value = base_img
             mock_uia.GetVirtualScreenRect.return_value = (0, 0, 640, 480)
             result = svc.get_annotated_screenshot(nodes)

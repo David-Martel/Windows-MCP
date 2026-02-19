@@ -4,6 +4,7 @@ Stateless service providing screenshot capture, bounding-box annotation,
 screen size queries, DPI scaling, and cursor operations.
 """
 
+import io
 import logging
 import random
 
@@ -12,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageGrab
 
 import windows_mcp.uia as uia
 from windows_mcp.desktop.views import Size
+from windows_mcp.native import native_capture_screenshot_png
 from windows_mcp.tree.views import TreeElementNode
 
 logger = logging.getLogger(__name__)
@@ -45,7 +47,20 @@ class ScreenService:
         return uia.ControlFromCursor()
 
     def get_screenshot(self) -> Image.Image:
-        """Capture the full virtual screen as a PIL Image."""
+        """Capture the full virtual screen as a PIL Image.
+
+        Tries Rust DXGI/GDI capture first (10-50ms), falls back to
+        PIL ImageGrab (100-200ms), then pyautogui as last resort.
+        """
+        # Fast path: Rust DXGI/GDI capture
+        png_bytes = native_capture_screenshot_png(0)
+        if png_bytes is not None:
+            try:
+                return Image.open(io.BytesIO(png_bytes))
+            except Exception:
+                logger.warning("Failed to decode Rust screenshot PNG, falling back")
+
+        # Fallback: PIL ImageGrab
         try:
             return ImageGrab.grab(all_screens=True)
         except Exception:

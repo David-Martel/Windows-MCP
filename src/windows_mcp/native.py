@@ -250,3 +250,42 @@ def native_list_windows() -> list[dict] | None:
     except Exception:
         logger.warning("native_list_windows failed, falling back", exc_info=True)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Screenshot functions
+# ---------------------------------------------------------------------------
+
+
+def native_capture_screenshot_png(monitor_index: int = 0) -> bytes | None:
+    """Capture a screenshot via DXGI/GDI and return PNG bytes.
+
+    Args:
+        monitor_index: Zero-based monitor index (0 = primary).
+
+    Returns PNG file bytes, or None if unavailable.
+    """
+    if not HAS_NATIVE:
+        return None
+    try:
+        return windows_mcp_core.capture_screenshot_png(monitor_index)
+    except Exception:
+        logger.warning("native_capture_screenshot_png failed, falling back", exc_info=True)
+        return None
+
+
+def native_capture_screenshot_raw(monitor_index: int = 0) -> dict | None:
+    """Capture a screenshot via DXGI/GDI and return raw BGRA data.
+
+    Args:
+        monitor_index: Zero-based monitor index (0 = primary).
+
+    Returns dict with keys: width, height, data (bytes), or None if unavailable.
+    """
+    if not HAS_NATIVE:
+        return None
+    try:
+        return windows_mcp_core.capture_screenshot_raw(monitor_index)
+    except Exception:
+        logger.warning("native_capture_screenshot_raw failed, falling back", exc_info=True)
+        return None
