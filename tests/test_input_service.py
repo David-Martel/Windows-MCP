@@ -755,3 +755,373 @@ class TestMultiEdit:
         with patch.object(svc, "type") as mock_type:
             svc.multi_edit([(-1, -2, "neg")])
             mock_type.assert_called_once_with((-1, -2), text="neg", clear=True)
+
+
+# ===========================================================================
+# _try_value_pattern()
+# ===========================================================================
+
+
+def _make_value_pattern(
+    is_read_only: bool = False,
+    current_value: str = "",
+    set_value_side_effect=None,
+):
+    """Build a mock ValuePattern with configurable properties."""
+    pattern = MagicMock()
+    pattern.IsReadOnly = is_read_only
+    pattern.Value = current_value
+    if set_value_side_effect is not None:
+        pattern.SetValue.side_effect = set_value_side_effect
+    return pattern
+
+
+def _make_uia_mock(element=MagicMock(), pattern=MagicMock()):
+    """Build a mock uia module for _try_value_pattern tests."""
+    mock_uia = MagicMock()
+    mock_uia.ControlFromPoint.return_value = element
+    element.GetPattern.return_value = pattern
+    return mock_uia
+
+
+class TestTryValuePattern:
+    """Unit tests for InputService._try_value_pattern()."""
+
+    # ------------------------------------------------------------------
+    # Happy path: element found, writable pattern present
+    # ------------------------------------------------------------------
+
+    def test_clear_true_calls_set_value_with_text(self, svc):
+        pattern = _make_value_pattern(current_value="old")
+        with patch(_UIA) as mock_uia:
+            mock_uia.ControlFromPoint.return_value = MagicMock()
+            mock_uia.ControlFromPoint.return_value.GetPattern.return_value = pattern
+            result = InputService._try_value_pattern(100, 200, "new_text", clear=True)
+        assert result is True
+        pattern.SetValue.assert_called_once_with("new_text")
+
+    def test_clear_false_appends_to_current_value(self, svc):
+        pattern = _make_value_pattern(current_value="hello")
+        with patch(_UIA) as mock_uia:
+            mock_uia.ControlFromPoint.return_value = MagicMock()
+            mock_uia.ControlFromPoint.return_value.GetPattern.return_value = pattern
+            result = InputService._try_value_pattern(100, 200, " world", clear=False)
+        assert result is True
+        pattern.SetValue.assert_called_once_with("hello world")
+
+    def test_clear_false_with_none_current_value_treats_as_empty(self, svc):
+        """When Value is None, treat it as empty string and just append."""
+        pattern = _make_value_pattern(current_value=None)
+        with patch(_UIA) as mock_uia:
+            mock_uia.ControlFromPoint.return_value = MagicMock()
+            mock_uia.ControlFromPoint.return_value.GetPattern.return_value = pattern
+            result = InputService._try_value_pattern(0, 0, "appended", clear=False)
+        assert result is True
+        pattern.SetValue.assert_called_once_with("appended")
+
+    def test_clear_false_empty_current_value_appends_text(self, svc):
+        pattern = _make_value_pattern(current_value="")
+        with patch(_UIA) as mock_uia:
+            mock_uia.ControlFromPoint.return_value = MagicMock()
+            mock_uia.ControlFromPoint.return_value.GetPattern.return_value = pattern
+            result = InputService._try_value_pattern(0, 0, "typed", clear=False)
+        assert result is True
+        pattern.SetValue.assert_called_once_with("typed")
+
+    def test_returns_true_on_success(self, svc):
+        pattern = _make_value_pattern()
+        with patch(_UIA) as mock_uia:
+            mock_uia.ControlFromPoint.return_value = MagicMock()
+            mock_uia.ControlFromPoint.return_value.GetPattern.return_value = pattern
+            result = InputService._try_value_pattern(50, 50, "text", clear=True)
+        assert result is True
+
+    def test_coordinates_passed_to_control_from_point(self, svc):
+        pattern = _make_value_pattern()
+        with patch(_UIA) as mock_uia:
+            mock_uia.ControlFromPoint.return_value = MagicMock()
+            mock_uia.ControlFromPoint.return_value.GetPattern.return_value = pattern
+            InputService._try_value_pattern(300, 400, "x", clear=True)
+        mock_uia.ControlFromPoint.assert_called_once_with(300, 400)
+
+    def test_pattern_id_value_pattern_used_for_get_pattern(self, svc):
+        pattern = _make_value_pattern()
+        with patch(_UIA) as mock_uia:
+            elem = MagicMock()
+            elem.GetPattern.return_value = pattern
+            mock_uia.ControlFromPoint.return_value = elem
+            InputService._try_value_pattern(0, 0, "x", clear=True)
+        elem.GetPattern.assert_called_once_with(mock_uia.PatternId.ValuePattern)
+
+    # ------------------------------------------------------------------
+    # Failure cases: no element, no pattern, read-only, exception
+    # ------------------------------------------------------------------
+
+    def test_returns_false_when_no_element(self, svc):
+        with patch(_UIA) as mock_uia:
+            mock_uia.ControlFromPoint.return_value = None
+            result = InputService._try_value_pattern(0, 0, "text", clear=True)
+        assert result is False
+
+    def test_returns_false_when_no_pattern(self, svc):
+        with patch(_UIA) as mock_uia:
+            elem = MagicMock()
+            elem.GetPattern.return_value = None
+            mock_uia.ControlFromPoint.return_value = elem
+            result = InputService._try_value_pattern(0, 0, "text", clear=True)
+        assert result is False
+
+    def test_returns_false_when_pattern_is_falsy(self, svc):
+        with patch(_UIA) as mock_uia:
+            elem = MagicMock()
+            elem.GetPattern.return_value = False
+            mock_uia.ControlFromPoint.return_value = elem
+            result = InputService._try_value_pattern(0, 0, "text", clear=True)
+        assert result is False
+
+    def test_returns_false_when_read_only(self, svc):
+        pattern = _make_value_pattern(is_read_only=True)
+        with patch(_UIA) as mock_uia:
+            elem = MagicMock()
+            elem.GetPattern.return_value = pattern
+            mock_uia.ControlFromPoint.return_value = elem
+            result = InputService._try_value_pattern(0, 0, "text", clear=True)
+        assert result is False
+        pattern.SetValue.assert_not_called()
+
+    def test_returns_false_on_control_from_point_exception(self, svc):
+        with patch(_UIA) as mock_uia:
+            mock_uia.ControlFromPoint.side_effect = OSError("COM error")
+            result = InputService._try_value_pattern(0, 0, "text", clear=True)
+        assert result is False
+
+    def test_returns_false_on_get_pattern_exception(self, svc):
+        with patch(_UIA) as mock_uia:
+            elem = MagicMock()
+            elem.GetPattern.side_effect = RuntimeError("pattern failed")
+            mock_uia.ControlFromPoint.return_value = elem
+            result = InputService._try_value_pattern(0, 0, "text", clear=True)
+        assert result is False
+
+    def test_returns_false_on_set_value_exception(self, svc):
+        pattern = _make_value_pattern(set_value_side_effect=RuntimeError("write failed"))
+        with patch(_UIA) as mock_uia:
+            elem = MagicMock()
+            elem.GetPattern.return_value = pattern
+            mock_uia.ControlFromPoint.return_value = elem
+            result = InputService._try_value_pattern(0, 0, "text", clear=True)
+        assert result is False
+
+    def test_returns_false_on_is_read_only_exception(self, svc):
+        """If accessing IsReadOnly raises, return False gracefully."""
+        pattern = MagicMock()
+        type(pattern).IsReadOnly = property(lambda self: (_ for _ in ()).throw(OSError("access")))
+        with patch(_UIA) as mock_uia:
+            elem = MagicMock()
+            elem.GetPattern.return_value = pattern
+            mock_uia.ControlFromPoint.return_value = elem
+            result = InputService._try_value_pattern(0, 0, "text", clear=True)
+        assert result is False
+
+    # ------------------------------------------------------------------
+    # Edge cases
+    # ------------------------------------------------------------------
+
+    def test_empty_text_clear_true_sets_empty_string(self, svc):
+        pattern = _make_value_pattern(current_value="existing")
+        with patch(_UIA) as mock_uia:
+            elem = MagicMock()
+            elem.GetPattern.return_value = pattern
+            mock_uia.ControlFromPoint.return_value = elem
+            result = InputService._try_value_pattern(0, 0, "", clear=True)
+        assert result is True
+        pattern.SetValue.assert_called_once_with("")
+
+    def test_unicode_text_passed_to_set_value(self, svc):
+        pattern = _make_value_pattern()
+        with patch(_UIA) as mock_uia:
+            elem = MagicMock()
+            elem.GetPattern.return_value = pattern
+            mock_uia.ControlFromPoint.return_value = elem
+            result = InputService._try_value_pattern(0, 0, "\U0001f600 emoji", clear=True)
+        assert result is True
+        pattern.SetValue.assert_called_once_with("\U0001f600 emoji")
+
+    def test_large_text_passed_through(self, svc):
+        big_text = "x" * 10_000
+        pattern = _make_value_pattern()
+        with patch(_UIA) as mock_uia:
+            elem = MagicMock()
+            elem.GetPattern.return_value = pattern
+            mock_uia.ControlFromPoint.return_value = elem
+            result = InputService._try_value_pattern(0, 0, big_text, clear=True)
+        assert result is True
+        pattern.SetValue.assert_called_once_with(big_text)
+
+    def test_zero_zero_coordinates_passed_to_control_from_point(self, svc):
+        pattern = _make_value_pattern()
+        with patch(_UIA) as mock_uia:
+            elem = MagicMock()
+            elem.GetPattern.return_value = pattern
+            mock_uia.ControlFromPoint.return_value = elem
+            InputService._try_value_pattern(0, 0, "x", clear=True)
+        mock_uia.ControlFromPoint.assert_called_once_with(0, 0)
+
+    def test_negative_coordinates_passed_to_control_from_point(self, svc):
+        pattern = _make_value_pattern()
+        with patch(_UIA) as mock_uia:
+            elem = MagicMock()
+            elem.GetPattern.return_value = pattern
+            mock_uia.ControlFromPoint.return_value = elem
+            InputService._try_value_pattern(-10, -20, "x", clear=True)
+        mock_uia.ControlFromPoint.assert_called_once_with(-10, -20)
+
+
+# ===========================================================================
+# type() + ValuePattern integration
+# ===========================================================================
+
+
+class TestTypeValuePatternIntegration:
+    """Integration tests for how type() dispatches to _try_value_pattern."""
+
+    def test_idle_caret_success_skips_left_click(self, svc):
+        """When ValuePattern succeeds and caret='idle', pg.leftClick is NOT called."""
+        with (
+            patch(_PG) as mock_pg,
+            patch(_NATIVE_TEXT, return_value=1),
+            patch.object(InputService, "_try_value_pattern", return_value=True),
+        ):
+            svc.type((100, 200), text="hello", caret_position="idle")
+        mock_pg.leftClick.assert_not_called()
+
+    def test_idle_caret_success_skips_native_send_text(self, svc):
+        """When ValuePattern succeeds, native_send_text is NOT called."""
+        with (
+            patch(_PG),
+            patch(_NATIVE_TEXT) as mock_text,
+            patch.object(InputService, "_try_value_pattern", return_value=True),
+        ):
+            svc.type((100, 200), text="hello", caret_position="idle")
+        mock_text.assert_not_called()
+
+    def test_idle_caret_failure_falls_through_to_click_and_type(self, svc):
+        """When ValuePattern fails and caret='idle', falls through to standard path."""
+        with (
+            patch(_PG) as mock_pg,
+            patch(_NATIVE_TEXT, return_value=1),
+            patch.object(InputService, "_try_value_pattern", return_value=False),
+        ):
+            svc.type((100, 200), text="hello", caret_position="idle")
+        mock_pg.leftClick.assert_called_once_with(100, 200)
+
+    def test_start_caret_never_calls_value_pattern(self, svc):
+        """caret_position='start' should skip ValuePattern entirely."""
+        with (
+            patch(_PG),
+            patch(_NATIVE_TEXT, return_value=1),
+            patch.object(InputService, "_try_value_pattern") as mock_vp,
+        ):
+            svc.type((100, 200), text="hello", caret_position="start")
+        mock_vp.assert_not_called()
+
+    def test_end_caret_never_calls_value_pattern(self, svc):
+        """caret_position='end' should skip ValuePattern entirely."""
+        with (
+            patch(_PG),
+            patch(_NATIVE_TEXT, return_value=1),
+            patch.object(InputService, "_try_value_pattern") as mock_vp,
+        ):
+            svc.type((100, 200), text="hello", caret_position="end")
+        mock_vp.assert_not_called()
+
+    def test_idle_caret_success_with_press_enter_calls_enter(self, svc):
+        """After ValuePattern success, press_enter=True should still press Enter."""
+        with (
+            patch(_PG) as mock_pg,
+            patch(_NATIVE_TEXT, return_value=1),
+            patch.object(InputService, "_try_value_pattern", return_value=True),
+        ):
+            svc.type((100, 200), text="hello", caret_position="idle", press_enter=True)
+        mock_pg.press.assert_called_once_with("enter")
+
+    def test_idle_caret_success_without_press_enter_no_enter_key(self, svc):
+        """After ValuePattern success, press_enter=False means no Enter keypress."""
+        with (
+            patch(_PG) as mock_pg,
+            patch(_NATIVE_TEXT, return_value=1),
+            patch.object(InputService, "_try_value_pattern", return_value=True),
+        ):
+            svc.type((100, 200), text="hello", caret_position="idle", press_enter=False)
+        mock_pg.press.assert_not_called()
+
+    def test_value_pattern_called_with_correct_args_clear_true(self, svc):
+        """Verify _try_value_pattern receives x, y, text, and is_clear correctly."""
+        with (
+            patch(_PG),
+            patch(_NATIVE_TEXT, return_value=1),
+            patch.object(InputService, "_try_value_pattern", return_value=True) as mock_vp,
+        ):
+            svc.type((300, 400), text="abc", caret_position="idle", clear=True)
+        mock_vp.assert_called_once_with(300, 400, "abc", True)
+
+    def test_value_pattern_called_with_correct_args_clear_false(self, svc):
+        """clear=False must propagate as False to _try_value_pattern."""
+        with (
+            patch(_PG),
+            patch(_NATIVE_TEXT, return_value=1),
+            patch.object(InputService, "_try_value_pattern", return_value=True) as mock_vp,
+        ):
+            svc.type((300, 400), text="abc", caret_position="idle", clear=False)
+        mock_vp.assert_called_once_with(300, 400, "abc", False)
+
+    def test_value_pattern_called_with_string_clear_true_coerced(self, svc):
+        """clear='true' (string) must coerce to bool True before reaching _try_value_pattern."""
+        with (
+            patch(_PG),
+            patch(_NATIVE_TEXT, return_value=1),
+            patch.object(InputService, "_try_value_pattern", return_value=True) as mock_vp,
+        ):
+            svc.type((0, 0), text="x", caret_position="idle", clear="true")
+        mock_vp.assert_called_once_with(0, 0, "x", True)
+
+    def test_idle_caret_calls_value_pattern_once(self, svc):
+        """_try_value_pattern must be called exactly once per type() invocation."""
+        with (
+            patch(_PG),
+            patch(_NATIVE_TEXT, return_value=1),
+            patch.object(InputService, "_try_value_pattern", return_value=True) as mock_vp,
+        ):
+            svc.type((10, 20), text="test", caret_position="idle")
+        assert mock_vp.call_count == 1
+
+    def test_idle_failure_clear_true_falls_through_with_select_all(self, svc):
+        """When ValuePattern fails and clear=True, standard path does ctrl+a, backspace."""
+        with (
+            patch(_PG) as mock_pg,
+            patch(_NATIVE_TEXT, return_value=1),
+            patch.object(InputService, "_try_value_pattern", return_value=False),
+        ):
+            svc.type((0, 0), text="x", caret_position="idle", clear=True)
+        mock_pg.hotkey.assert_called_with("ctrl", "a")
+        mock_pg.press.assert_any_call("backspace")
+
+    def test_start_caret_standard_path_uses_left_click_and_home(self, svc):
+        """caret='start' always goes through standard path: leftClick + Home key."""
+        with (
+            patch(_PG) as mock_pg,
+            patch(_NATIVE_TEXT, return_value=1),
+        ):
+            svc.type((50, 60), text="hi", caret_position="start")
+        mock_pg.leftClick.assert_called_once_with(50, 60)
+        mock_pg.press.assert_any_call("home")
+
+    def test_end_caret_standard_path_uses_left_click_and_end(self, svc):
+        """caret='end' always goes through standard path: leftClick + End key."""
+        with (
+            patch(_PG) as mock_pg,
+            patch(_NATIVE_TEXT, return_value=1),
+        ):
+            svc.type((50, 60), text="hi", caret_position="end")
+        mock_pg.leftClick.assert_called_once_with(50, 60)
+        mock_pg.press.assert_any_call("end")
