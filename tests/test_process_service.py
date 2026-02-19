@@ -224,9 +224,7 @@ class TestListProcesses:
 
         # Simulate AccessDenied raised when accessing .info
         denied_proc = MagicMock()
-        type(denied_proc).info = property(
-            fget=MagicMock(side_effect=psutil.AccessDenied(pid=2))
-        )
+        type(denied_proc).info = property(fget=MagicMock(side_effect=psutil.AccessDenied(pid=2)))
 
         with patch("psutil.process_iter", return_value=[denied_proc, good_proc]):
             result = svc.list_processes()
@@ -235,9 +233,7 @@ class TestListProcesses:
 
     def test_no_such_process_is_skipped(self, svc: ProcessService):
         gone_proc = MagicMock()
-        type(gone_proc).info = property(
-            fget=MagicMock(side_effect=psutil.NoSuchProcess(pid=99))
-        )
+        type(gone_proc).info = property(fget=MagicMock(side_effect=psutil.NoSuchProcess(pid=99)))
         good_proc = _make_proc(1, "alive.exe")
 
         with patch("psutil.process_iter", return_value=[gone_proc, good_proc]):
@@ -454,9 +450,7 @@ class TestKillProcess:
         good_proc.kill = MagicMock()
 
         denied_proc = MagicMock()
-        type(denied_proc).info = property(
-            fget=MagicMock(side_effect=psutil.AccessDenied(pid=701))
-        )
+        type(denied_proc).info = property(fget=MagicMock(side_effect=psutil.AccessDenied(pid=701)))
 
         with patch("psutil.process_iter", return_value=[denied_proc, good_proc]):
             result = svc.kill_process(name="target.exe")
@@ -471,9 +465,7 @@ class TestKillProcess:
         good_proc.kill = MagicMock()
 
         gone_proc = MagicMock()
-        type(gone_proc).info = property(
-            fget=MagicMock(side_effect=psutil.NoSuchProcess(pid=801))
-        )
+        type(gone_proc).info = property(fget=MagicMock(side_effect=psutil.NoSuchProcess(pid=801)))
 
         with patch("psutil.process_iter", return_value=[gone_proc, good_proc]):
             result = svc.kill_process(name="alive.exe")

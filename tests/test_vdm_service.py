@@ -2149,9 +2149,7 @@ class TestGetDesktopInfo:
 
     def test_all_desktops_count_matches_entries(self):
         """all_desktops contains one entry per enumerated desktop."""
-        entries = self._make_entries(
-            [(f"{{G{i}}}", f"Desktop {i + 1}") for i in range(4)]
-        )
+        entries = self._make_entries([(f"{{G{i}}}", f"Desktop {i + 1}") for i in range(4)])
         current_obj = MagicMock()
         current_obj.GetID.return_value = MagicMock(__str__=MagicMock(return_value="{G0}"))
 
@@ -2211,9 +2209,7 @@ class TestGetDesktopInfo:
         entries = self._make_entries([(guid_known, "Desktop 1")])
 
         current_obj = MagicMock()
-        current_obj.GetID.return_value = MagicMock(
-            __str__=MagicMock(return_value=guid_current)
-        )
+        current_obj.GetID.return_value = MagicMock(__str__=MagicMock(return_value=guid_current))
 
         internal = MagicMock()
         internal.GetCurrentDesktop.return_value = current_obj
@@ -2231,9 +2227,7 @@ class TestGetDesktopInfo:
         entries = self._make_entries([("{G1}", "Desktop 1"), ("{G2}", "Desktop 2")])
 
         current_obj = MagicMock()
-        current_obj.GetID.return_value = MagicMock(
-            __str__=MagicMock(return_value="{NOT-IN-LIST}")
-        )
+        current_obj.GetID.return_value = MagicMock(__str__=MagicMock(return_value="{NOT-IN-LIST}"))
 
         internal = MagicMock()
         internal.GetCurrentDesktop.return_value = current_obj
@@ -2253,9 +2247,7 @@ class TestGetDesktopInfo:
         entries = self._make_entries([("{RET-GUID}", "Desktop 1")])
 
         current_obj = MagicMock()
-        current_obj.GetID.return_value = MagicMock(
-            __str__=MagicMock(return_value="{RET-GUID}")
-        )
+        current_obj.GetID.return_value = MagicMock(__str__=MagicMock(return_value="{RET-GUID}"))
 
         internal = MagicMock()
         internal.GetCurrentDesktop.return_value = current_obj
