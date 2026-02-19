@@ -3,6 +3,7 @@ import os
 import threading
 import weakref
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from time import time
 from typing import TYPE_CHECKING, Any
 
@@ -42,8 +43,23 @@ from windows_mcp.uia import (
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# Per-window tree cache TTL (seconds).  Background windows older than this
+# are re-traversed even without a WatchDog invalidation event.
+_WINDOW_CACHE_TTL = 30.0
+
 if TYPE_CHECKING:
     from windows_mcp.desktop.service import Desktop
+
+
+@dataclass
+class _CachedWindowNodes:
+    """Per-window tree traversal result, cached for reuse."""
+
+    interactive: list[TreeElementNode] = field(default_factory=list)
+    scrollable: list[ScrollElementNode] = field(default_factory=list)
+    informative: list[TextElementNode] = field(default_factory=list)
+    dom_node: ScrollElementNode | None = None
+    timestamp: float = 0.0
 
 
 class Tree:
@@ -61,6 +77,10 @@ class Tree:
         self.tree_state = None
         self._state_lock = threading.Lock()
         self._last_focus_event: tuple[tuple, float] | None = None
+        # Per-window tree cache: HWND -> cached nodes.  Background windows
+        # are served from cache unless invalidated by WatchDog events.
+        self._window_cache: dict[int, _CachedWindowNodes] = {}
+        self._dirty_windows: set[int] = set()
 
     def get_state(
         self,
@@ -298,15 +318,56 @@ class Tree:
     ]:
         interactive_nodes, scrollable_nodes, dom_informative_nodes = [], [], []
         dom_node: ScrollElementNode | None = None
+        now = time()
+
+        # Active window is always re-traversed (user is interacting with it).
+        active_handle = windows_handles[0] if active_window_flag and windows_handles else None
+
+        # Separate cached background windows from those needing traversal.
+        handles_to_traverse: list[int] = []
+        for handle in windows_handles:
+            if handle == active_handle:
+                handles_to_traverse.append(handle)
+                continue
+
+            cached = self._window_cache.get(handle)
+            if (
+                cached is not None
+                and handle not in self._dirty_windows
+                and (now - cached.timestamp) < _WINDOW_CACHE_TTL
+            ):
+                interactive_nodes.extend(cached.interactive)
+                scrollable_nodes.extend(cached.scrollable)
+                dom_informative_nodes.extend(cached.informative)
+                if cached.dom_node is not None:
+                    dom_node = cached.dom_node
+            else:
+                handles_to_traverse.append(handle)
+
+        cache_hits = len(windows_handles) - len(handles_to_traverse)
+        if cache_hits > 0:
+            logger.info(
+                "Window cache: %d/%d background windows served from cache",
+                cache_hits,
+                len(windows_handles),
+            )
+
+        # Clear dirty set and prune stale cache entries for vanished windows.
+        self._dirty_windows.clear()
+        current_handles = set(windows_handles)
+        stale = [h for h in self._window_cache if h not in current_handles]
+        for h in stale:
+            del self._window_cache[h]
+
+        if not handles_to_traverse:
+            return interactive_nodes, scrollable_nodes, dom_informative_nodes, dom_node
 
         # Pre-calculate browser status in main thread to pass simple types to workers
-        task_inputs = []
-        rust_handles = []  # Non-browser windows for Rust fast-path
-        for handle in windows_handles:
+        task_inputs: list[tuple[int, bool]] = []
+        rust_handles: list[int] = []
+        for handle in handles_to_traverse:
             is_browser = False
             try:
-                # Use temporary control for property check in main thread
-                # This is safe as we don't pass this specific COM object to the thread
                 temp_node = ControlFromHandle(handle)
                 if active_window_flag and temp_node.ClassName == "Progman":
                     continue
@@ -315,43 +376,56 @@ class Tree:
                 logger.debug("Failed to check browser status for handle %s", handle, exc_info=True)
 
             if is_browser or use_dom:
-                # Browser windows need full Python path (DOM mode, pattern queries)
                 task_inputs.append((handle, is_browser))
             else:
                 rust_handles.append(handle)
 
-        # Rust fast-path for non-browser windows (parallel Rayon traversal)
+        # Rust fast-path for non-browser windows (parallel Rayon traversal).
+        # Process each window snapshot individually for per-window caching.
         if rust_handles:
             rust_start = time()
             rust_tree = native_capture_tree(rust_handles, max_depth=50)
             if rust_tree is not None:
-                for snapshot in rust_tree:
+                for i, snapshot in enumerate(rust_tree):
+                    hwnd = rust_handles[i] if i < len(rust_handles) else 0
+                    per_window_int: list[TreeElementNode] = []
+                    per_window_scroll: list[ScrollElementNode] = []
                     rect = snapshot.get("bounding_rect", [0, 0, 0, 0])
                     wname = snapshot.get("name", "").strip()
                     wname = app_name_correction(wname)
                     self._classify_rust_tree(
-                        snapshot, wname, rect, interactive_nodes, scrollable_nodes
+                        snapshot, wname, rect, per_window_int, per_window_scroll
+                    )
+                    interactive_nodes.extend(per_window_int)
+                    scrollable_nodes.extend(per_window_scroll)
+                    # Cache per-window results
+                    self._window_cache[hwnd] = _CachedWindowNodes(
+                        interactive=per_window_int,
+                        scrollable=per_window_scroll,
+                        timestamp=now,
                     )
                 logger.info(
                     "Rust fast-path: %d windows, %d interactive elements in %.2fs",
                     len(rust_handles),
-                    len(interactive_nodes),
+                    sum(
+                        len(self._window_cache.get(h, _CachedWindowNodes()).interactive)
+                        for h in rust_handles
+                    ),
                     time() - rust_start,
                 )
             else:
-                # Rust unavailable -- fall back to Python for all
                 for handle in rust_handles:
                     task_inputs.append((handle, False))
 
         with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as executor:
-            retry_counts = {handle: 0 for handle in windows_handles}
+            retry_counts = {handle: 0 for handle in handles_to_traverse}
             future_to_handle = {
                 executor.submit(self.get_nodes, handle, is_browser, use_dom): handle
                 for handle, is_browser in task_inputs
             }
-            while future_to_handle:  # keep running until no pending futures
+            while future_to_handle:
                 for future in as_completed(list(future_to_handle)):
-                    handle = future_to_handle.pop(future)  # remove completed future
+                    handle = future_to_handle.pop(future)
                     try:
                         result = future.result()
                         if result:
@@ -361,6 +435,14 @@ class Tree:
                             dom_informative_nodes.extend(info_nodes)
                             if window_dom_node is not None:
                                 dom_node = window_dom_node
+                            # Cache per-window results
+                            self._window_cache[handle] = _CachedWindowNodes(
+                                interactive=list(element_nodes),
+                                scrollable=list(scroll_nodes),
+                                informative=list(info_nodes),
+                                dom_node=window_dom_node,
+                                timestamp=now,
+                            )
                     except Exception as e:
                         retry_counts[handle] += 1
                         logger.debug(
@@ -370,8 +452,9 @@ class Tree:
                             e,
                         )
                         if retry_counts[handle] < THREAD_MAX_RETRIES:
-                            # Need to find is_browser again for retry
-                            is_browser = next((ib for h, ib in task_inputs if h == handle), False)
+                            is_browser = next(
+                                (ib for h, ib in task_inputs if h == handle), False
+                            )
                             new_future = executor.submit(
                                 self.get_nodes, handle, is_browser, use_dom
                             )
@@ -1026,6 +1109,11 @@ class Tree:
             if com_initialized:
                 comtypes.CoUninitialize()
 
+    def _invalidate_window_cache(self, hwnd: int) -> None:
+        """Mark a window as dirty so its tree cache is refreshed on next get_state()."""
+        if hwnd:
+            self._dirty_windows.add(hwnd)
+
     def _on_focus_change(self, sender: Any):
         """Handle focus change events."""
         # Debounce duplicate events
@@ -1038,6 +1126,13 @@ class Tree:
             if last_key == event_key and (current_time - last_time) < 1.0:
                 return None
         self._last_focus_event = (event_key, current_time)
+
+        # Invalidate the cache for the window containing the focused element.
+        try:
+            hwnd = element.NativeWindowHandle
+            self._invalidate_window_cache(hwnd)
+        except Exception:
+            pass
 
         try:
             logger.debug(
@@ -1052,6 +1147,9 @@ class Tree:
         """Handle property change events."""
         try:
             element = Control.CreateControlFromElement(sender)
+            # Invalidate the cache for the window containing the changed element.
+            hwnd = element.NativeWindowHandle
+            self._invalidate_window_cache(hwnd)
             logger.debug(
                 "[WatchDog] Property changed: ID=%s Value=%s Element: '%s' (%s)",
                 propertyId,

@@ -17,6 +17,15 @@ def tree_instance():
     return Tree(mock_desktop)
 
 
+@pytest.fixture
+def tree_with_desktop():
+    """Return (tree, mock_desktop) so tests can keep the desktop alive through the proxy."""
+    mock_desktop = MagicMock()
+    mock_desktop.get_screen_size.return_value = Size(width=1920, height=1080)
+    tree = Tree(mock_desktop)
+    return tree, mock_desktop
+
+
 class TestIouBoundingBox:
     def test_full_overlap(self, tree_instance):
         window = SimpleNamespace(left=0, top=0, right=500, bottom=500)
@@ -1426,3 +1435,802 @@ class TestDomCorrection:
         result = tree_instance.element_has_child_element(node, "list item", "link")
 
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by window-cache test classes
+# ---------------------------------------------------------------------------
+
+
+def _make_cached_entry(interactive=None, scrollable=None, informative=None, age=0.0):
+    """Build a _CachedWindowNodes with a configurable timestamp age (seconds old)."""
+    from windows_mcp.tree.service import _CachedWindowNodes
+
+    return _CachedWindowNodes(
+        interactive=interactive or [],
+        scrollable=scrollable or [],
+        informative=informative or [],
+        dom_node=None,
+        timestamp=time() - age,
+    )
+
+
+def _make_cached_interactive(name="CachedBtn", age=0.0):
+    """Return a single-element interactive list and a matching cache entry."""
+    node = TreeElementNode(
+        name=name,
+        control_type="Button",
+        bounding_box=BoundingBox(0, 0, 100, 100, 100, 100),
+        center=BoundingBox(0, 0, 100, 100, 100, 100).get_center(),
+        window_name="TestApp",
+        value="",
+        shortcut="",
+        xpath="",
+        is_focused=False,
+    )
+    entry = _make_cached_entry(interactive=[node], age=age)
+    return [node], entry
+
+
+# ---------------------------------------------------------------------------
+# TestWindowCacheHits
+# ---------------------------------------------------------------------------
+
+
+class TestWindowCacheHits:
+    """Tests for per-window cache serving background windows from cache."""
+
+    def test_single_background_window_served_from_cache(self, tree_with_desktop):
+        """
+        A background window with a fresh, non-dirty cache entry is served
+        without any traversal.  native_capture_tree must not be called.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd_active = 100
+        hwnd_bg = 200
+        nodes, entry = _make_cached_interactive("CachedBg")
+        tree._window_cache[hwnd_bg] = entry
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            # Active window: ControlFromHandle returns a non-browser mock
+            active_ctrl = MagicMock()
+            active_ctrl.ClassName = "NotProgman"
+            mock_cfh.return_value = active_ctrl
+            desktop.is_window_browser.return_value = False
+            # Rust returns None so active window falls to task_inputs but no workers start
+            mock_rust.return_value = None
+
+            interactive, _, _, _ = tree.get_window_wise_nodes(
+                windows_handles=[hwnd_active, hwnd_bg],
+                active_window_flag=True,
+            )
+
+        # CachedBg must appear in results (served from cache)
+        assert any(n.name == "CachedBg" for n in interactive)
+        # native_capture_tree is called only for the active window handle
+        call_args = mock_rust.call_args
+        assert hwnd_bg not in call_args[0][0]
+
+    def test_multiple_background_windows_all_served_from_cache(self, tree_with_desktop):
+        """
+        Multiple background windows with valid cache entries are all served
+        from cache and native_capture_tree receives only the active handle.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd_active = 1
+        hwnd_bg1 = 2
+        hwnd_bg2 = 3
+
+        _, entry1 = _make_cached_interactive("Bg1Btn")
+        _, entry2 = _make_cached_interactive("Bg2Btn")
+        tree._window_cache[hwnd_bg1] = entry1
+        tree._window_cache[hwnd_bg2] = entry2
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            active_ctrl = MagicMock()
+            active_ctrl.ClassName = "NotProgman"
+            mock_cfh.return_value = active_ctrl
+            desktop.is_window_browser.return_value = False
+            mock_rust.return_value = None
+
+            interactive, _, _, _ = tree.get_window_wise_nodes(
+                windows_handles=[hwnd_active, hwnd_bg1, hwnd_bg2],
+                active_window_flag=True,
+            )
+
+        names = {n.name for n in interactive}
+        assert "Bg1Btn" in names
+        assert "Bg2Btn" in names
+        rust_handles_arg = mock_rust.call_args[0][0]
+        assert hwnd_bg1 not in rust_handles_arg
+        assert hwnd_bg2 not in rust_handles_arg
+
+    def test_all_cache_hit_returns_early_without_traversal(self, tree_with_desktop):
+        """
+        When every handle has a valid cache entry (no active_window_flag),
+        get_window_wise_nodes returns early and neither native_capture_tree
+        nor ControlFromHandle is called at all.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd1 = 10
+        hwnd2 = 20
+
+        _, entry1 = _make_cached_interactive("W1")
+        _, entry2 = _make_cached_interactive("W2")
+        tree._window_cache[hwnd1] = entry1
+        tree._window_cache[hwnd2] = entry2
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            interactive, scrollable, informative, dom_node = (
+                tree.get_window_wise_nodes(
+                    windows_handles=[hwnd1, hwnd2],
+                    active_window_flag=False,
+                )
+            )
+
+        mock_rust.assert_not_called()
+        mock_cfh.assert_not_called()
+        assert len(interactive) == 2
+
+    def test_active_window_always_re_traversed_even_with_valid_cache(self, tree_with_desktop):
+        """
+        The first handle when active_window_flag=True is always sent for
+        traversal regardless of a warm, non-dirty cache entry.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd_active = 999
+        nodes, entry = _make_cached_interactive("ShouldNotReturn")
+        tree._window_cache[hwnd_active] = entry
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            active_ctrl = MagicMock()
+            active_ctrl.ClassName = "NotProgman"
+            mock_cfh.return_value = active_ctrl
+            desktop.is_window_browser.return_value = False
+            mock_rust.return_value = None  # No Rust results
+
+            tree.get_window_wise_nodes(
+                windows_handles=[hwnd_active],
+                active_window_flag=True,
+            )
+
+        # ControlFromHandle must have been called for the active handle
+        mock_cfh.assert_called()
+        called_handles = [call.args[0] for call in mock_cfh.call_args_list]
+        assert hwnd_active in called_handles
+
+    def test_cache_dom_node_merged_into_result(self, tree_with_desktop):
+        """
+        A cached dom_node from a background window is propagated to the
+        caller's dom_node return value.
+        """
+        from windows_mcp.tree.service import _CachedWindowNodes
+        from windows_mcp.tree.views import ScrollElementNode
+
+        tree, desktop = tree_with_desktop
+        hwnd_bg = 55
+        mock_dom = MagicMock(spec=ScrollElementNode)
+        entry = _CachedWindowNodes(
+            interactive=[],
+            scrollable=[],
+            informative=[],
+            dom_node=mock_dom,
+            timestamp=time(),
+        )
+        tree._window_cache[hwnd_bg] = entry
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree"),
+            patch("windows_mcp.tree.service.ControlFromHandle"),
+        ):
+            _, _, _, dom_node = tree.get_window_wise_nodes(
+                windows_handles=[hwnd_bg],
+                active_window_flag=False,
+            )
+
+        assert dom_node is mock_dom
+
+
+# ---------------------------------------------------------------------------
+# TestWindowCacheInvalidation
+# ---------------------------------------------------------------------------
+
+
+class TestWindowCacheInvalidation:
+    """Tests for dirty-flag invalidation and cache re-traversal."""
+
+    def test_dirty_window_is_re_traversed(self, tree_with_desktop):
+        """
+        A window marked dirty via _invalidate_window_cache is excluded from
+        cache and sent to traversal even though a cache entry exists.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd = 300
+
+        _, entry = _make_cached_interactive("OldData")
+        tree._window_cache[hwnd] = entry
+        tree._invalidate_window_cache(hwnd)
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            ctrl = MagicMock()
+            ctrl.ClassName = "NotProgman"
+            mock_cfh.return_value = ctrl
+            desktop.is_window_browser.return_value = False
+            mock_rust.return_value = None  # Force Python path
+
+            tree.get_window_wise_nodes(
+                windows_handles=[hwnd],
+                active_window_flag=False,
+            )
+
+        # Must reach ControlFromHandle, confirming traversal was triggered
+        mock_cfh.assert_called_with(hwnd)
+
+    def test_dirty_set_cleared_after_call(self, tree_with_desktop):
+        """
+        After get_window_wise_nodes completes, _dirty_windows is empty
+        regardless of how many handles were dirty.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd_a = 400
+        hwnd_b = 401
+        tree._invalidate_window_cache(hwnd_a)
+        tree._invalidate_window_cache(hwnd_b)
+
+        assert len(tree._dirty_windows) == 2
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            ctrl = MagicMock()
+            ctrl.ClassName = "NotProgman"
+            mock_cfh.return_value = ctrl
+            desktop.is_window_browser.return_value = False
+            mock_rust.return_value = None
+
+            tree.get_window_wise_nodes(
+                windows_handles=[hwnd_a, hwnd_b],
+                active_window_flag=False,
+            )
+
+        assert len(tree._dirty_windows) == 0
+
+    def test_invalidate_window_cache_zero_hwnd_is_no_op(self, tree_instance):
+        """_invalidate_window_cache(0) must not add 0 to the dirty set."""
+        tree_instance._invalidate_window_cache(0)
+
+        assert 0 not in tree_instance._dirty_windows
+        assert len(tree_instance._dirty_windows) == 0
+
+    def test_non_dirty_window_beside_dirty_window_still_cached(self, tree_with_desktop):
+        """
+        When one background window is dirty and another is clean, only the
+        dirty window is re-traversed; the clean window is served from cache.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd_dirty = 500
+        hwnd_clean = 501
+
+        _, entry_dirty = _make_cached_interactive("Dirty")
+        _, entry_clean = _make_cached_interactive("Clean")
+        tree._window_cache[hwnd_dirty] = entry_dirty
+        tree._window_cache[hwnd_clean] = entry_clean
+        tree._invalidate_window_cache(hwnd_dirty)
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            ctrl = MagicMock()
+            ctrl.ClassName = "NotProgman"
+            mock_cfh.return_value = ctrl
+            desktop.is_window_browser.return_value = False
+            mock_rust.return_value = None
+
+            interactive, _, _, _ = tree.get_window_wise_nodes(
+                windows_handles=[hwnd_dirty, hwnd_clean],
+                active_window_flag=False,
+            )
+
+        # ControlFromHandle called only for the dirty handle, not the clean one
+        called_handles = [call.args[0] for call in mock_cfh.call_args_list]
+        assert hwnd_dirty in called_handles
+        assert hwnd_clean not in called_handles
+        # Clean window's cached node appears in results
+        assert any(n.name == "Clean" for n in interactive)
+
+
+# ---------------------------------------------------------------------------
+# TestWindowCacheTTL
+# ---------------------------------------------------------------------------
+
+
+class TestWindowCacheTTL:
+    """Tests for TTL-based cache expiry (30-second window)."""
+
+    def test_expired_cache_entry_triggers_re_traversal(self, tree_with_desktop):
+        """
+        A cache entry older than _WINDOW_CACHE_TTL (30 s) must be bypassed
+        and the window re-traversed.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd = 600
+
+        # Age = 31 seconds -- past the 30-second TTL
+        _, entry = _make_cached_interactive("Stale", age=31.0)
+        tree._window_cache[hwnd] = entry
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            ctrl = MagicMock()
+            ctrl.ClassName = "NotProgman"
+            mock_cfh.return_value = ctrl
+            desktop.is_window_browser.return_value = False
+            mock_rust.return_value = None
+
+            tree.get_window_wise_nodes(
+                windows_handles=[hwnd],
+                active_window_flag=False,
+            )
+
+        mock_cfh.assert_called_with(hwnd)
+
+    def test_fresh_cache_entry_is_not_re_traversed(self, tree_with_desktop):
+        """
+        A cache entry younger than _WINDOW_CACHE_TTL must be served from
+        cache without any traversal.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd = 700
+
+        # Age = 5 seconds -- well within the 30-second TTL
+        _, entry = _make_cached_interactive("Fresh", age=5.0)
+        tree._window_cache[hwnd] = entry
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            interactive, _, _, _ = tree.get_window_wise_nodes(
+                windows_handles=[hwnd],
+                active_window_flag=False,
+            )
+
+        mock_rust.assert_not_called()
+        mock_cfh.assert_not_called()
+        assert any(n.name == "Fresh" for n in interactive)
+
+    def test_entry_at_exact_ttl_boundary_is_re_traversed(self, tree_with_desktop):
+        """
+        An entry whose age equals _WINDOW_CACHE_TTL exactly does NOT satisfy
+        the strict less-than check and must be re-traversed.
+        """
+        from windows_mcp.tree.service import _WINDOW_CACHE_TTL, _CachedWindowNodes
+
+        tree, desktop = tree_with_desktop
+        hwnd = 800
+
+        # Patch time() so we can set age precisely to the TTL value
+        base_time = 10_000.0
+        entry_timestamp = base_time - _WINDOW_CACHE_TTL  # exactly at the boundary
+
+        entry = _CachedWindowNodes(timestamp=entry_timestamp)
+        tree._window_cache[hwnd] = entry
+
+        with (
+            patch("windows_mcp.tree.service.time", return_value=base_time),
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            ctrl = MagicMock()
+            ctrl.ClassName = "NotProgman"
+            mock_cfh.return_value = ctrl
+            desktop.is_window_browser.return_value = False
+            mock_rust.return_value = None
+
+            tree.get_window_wise_nodes(
+                windows_handles=[hwnd],
+                active_window_flag=False,
+            )
+
+        mock_cfh.assert_called_with(hwnd)
+
+    def test_just_under_ttl_boundary_is_served_from_cache(self, tree_with_desktop):
+        """
+        An entry one millisecond under _WINDOW_CACHE_TTL still satisfies the
+        strict less-than check and is served from cache.
+        """
+        from windows_mcp.tree.service import _WINDOW_CACHE_TTL, _CachedWindowNodes
+
+        tree, desktop = tree_with_desktop
+        hwnd = 900
+        base_time = 10_000.0
+        age = _WINDOW_CACHE_TTL - 0.001
+        entry_timestamp = base_time - age
+
+        nodes, _ = _make_cached_interactive("JustUnder")
+
+        entry = _CachedWindowNodes(interactive=nodes, timestamp=entry_timestamp)
+        tree._window_cache[hwnd] = entry
+
+        with (
+            patch("windows_mcp.tree.service.time", return_value=base_time),
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            interactive, _, _, _ = tree.get_window_wise_nodes(
+                windows_handles=[hwnd],
+                active_window_flag=False,
+            )
+
+        mock_rust.assert_not_called()
+        mock_cfh.assert_not_called()
+        assert any(n.name == "JustUnder" for n in interactive)
+
+
+# ---------------------------------------------------------------------------
+# TestWindowCachePruning
+# ---------------------------------------------------------------------------
+
+
+class TestWindowCachePruning:
+    """Tests for stale-entry pruning when windows disappear."""
+
+    def test_vanished_window_removed_from_cache(self, tree_with_desktop):
+        """
+        A handle that appears in _window_cache but is absent from the current
+        windows_handles list must be pruned from the cache after the call.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd_present = 1000
+        hwnd_gone = 1001
+
+        _, entry_present = _make_cached_interactive("Present")
+        _, entry_gone = _make_cached_interactive("Gone")
+        tree._window_cache[hwnd_present] = entry_present
+        tree._window_cache[hwnd_gone] = entry_gone
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree"),
+            patch("windows_mcp.tree.service.ControlFromHandle"),
+        ):
+            tree.get_window_wise_nodes(
+                windows_handles=[hwnd_present],
+                active_window_flag=False,
+            )
+
+        assert hwnd_gone not in tree._window_cache
+        assert hwnd_present in tree._window_cache
+
+    def test_multiple_vanished_windows_all_pruned(self, tree_with_desktop):
+        """All stale cache keys not in the current handle list are pruned."""
+        tree, desktop = tree_with_desktop
+        hwnd_active = 2000
+        stale_handles = [2001, 2002, 2003]
+
+        for h in stale_handles:
+            _, entry = _make_cached_interactive(f"Stale{h}")
+            tree._window_cache[h] = entry
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            ctrl = MagicMock()
+            ctrl.ClassName = "NotProgman"
+            mock_cfh.return_value = ctrl
+            desktop.is_window_browser.return_value = False
+            mock_rust.return_value = None
+
+            tree.get_window_wise_nodes(
+                windows_handles=[hwnd_active],
+                active_window_flag=True,
+            )
+
+        for h in stale_handles:
+            assert h not in tree._window_cache
+
+    def test_empty_handle_list_clears_entire_cache(self, tree_with_desktop):
+        """
+        Passing an empty windows_handles list causes all cache entries to be
+        pruned because no handle appears in the current set.
+        """
+        tree, desktop = tree_with_desktop
+        for h in [3000, 3001, 3002]:
+            _, entry = _make_cached_interactive(f"W{h}")
+            tree._window_cache[h] = entry
+
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree"),
+            patch("windows_mcp.tree.service.ControlFromHandle"),
+        ):
+            tree.get_window_wise_nodes(
+                windows_handles=[],
+                active_window_flag=False,
+            )
+
+        assert len(tree._window_cache) == 0
+
+
+# ---------------------------------------------------------------------------
+# TestWindowCachePopulation
+# ---------------------------------------------------------------------------
+
+
+class TestWindowCachePopulation:
+    """Tests that traversal results are stored back into _window_cache."""
+
+    def test_rust_fast_path_populates_cache(self, tree_with_desktop):
+        """
+        When native_capture_tree returns a snapshot, the result is stored in
+        _window_cache under the corresponding HWND.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd = 4000
+
+        rust_snapshot = {
+            "name": "TestApp",
+            "bounding_rect": [0.0, 0.0, 800.0, 600.0],
+            "control_type": "Window",
+            "is_control_element": True,
+            "is_enabled": True,
+            "is_offscreen": False,
+            "is_keyboard_focusable": False,
+            "children": [
+                {
+                    "name": "RustButton",
+                    "control_type": "Button",
+                    "bounding_rect": [10.0, 10.0, 110.0, 50.0],
+                    "is_control_element": True,
+                    "is_enabled": True,
+                    "is_offscreen": False,
+                    "is_keyboard_focusable": True,
+                    "children": [],
+                }
+            ],
+        }
+
+        with (
+            patch(
+                "windows_mcp.tree.service.native_capture_tree",
+                return_value=[rust_snapshot],
+            ),
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            # ControlFromHandle called for browser check; returns non-browser control
+            ctrl = MagicMock()
+            ctrl.ClassName = "NotProgman"
+            mock_cfh.return_value = ctrl
+            desktop.is_window_browser.return_value = False
+
+            tree.get_window_wise_nodes(
+                windows_handles=[hwnd],
+                active_window_flag=False,
+            )
+
+        assert hwnd in tree._window_cache
+        cached = tree._window_cache[hwnd]
+        assert cached.timestamp > 0
+        # Interactive list populated with the RustButton element
+        assert any(n.name == "RustButton" for n in cached.interactive)
+
+    def test_cache_timestamp_is_set_after_rust_traversal(self, tree_with_desktop):
+        """
+        The cache entry timestamp is set to approximately the time of the call,
+        not zero, after a Rust fast-path traversal.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd = 4100
+        before = time()
+
+        rust_snapshot = {
+            "name": "App",
+            "bounding_rect": [0.0, 0.0, 800.0, 600.0],
+            "control_type": "Window",
+            "is_control_element": True,
+            "is_enabled": True,
+            "is_offscreen": False,
+            "is_keyboard_focusable": False,
+            "children": [],
+        }
+
+        with (
+            patch(
+                "windows_mcp.tree.service.native_capture_tree",
+                return_value=[rust_snapshot],
+            ),
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            ctrl = MagicMock()
+            ctrl.ClassName = "NotProgman"
+            mock_cfh.return_value = ctrl
+            desktop.is_window_browser.return_value = False
+
+            tree.get_window_wise_nodes(
+                windows_handles=[hwnd],
+                active_window_flag=False,
+            )
+
+        after = time()
+        cached = tree._window_cache[hwnd]
+        assert before <= cached.timestamp <= after
+
+
+# ---------------------------------------------------------------------------
+# TestWindowCacheEventInvalidation
+# ---------------------------------------------------------------------------
+
+
+class TestWindowCacheEventInvalidation:
+    """Tests for cache invalidation triggered by WatchDog events."""
+
+    def test_on_focus_change_marks_window_dirty(self, tree_instance):
+        """
+        _on_focus_change populates _dirty_windows with the HWND of the
+        element that received focus.
+        """
+        hwnd = 5000
+
+        mock_element = MagicMock()
+        mock_element.GetRuntimeId.return_value = [1, 2, 3]
+        mock_element.NativeWindowHandle = hwnd
+        mock_element.Name = "SomeButton"
+        mock_element.ControlTypeName = "ButtonControl"
+
+        with patch(
+            "windows_mcp.tree.service.Control.CreateControlFromElement",
+            return_value=mock_element,
+        ):
+            tree_instance._on_focus_change(MagicMock())
+
+        assert hwnd in tree_instance._dirty_windows
+
+    def test_on_focus_change_multiple_windows_all_dirty(self, tree_instance):
+        """
+        Successive _on_focus_change calls for elements in different windows
+        accumulate all their HWNDs in _dirty_windows.
+        """
+        hwnd_a = 5100
+        hwnd_b = 5101
+
+        elem_a = MagicMock()
+        elem_a.GetRuntimeId.return_value = [10]
+        elem_a.NativeWindowHandle = hwnd_a
+        elem_a.Name = "A"
+        elem_a.ControlTypeName = "ButtonControl"
+
+        elem_b = MagicMock()
+        elem_b.GetRuntimeId.return_value = [20]
+        elem_b.NativeWindowHandle = hwnd_b
+        elem_b.Name = "B"
+        elem_b.ControlTypeName = "EditControl"
+
+        with patch(
+            "windows_mcp.tree.service.Control.CreateControlFromElement",
+            side_effect=[elem_a, elem_b],
+        ):
+            tree_instance._on_focus_change(MagicMock())
+            # Second call has a different runtime ID so it is not debounced
+            tree_instance._on_focus_change(MagicMock())
+
+        assert hwnd_a in tree_instance._dirty_windows
+        assert hwnd_b in tree_instance._dirty_windows
+
+    def test_on_focus_change_nativewindowhandle_exception_does_not_propagate(
+        self, tree_instance
+    ):
+        """
+        If accessing NativeWindowHandle raises, the exception is swallowed
+        and _dirty_windows remains empty.
+        """
+        mock_element = MagicMock()
+        mock_element.GetRuntimeId.return_value = [99]
+        mock_element.Name = "X"
+        mock_element.ControlTypeName = "ButtonControl"
+        type(mock_element).NativeWindowHandle = property(
+            lambda self: (_ for _ in ()).throw(Exception("COM error"))
+        )
+
+        with patch(
+            "windows_mcp.tree.service.Control.CreateControlFromElement",
+            return_value=mock_element,
+        ):
+            # Should not raise
+            tree_instance._on_focus_change(MagicMock())
+
+        assert len(tree_instance._dirty_windows) == 0
+
+    def test_on_property_change_marks_window_dirty(self, tree_instance):
+        """
+        _on_property_change marks the element's HWND dirty in _dirty_windows.
+        """
+        hwnd = 6000
+
+        mock_element = MagicMock()
+        mock_element.NativeWindowHandle = hwnd
+        mock_element.Name = "Checkbox"
+        mock_element.ControlTypeName = "CheckBoxControl"
+
+        with patch(
+            "windows_mcp.tree.service.Control.CreateControlFromElement",
+            return_value=mock_element,
+        ):
+            tree_instance._on_property_change(MagicMock(), propertyId=30003, newValue=True)
+
+        assert hwnd in tree_instance._dirty_windows
+
+    def test_on_property_change_exception_is_swallowed(self, tree_instance):
+        """
+        If CreateControlFromElement raises inside _on_property_change, the
+        exception is caught and _dirty_windows remains unchanged.
+        """
+        with patch(
+            "windows_mcp.tree.service.Control.CreateControlFromElement",
+            side_effect=Exception("COM failure"),
+        ):
+            # Must not propagate
+            tree_instance._on_property_change(MagicMock(), propertyId=30003, newValue=None)
+
+        assert len(tree_instance._dirty_windows) == 0
+
+    def test_focus_then_traversal_dirty_cleared(self, tree_with_desktop):
+        """
+        A window dirtied by _on_focus_change has its dirty flag cleared after
+        the next get_window_wise_nodes call completes.
+        """
+        tree, desktop = tree_with_desktop
+        hwnd = 7000
+
+        _, entry = _make_cached_interactive("OldNode")
+        tree._window_cache[hwnd] = entry
+
+        # Mark the window dirty via the focus event path
+        mock_element = MagicMock()
+        mock_element.GetRuntimeId.return_value = [77]
+        mock_element.NativeWindowHandle = hwnd
+        mock_element.Name = "Focused"
+        mock_element.ControlTypeName = "EditControl"
+
+        with patch(
+            "windows_mcp.tree.service.Control.CreateControlFromElement",
+            return_value=mock_element,
+        ):
+            tree._on_focus_change(MagicMock())
+
+        assert hwnd in tree._dirty_windows
+
+        # Now traverse; dirty set should be cleared afterwards
+        with (
+            patch("windows_mcp.tree.service.native_capture_tree") as mock_rust,
+            patch("windows_mcp.tree.service.ControlFromHandle") as mock_cfh,
+        ):
+            ctrl = MagicMock()
+            ctrl.ClassName = "NotProgman"
+            mock_cfh.return_value = ctrl
+            desktop.is_window_browser.return_value = False
+            mock_rust.return_value = None
+
+            tree.get_window_wise_nodes(
+                windows_handles=[hwnd],
+                active_window_flag=False,
+            )
+
+        assert hwnd not in tree._dirty_windows
