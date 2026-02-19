@@ -51,16 +51,17 @@ async def lifespan(app: FastMCP):
         _state.analytics = PostHogAnalytics()
 
     _state.desktop = Desktop()
-    watchdog = WatchDog()
+    _state.watchdog = WatchDog()
     _state.screen_size = _state.desktop.get_screen_size()
-    watchdog.set_focus_callback(_state.desktop.tree._on_focus_change)
+    _state.watchdog.set_focus_callback(_state.desktop.tree._on_focus_change)
 
     try:
-        watchdog.start()
+        _state.watchdog.start()
         yield
     finally:
-        if watchdog:
-            watchdog.stop()
+        if _state.watchdog:
+            _state.watchdog.stop()
+            _state.watchdog = None
         if _state.analytics:
             await _state.analytics.close()
 

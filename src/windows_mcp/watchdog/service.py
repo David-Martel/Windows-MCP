@@ -13,6 +13,7 @@ from windows_mcp.uia.core import _AutomationClient
 from windows_mcp.uia.enums import PropertyId, TreeScope
 
 from .event_handlers import (
+    AutomationEventHandler,
     FocusChangedEventHandler,
     PropertyChangedEventHandler,
     StructureChangedEventHandler,
@@ -36,6 +37,9 @@ class WatchDog:
         self._property_callback = None
         self._property_element = None
         self._property_ids = None
+        self._automation_callback = None
+        self._automation_event_id = None
+        self._automation_element = None
 
         # Internal state for tracking active handlers
         self._focus_handler = None
@@ -44,6 +48,9 @@ class WatchDog:
         self._property_handler = None
         self._active_property_element = None
         self._active_property_ids = None
+        self._automation_handler = None
+        self._active_automation_event_id = None
+        self._active_automation_element = None
 
     def __enter__(self):
         self.start()
@@ -86,6 +93,14 @@ class WatchDog:
         self._property_callback = callback
         self._property_element = element
         self._property_ids = property_ids
+
+    def set_automation_callback(self, callback, event_id=None, element=None):
+        """Set the callback for generic automation events. Pass None to disable.
+        ``event_id`` is a UIA event constant (e.g. ``EventId.UIA_Window_WindowOpenedEventId``).
+        ``element`` scopes the subscription (defaults to RootElement)."""
+        self._automation_callback = callback
+        self._automation_event_id = event_id
+        self._automation_element = element
 
     def _run(self):
         """Main event loop running in a dedicated STA thread."""
@@ -198,6 +213,49 @@ class WatchDog:
                     except Exception as e:
                         logger.debug("Failed to add property handler: %s", e)
 
+                # --- Automation Event Monitoring ---
+                auto_config_changed = (
+                    self._automation_event_id != self._active_automation_event_id
+                ) or (self._automation_element != self._active_automation_element)
+
+                should_be_active = self._automation_callback is not None
+                is_active = self._automation_handler is not None
+
+                if is_active and (not should_be_active or auto_config_changed):
+                    try:
+                        target = (
+                            self._active_automation_element
+                            if self._active_automation_element
+                            else self.uia.GetRootElement()
+                        )
+                        self.uia.RemoveAutomationEventHandler(
+                            self._active_automation_event_id, target, self._automation_handler
+                        )
+                    except Exception as e:
+                        logger.debug("Failed to remove automation handler: %s", e)
+                    self._automation_handler = None
+                    self._active_automation_event_id = None
+                    self._active_automation_element = None
+                    is_active = False
+
+                if should_be_active and not is_active and self._automation_event_id is not None:
+                    try:
+                        target = (
+                            self._automation_element
+                            if self._automation_element
+                            else self.uia.GetRootElement()
+                        )
+                        scope = TreeScope.TreeScope_Subtree
+                        self._automation_handler = AutomationEventHandler(self)
+                        self.uia.AddAutomationEventHandler(
+                            self._automation_event_id, target, scope, None,
+                            self._automation_handler,
+                        )
+                        self._active_automation_event_id = self._automation_event_id
+                        self._active_automation_element = target
+                    except Exception as e:
+                        logger.debug("Failed to add automation handler: %s", e)
+
                 # Pump events for this thread
                 comtypes.client.PumpEvents(0.1)
 
@@ -238,5 +296,21 @@ class WatchDog:
                 self._property_handler = None
                 self._active_property_element = None
                 self._active_property_ids = None
+
+            if self._automation_handler:
+                try:
+                    target = (
+                        self._active_automation_element
+                        if self._active_automation_element
+                        else self.uia.GetRootElement()
+                    )
+                    self.uia.RemoveAutomationEventHandler(
+                        self._active_automation_event_id, target, self._automation_handler
+                    )
+                except Exception:
+                    pass
+                self._automation_handler = None
+                self._active_automation_event_id = None
+                self._active_automation_element = None
 
             comtypes.CoUninitialize()

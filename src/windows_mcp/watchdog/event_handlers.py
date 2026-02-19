@@ -61,3 +61,22 @@ class PropertyChangedEventHandler(comtypes.COMObject):
         except Exception as e:
             logger.debug("Error in property callback: %s", e)
         return 0  # S_OK
+
+
+class AutomationEventHandler(comtypes.COMObject):
+    """Generic UIA automation event handler (Window_Opened, Window_Closed, etc.)."""
+
+    _com_interfaces_ = [UIA.IUIAutomationEventHandler]
+
+    def __init__(self, parent):
+        self._parent = weakref.ref(parent)
+        super().__init__()
+
+    def HandleAutomationEvent(self, sender, eventId):
+        try:
+            parent = self._parent()
+            if parent and parent._automation_callback:
+                parent._automation_callback(sender, eventId)
+        except Exception as e:
+            logger.debug("Error in automation callback: %s", e)
+        return 0  # S_OK

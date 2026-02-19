@@ -1,6 +1,6 @@
 """Observation / state-query MCP tools.
 
-Registers: Snapshot, WaitFor, Find, VisionAnalyze (4 tools).
+Registers: Snapshot, WaitFor, WaitForEvent, Find, VisionAnalyze (5 tools).
 """
 
 import asyncio
@@ -164,6 +164,103 @@ def register(mcp):  # noqa: C901
             await asyncio.sleep(poll_interval)
 
         return f"Timeout: '{name}' {mode} not found within {timeout}s."
+
+    @mcp.tool(
+        name="WaitForEvent",
+        description=(
+            "Subscribes to a Windows UI Automation event and waits for it to fire. "
+            "Supported events: 'window_opened', 'window_closed', 'menu_opened', "
+            "'menu_closed', 'text_changed', 'focus_changed'. "
+            "Optionally filter by element name (title substring match). "
+            "Returns the matched event details or times out. "
+            "More efficient than polling with WaitFor for window lifecycle events."
+        ),
+        annotations=ToolAnnotations(
+            title="WaitForEvent",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+    )
+    @with_analytics(lambda: _state.analytics, "WaitForEvent-Tool")
+    async def wait_for_event_tool(
+        event: Literal[
+            "window_opened",
+            "window_closed",
+            "menu_opened",
+            "menu_closed",
+            "text_changed",
+            "focus_changed",
+        ],
+        name: str = "",
+        timeout: int = 30,
+        ctx: Context = None,
+    ) -> str:
+        import threading
+        import time
+
+        from windows_mcp.uia import Control
+        from windows_mcp.uia.events import EventId
+
+        _EVENT_MAP = {
+            "window_opened": EventId.UIA_Window_WindowOpenedEventId,
+            "window_closed": EventId.UIA_Window_WindowClosedEventId,
+            "menu_opened": EventId.UIA_MenuOpenedEventId,
+            "menu_closed": EventId.UIA_MenuClosedEventId,
+            "text_changed": EventId.UIA_Text_TextChangedEventId,
+            "focus_changed": EventId.UIA_AutomationFocusChangedEventId,
+        }
+
+        event_id = _EVENT_MAP.get(event)
+        if event_id is None:
+            return f"Error: unknown event '{event}'. Supported: {', '.join(_EVENT_MAP)}."
+
+        timeout = min(max(timeout, 1), 300)
+        matched = threading.Event()
+        result_holder: list[str] = []
+
+        def on_event(sender, fired_event_id):
+            try:
+                element = Control.CreateControlFromElement(sender)
+                element_name = element.Name or ""
+                if name and name.lower() not in element_name.lower():
+                    return
+                result_holder.append(
+                    f"Event '{event}' fired: '{element_name}' "
+                    f"({element.ControlTypeName})"
+                )
+                matched.set()
+            except Exception:
+                # If we can't read element details, still match if no name filter
+                if not name:
+                    result_holder.append(f"Event '{event}' fired (element details unavailable)")
+                    matched.set()
+
+        watchdog = _state.watchdog
+        if watchdog is None:
+            return "Error: WatchDog service not available."
+
+        # Subscribe to the event via WatchDog.
+        prev_callback = watchdog._automation_callback
+        prev_event_id = watchdog._automation_event_id
+        prev_element = watchdog._automation_element
+        watchdog.set_automation_callback(on_event, event_id=event_id)
+
+        try:
+            deadline = time.monotonic() + timeout
+            while not matched.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(0.2, remaining))
+        finally:
+            # Restore previous callback (or clear).
+            watchdog.set_automation_callback(prev_callback, prev_event_id, prev_element)
+
+        if result_holder:
+            return result_holder[0]
+        return f"Timeout: no '{event}' event{f' matching {name!r}' if name else ''} within {timeout}s."
 
     @mcp.tool(
         name="Find",

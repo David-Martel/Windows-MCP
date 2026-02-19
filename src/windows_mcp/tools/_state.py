@@ -12,7 +12,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from windows_mcp.analytics import PostHogAnalytics
     from windows_mcp.desktop.service import Desktop, Size
+    from windows_mcp.watchdog.service import WatchDog
 
 desktop: Desktop | None = None
 analytics: PostHogAnalytics | None = None
 screen_size: Size | None = None
+watchdog: WatchDog | None = None

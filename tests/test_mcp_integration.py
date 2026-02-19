@@ -139,11 +139,22 @@ def mock_desktop() -> MagicMock:
 
 
 @pytest.fixture
-def patched_desktop(mock_desktop):
-    """Patch the module-level desktop and screen_size globals and yield the mock."""
+def mock_watchdog():
+    """Create a mock WatchDog with automation callback support."""
+    m = MagicMock()
+    m._automation_callback = None
+    m._automation_event_id = None
+    m._automation_element = None
+    return m
+
+
+@pytest.fixture
+def patched_desktop(mock_desktop, mock_watchdog):
+    """Patch the module-level desktop, screen_size, and watchdog globals."""
     with patch.object(_state_module, "desktop", mock_desktop):
         with patch.object(_state_module, "screen_size", SCREEN_SIZE):
-            yield mock_desktop
+            with patch.object(_state_module, "watchdog", mock_watchdog):
+                yield mock_desktop
 
 
 async def _get_tools() -> dict:
@@ -162,9 +173,9 @@ class TestServerStructure:
     def test_mcp_instance_name(self):
         assert main_module.mcp.name == "windows-mcp"
 
-    async def test_all_23_tools_registered(self):
+    async def test_all_24_tools_registered(self):
         tools = await _get_tools()
-        assert len(tools) == 23
+        assert len(tools) == 24
 
     async def test_expected_tool_names_present(self):
         tools = await _get_tools()
@@ -189,6 +200,7 @@ class TestServerStructure:
             "LockScreen",
             "Registry",
             "WaitFor",
+            "WaitForEvent",
             "Find",
             "Invoke",
             "VisionAnalyze",
@@ -213,7 +225,7 @@ class TestServerStructure:
         assert mismatches == [], f"Annotation title mismatch: {mismatches}"
 
     async def test_readonly_tools_flagged_correctly(self):
-        """Six tools are read-only: Find, Scrape, Snapshot, SystemInfo, Wait, WaitFor."""
+        """Read-only tools: Find, Scrape, Snapshot, SystemInfo, Wait, WaitFor, WaitForEvent."""
         tools = await _get_tools()
         readonly = {name for name, t in tools.items() if t.annotations.readOnlyHint}
         assert readonly == {
@@ -224,6 +236,7 @@ class TestServerStructure:
             "VisionAnalyze",
             "Wait",
             "WaitFor",
+            "WaitForEvent",
         }
 
     async def test_open_world_tools_flagged_correctly(self):
@@ -797,6 +810,35 @@ class TestWaitForToolDispatch:
         tools = await _get_tools()
         result = await tools["WaitFor"].fn(mode="window", name="Calc", timeout=5)
         assert "Window found" in result
+
+
+class TestWaitForEventToolDispatch:
+    async def test_waitforevent_times_out_with_no_event(self, patched_desktop):
+        tools = await _get_tools()
+        result = await tools["WaitForEvent"].fn(event="window_opened", timeout=1)
+        assert "Timeout" in result
+        assert "window_opened" in result
+
+    async def test_waitforevent_returns_error_for_unknown_event(self, patched_desktop):
+        tools = await _get_tools()
+        result = await tools["WaitForEvent"].fn(event="bogus_event", timeout=1)
+        assert "Error" in result
+        assert "unknown event" in result
+
+    async def test_waitforevent_returns_error_when_no_watchdog(self, patched_desktop):
+        with patch.object(_state_module, "watchdog", None):
+            tools = await _get_tools()
+            result = await tools["WaitForEvent"].fn(event="window_opened", timeout=1)
+            assert "Error" in result
+            assert "WatchDog" in result
+
+    async def test_waitforevent_timeout_name_filter_in_message(self, patched_desktop):
+        tools = await _get_tools()
+        result = await tools["WaitForEvent"].fn(
+            event="window_closed", name="Notepad", timeout=1
+        )
+        assert "Timeout" in result
+        assert "Notepad" in result
 
 
 class TestFindToolDispatch:
