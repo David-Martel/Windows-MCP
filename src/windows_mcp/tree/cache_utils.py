@@ -96,7 +96,7 @@ class CachedControlHelper:
             cached_node._is_cached = True
             return cached_node
         except Exception as e:
-            logger.debug(f"Failed to build cached control: {e}")
+            logger.debug("Failed to build cached control: %s", e)
             return node
 
     @staticmethod
@@ -137,9 +137,9 @@ class CachedControlHelper:
             for child in children:
                 child._is_cached = True
 
-            logger.debug(f"Retrieved {len(children)} cached children (newly built)")
+            logger.debug("Retrieved %d cached children (newly built)", len(children))
             return children
 
         except Exception as e:
-            logger.debug(f"Failed to get cached children, falling back to regular access: {e}")
+            logger.debug("Failed to get cached children, falling back to regular access: %s", e)
             return node.GetChildren()

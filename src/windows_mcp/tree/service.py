@@ -104,7 +104,7 @@ class Tree:
         with self._state_lock:
             self.tree_state = tree_state
         end_time = time()
-        logger.info(f"Tree State capture took {end_time - start_time:.2f} seconds")
+        logger.info("Tree State capture took %.2f seconds", end_time - start_time)
         return tree_state
 
     # -----------------------------------------------------------------------
@@ -879,7 +879,7 @@ class Tree:
                         depth=depth + 1,
                     )
         except Exception as e:
-            logger.error(f"Error in tree_traversal: {e}", exc_info=True)
+            logger.error("Error in tree_traversal: %s", e, exc_info=True)
             raise
 
     def app_name_correction(self, app_name: str) -> str:
@@ -919,7 +919,7 @@ class Tree:
                 node = cached_root
                 subtree_cached = True
             except Exception as e:
-                logger.debug(f"Subtree caching failed for handle {handle}: {e}")
+                logger.debug("Subtree caching failed for handle %s: %s", handle, e)
 
             # Fallback: per-node cache requests
             element_cache_req = None
@@ -968,12 +968,12 @@ class Tree:
                 subtree_cached=subtree_cached,
                 dom_context=dom_context,
             )
-            logger.debug(f"Window name:{window_name}")
-            logger.debug(f"Interactive nodes:{len(interactive_nodes)}")
+            logger.debug("Window name:%s", window_name)
+            logger.debug("Interactive nodes:%d", len(interactive_nodes))
             if is_browser:
-                logger.debug(f"DOM interactive nodes:{len(dom_interactive_nodes)}")
-                logger.debug(f"DOM informative nodes:{len(dom_informative_nodes)}")
-            logger.debug(f"Scrollable nodes:{len(scrollable_nodes)}")
+                logger.debug("DOM interactive nodes:%d", len(dom_interactive_nodes))
+                logger.debug("DOM informative nodes:%d", len(dom_informative_nodes))
+            logger.debug("Scrollable nodes:%d", len(scrollable_nodes))
 
             # Extract DOM scroll info in worker thread (COM object stays in its apartment)
             dom_node: ScrollElementNode | None = None
@@ -1004,7 +1004,7 @@ class Tree:
                         is_focused=False,
                     )
                 except Exception as e:
-                    logger.debug(f"Failed to extract DOM scroll info: {e}")
+                    logger.debug("Failed to extract DOM scroll info: %s", e)
 
             if use_dom:
                 if is_browser:
@@ -1020,7 +1020,7 @@ class Tree:
                 interactive_nodes.extend(dom_interactive_nodes)
                 return (interactive_nodes, scrollable_nodes, dom_informative_nodes, dom_node)
         except Exception as e:
-            logger.error(f"Error getting nodes for handle {handle}: {e}")
+            logger.error("Error getting nodes for handle %s: %s", handle, e)
             raise
         finally:
             if com_initialized:

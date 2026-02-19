@@ -114,8 +114,8 @@ class Desktop:
         if active_window is not None and active_window in windows:
             windows.remove(active_window)
 
-        logger.debug(f"Active window: {active_window or 'No Active Window Found'}")
-        logger.debug(f"Windows: {windows}")
+        logger.debug("Active window: %s", active_window or "No Active Window Found")
+        logger.debug("Windows: %s", windows)
 
         # Preparing handles for Tree
         other_windows_handles = list(controls_handles - windows_handles)
@@ -157,7 +157,7 @@ class Desktop:
             self.desktop_state = desktop_state
         # Log the time taken to capture the state
         end_time = time()
-        logger.info(f"Desktop State capture took {end_time - start_time:.2f} seconds")
+        logger.info("Desktop State capture took %.2f seconds", end_time - start_time)
         return desktop_state
 
     def get_window_status(self, control: uia.Control) -> Status:
@@ -199,7 +199,7 @@ class Desktop:
                     self._app_cache_time = now
                     return apps
             except Exception as e:
-                logger.warning(f"Error parsing Get-StartApps output: {e}")
+                logger.warning("Error parsing Get-StartApps output: %s", e)
 
         # Fallback: scan Start Menu shortcut folders (works on all Windows versions)
         logger.info("Get-StartApps unavailable, falling back to Start Menu folder scan")
@@ -456,7 +456,7 @@ class Desktop:
                     win32process.AttachThreadInput(foreground_thread, target_thread, False)
 
         except Exception as e:
-            logger.exception(f"Failed to bring window to top: {e}")
+            logger.exception("Failed to bring window to top: %s", e)
 
     def get_element_handle_from_label(self, label: int) -> uia.Control:
         tree_state = self.desktop_state.tree_state
@@ -598,7 +598,7 @@ class Desktop:
                 }
             )
         except Exception as ex:
-            logger.error(f"Error in get_active_window: {ex}")
+            logger.error("Error in get_active_window: %s", ex)
         return None
 
     def get_foreground_window(self) -> uia.Control:
@@ -667,7 +667,7 @@ class Desktop:
                         )
                         window_handles.add(child.NativeWindowHandle)
         except Exception as ex:
-            logger.error(f"Error in get_windows: {ex}")
+            logger.error("Error in get_windows: %s", ex)
             windows = []
         return windows, window_handles
 

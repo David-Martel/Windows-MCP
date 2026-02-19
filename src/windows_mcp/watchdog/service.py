@@ -98,12 +98,12 @@ class WatchDog:
                         self._focus_handler = FocusChangedEventHandler(self)
                         self.uia.AddFocusChangedEventHandler(None, self._focus_handler)
                     except Exception as e:
-                        logger.debug(f"Failed to add focus handler: {e}")
+                        logger.debug("Failed to add focus handler: %s", e)
                 elif not self._focus_callback and self._focus_handler:
                     try:
                         self.uia.RemoveFocusChangedEventHandler(self._focus_handler)
                     except Exception as e:
-                        logger.debug(f"Failed to remove focus handler: {e}")
+                        logger.debug("Failed to remove focus handler: %s", e)
                     self._focus_handler = None
 
                 # --- Structure Monitoring ---
@@ -122,7 +122,7 @@ class WatchDog:
                         )
                         self.uia.RemoveStructureChangedEventHandler(target, self._structure_handler)
                     except Exception as e:
-                        logger.debug(f"Failed to remove structure handler: {e}")
+                        logger.debug("Failed to remove structure handler: %s", e)
                     self._structure_handler = None
                     self._active_structure_element = None
                     is_active = False
@@ -142,7 +142,7 @@ class WatchDog:
                         )
                         self._active_structure_element = target
                     except Exception as e:
-                        logger.debug(f"Failed to add structure handler: {e}")
+                        logger.debug("Failed to add structure handler: %s", e)
 
                 # --- Property Monitoring ---
                 config_changed = (self._property_element != self._active_property_element) or (
@@ -161,7 +161,7 @@ class WatchDog:
                         )
                         self.uia.RemovePropertyChangedEventHandler(target, self._property_handler)
                     except Exception as e:
-                        logger.debug(f"Failed to remove property handler: {e}")
+                        logger.debug("Failed to remove property handler: %s", e)
                     self._property_handler = None
                     self._active_property_element = None
                     self._active_property_ids = None
@@ -192,13 +192,13 @@ class WatchDog:
                         self._active_property_element = target
                         self._active_property_ids = p_ids
                     except Exception as e:
-                        logger.debug(f"Failed to add property handler: {e}")
+                        logger.debug("Failed to add property handler: %s", e)
 
                 # Pump events for this thread
                 comtypes.client.PumpEvents(0.1)
 
         except Exception as e:
-            logger.error(f"WatchDogService died: {e}")
+            logger.error("WatchDogService died: %s", e)
         finally:
             # Cleanup handlers on exit
             if self._focus_handler:

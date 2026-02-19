@@ -25,7 +25,7 @@ class FocusChangedEventHandler(comtypes.COMObject):
             if parent and parent._focus_callback:
                 parent._focus_callback(sender)
         except Exception as e:
-            logger.debug(f"Error in focus callback: {e}")
+            logger.debug("Error in focus callback: %s", e)
         return 0  # S_OK
 
 
@@ -42,7 +42,7 @@ class StructureChangedEventHandler(comtypes.COMObject):
             if parent and parent._structure_callback:
                 parent._structure_callback(sender, changeType, runtimeId)
         except Exception as e:
-            logger.debug(f"Error in structure callback: {e}")
+            logger.debug("Error in structure callback: %s", e)
         return 0  # S_OK
 
 
@@ -59,5 +59,5 @@ class PropertyChangedEventHandler(comtypes.COMObject):
             if parent and parent._property_callback:
                 parent._property_callback(sender, propertyId, newValue)
         except Exception as e:
-            logger.debug(f"Error in property callback: {e}")
+            logger.debug("Error in property callback: %s", e)
         return 0  # S_OK

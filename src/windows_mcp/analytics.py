@@ -75,7 +75,7 @@ class PostHogAnalytics:
             try:
                 user_id_file.write_text(self._user_id, encoding="utf-8")
             except Exception as e:
-                logger.warning(f"Could not persist user ID: {e}")
+                logger.warning("Could not persist user ID: %s", e)
 
         return self._user_id
 
@@ -95,7 +95,7 @@ class PostHogAnalytics:
 
         duration = result.get("duration_ms", 0)
         success_mark = "SUCCESS" if result.get("success") else "FAILED"
-        logger.info(f"{tool_name}: {success_mark} ({duration}ms)")
+        logger.info("%s: %s (%dms)", tool_name, success_mark, duration)
 
     async def track_error(self, error: Exception, context: Dict[str, Any]) -> None:
         if self.client:
@@ -113,7 +113,7 @@ class PostHogAnalytics:
                 },
             )
 
-        logger.error(f"ERROR in {context.get('tool_name')}: {error}")
+        logger.error("ERROR in %s: %s", context.get("tool_name"), error)
 
     async def is_feature_enabled(self, feature: str) -> bool:
         if not self.client:
