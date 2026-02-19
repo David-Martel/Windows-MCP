@@ -56,7 +56,7 @@
 - [x] **[S5] Rotate PostHog API key** -- `POSTHOG_API_KEY` env var overrides hardcoded default. Disabled GeoIP, disabled exception auto-capture.
 - [x] **[S6] Enforce HTTPS for auth client** -- Default dashboard URL changed to `https://windowsmcp.io` (configurable via `DASHBOARD_URL`). `__repr__` exposes only last 4 chars of API key.
 - [x] **[S8] Add protected process list** -- `ProcessService.is_protected()` blocks csrss, lsass, services, svchost, winlogon, MsMpEng, smss, wininit, system, registry. Extracted to `process/service.py`.
-- [ ] **Implement security audit logging** -- Log all tool invocations with timestamps, parameters, results.
+- [x] **Implement security audit logging** -- `WINDOWS_MCP_AUDIT_LOG` env var enables file-based audit log. Tab-separated: timestamp, OK/ERR, tool_name, duration_ms, error_type. Integrated into `with_analytics` decorator.
 - [ ] **Implement rate limiting** -- Per-tool rate limits to prevent abuse.
 
 ---
