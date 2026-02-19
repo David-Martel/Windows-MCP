@@ -1,0 +1,31 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "windows-mcp-core"
+version = "0.1.0"
+description = "PyO3 Rust extension accelerating hot paths in the Windows-MCP server"
+# readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.13"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: Microsoft :: Windows",
+    "Development Status :: 3 - Alpha",
+]
+
+[tool.maturin]
+# The Python module name exposed via `import windows_mcp_core`
+module-name = "windows_mcp_core"
+# Only ship a Windows wheel -- this extension uses Windows-only sysinfo features
+features = ["pyo3/extension-module"]
+# Bindings type: pyo3
+bindings = "pyo3"
+# Strip debug symbols from release builds
+strip = true
+# Build for the current interpreter by default; CI can override with --target
+# python-source = "python"
