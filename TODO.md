@@ -1,7 +1,7 @@
 # Windows-MCP TODO
 
 **Generated:** 2026-02-18 from REVIEW.md findings
-**Last updated:** 2026-02-19 -- 1770 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete
+**Last updated:** 2026-02-19 -- 1916 tests, 64% coverage, Rust workspace (4 crates, 15 PyO3 + 12 FFI exports), tools/ decomposition complete
 **Reference:** See [REVIEW.md](REVIEW.md) for full context on each item.
 
 ---
@@ -57,7 +57,7 @@
 - [x] **[S6] Enforce HTTPS for auth client** -- Default dashboard URL changed to `https://windowsmcp.io` (configurable via `DASHBOARD_URL`). `__repr__` exposes only last 4 chars of API key.
 - [x] **[S8] Add protected process list** -- `ProcessService.is_protected()` blocks csrss, lsass, services, svchost, winlogon, MsMpEng, smss, wininit, system, registry. Extracted to `process/service.py`.
 - [x] **Implement security audit logging** -- `WINDOWS_MCP_AUDIT_LOG` env var enables file-based audit log. Tab-separated: timestamp, OK/ERR, tool_name, duration_ms, error_type. Integrated into `with_analytics` decorator.
-- [ ] **Implement rate limiting** -- Per-tool rate limits to prevent abuse.
+- [x] **Implement rate limiting** -- `RateLimiter` class with sliding window per-tool. Defaults: 60/min general, 10/min Shell, 5/min Registry-Set/Delete. Configurable via `WINDOWS_MCP_RATE_LIMITS` env var. Integrated into `with_analytics` decorator.
 
 ---
 
@@ -77,8 +77,8 @@
 - [x] **[Q4] Remove dead config** -- `STRUCTURAL_CONTROL_TYPE_NAMES` is actually used in tree/service.py -- not dead. Verified, no action needed.
 - [x] **[Q5] Fix broken traceback in analytics.py:107** -- Now uses `traceback.format_exception()` for full stack trace string.
 - [x] **[Q7] Fix resource leaks** -- Fixed HTTP response leak in `scrape()` (close intermediate redirect responses and final response in `finally` block). `auto_minimize` handle guard already present. COM init guard deferred (comtypes handles internally).
-- [ ] **[P10] Cache COM pattern calls in tree traversal** -- Store `GetLegacyIAccessiblePattern()` result in local variable instead of calling 3 times per node.
-- [ ] **[P10] Fix BuildUpdatedCache** -- Check for existing cached state before issuing round-trip in `get_cached_children`.
+- [x] **[P10] Cache COM pattern calls in tree traversal** -- Already done in P3 iterative rewrite. `legacy_pattern = None` set once per node, guarded `if legacy_pattern is None:` before each call.
+- [x] **[P10] Fix BuildUpdatedCache** -- Subtree caching attempted first (line 916), falls back to per-node only on failure. `get_cached_children` already checks scope flags.
 - [x] **Use set literals in tree/config.py** -- Already uses `{...}` set literals. Verified no `set([...])` remains.
 - [x] **[A6] Consolidate input simulation** -- Rust Win32 `SendInput` is primary path in `InputService` (click, type, scroll, drag, move, shortcut). Falls back to pyautogui when native unavailable.
 - [ ] **Add type annotations to all public APIs**.
@@ -95,7 +95,7 @@
 - [x] **Reduce `pg.PAUSE` from 1.0 to 0.05** -- Done. Changed in both `desktop/service.py:45` and `__main__.py:33`.
 - [x] **Add `Find` tool for semantic element lookup** -- Done. `Find(name, control_type, window, limit)` in `tools/state_tools.py`. Searches interactive nodes by name, type, and window.
 - [x] **Add `Invoke` tool for UIA pattern actions** -- Done. `Invoke(loc, action, value)` in `tools/input_tools.py`. Supports invoke, toggle, set_value, expand, collapse, select patterns.
-- [ ] **Use `TreeScope_Subtree` for single-shot cached traversal** -- Currently `BuildUpdatedCache` called per-node (TWO COM round-trips each). Single `TreeScope_Subtree` on window root would collapse thousands of COM calls into one. Estimated 60-80% tree traversal reduction.
+- [x] **Use `TreeScope_Subtree` for single-shot cached traversal** -- Implemented in `tree/service.py:916`. Attempts `TreeScope_Subtree` first, falls back to per-node caching on failure. `CacheRequestFactory.create_subtree_cache()` in `cache_utils.py`.
 
 ---
 
