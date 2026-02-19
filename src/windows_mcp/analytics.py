@@ -2,8 +2,10 @@ import asyncio
 import logging
 import os
 import tempfile
+import threading
 import time
 import traceback
+from collections import deque
 from functools import wraps
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Protocol, TypeVar
@@ -40,6 +42,171 @@ if _audit_log_path:
         _audit_logger = None
 
 T = TypeVar("T")
+
+
+# ---------------------------------------------------------------------------
+# RateLimiter
+# ---------------------------------------------------------------------------
+
+# Per-tool rate limit overrides shipped with the project.
+# Format: tool_name -> (max_calls, window_seconds)
+_DEFAULT_RATE_LIMITS: dict[str, tuple[int, int]] = {
+    "Shell": (10, 60),
+    "Registry-Set": (5, 60),
+    "Registry-Delete": (5, 60),
+}
+
+# Global fallback: 60 calls per 60-second window.
+_DEFAULT_RATE_LIMIT_CALLS = 60
+_DEFAULT_RATE_LIMIT_WINDOW = 60
+
+
+def _parse_rate_limits_env(raw: str) -> dict[str, tuple[int, int]]:
+    """Parse the ``WINDOWS_MCP_RATE_LIMITS`` environment variable.
+
+    Expected format::
+
+        Tool-A:30:60;Tool-B:5:120
+
+    Each segment is ``<tool_name>:<max_calls>:<window_seconds>``.
+    Malformed segments are skipped with a warning.
+
+    Returns:
+        Mapping of tool name to ``(max_calls, window_seconds)``.
+    """
+    result: dict[str, tuple[int, int]] = {}
+    for segment in raw.split(";"):
+        segment = segment.strip()
+        if not segment:
+            continue
+        parts = segment.split(":")
+        if len(parts) != 3:
+            logger.warning(
+                "RateLimiter: ignoring malformed segment %r (expected tool:limit:window)", segment
+            )
+            continue
+        tool_name, limit_str, window_str = parts
+        tool_name = tool_name.strip()
+        try:
+            limit = int(limit_str.strip())
+            window = int(window_str.strip())
+        except ValueError:
+            logger.warning(
+                "RateLimiter: ignoring segment %r -- limit and window must be integers", segment
+            )
+            continue
+        if limit <= 0 or window <= 0:
+            logger.warning(
+                "RateLimiter: ignoring segment %r -- limit and window must be positive", segment
+            )
+            continue
+        result[tool_name] = (limit, window)
+    return result
+
+
+# Merge defaults with any env-var overrides at module load time.
+_env_rate_limits = _parse_rate_limits_env(os.environ.get("WINDOWS_MCP_RATE_LIMITS", "").strip())
+_EFFECTIVE_RATE_LIMITS: dict[str, tuple[int, int]] = {**_DEFAULT_RATE_LIMITS, **_env_rate_limits}
+
+
+class RateLimitExceededError(Exception):
+    """Raised when a tool call exceeds its configured rate limit."""
+
+
+class RateLimiter:
+    """Sliding-window rate limiter for MCP tool calls.
+
+    Each tool gets its own deque of call timestamps and a dedicated
+    ``threading.Lock`` so concurrent calls never corrupt state.
+
+    Args:
+        limits: Mapping of tool name to ``(max_calls, window_seconds)``.
+            Tools not present in the mapping use the global defaults.
+        default_calls: Global default maximum calls per window.
+        default_window: Global default window duration in seconds.
+
+    Example::
+
+        limiter = RateLimiter({"Shell": (10, 60)})
+        limiter.check("Shell")   # raises RateLimitExceededError on breach
+    """
+
+    def __init__(
+        self,
+        limits: dict[str, tuple[int, int]] | None = None,
+        *,
+        default_calls: int = _DEFAULT_RATE_LIMIT_CALLS,
+        default_window: int = _DEFAULT_RATE_LIMIT_WINDOW,
+    ) -> None:
+        self._limits: dict[str, tuple[int, int]] = limits if limits is not None else {}
+        self._default_calls = default_calls
+        self._default_window = default_window
+        # Per-tool state: deque of timestamps + a lock.
+        self._timestamps: dict[str, deque[float]] = {}
+        self._locks: dict[str, threading.Lock] = {}
+        self._meta_lock = threading.Lock()
+
+    def _get_tool_state(self, tool_name: str) -> tuple[deque[float], threading.Lock]:
+        """Return (timestamps_deque, lock) for *tool_name*, creating lazily."""
+        with self._meta_lock:
+            if tool_name not in self._timestamps:
+                self._timestamps[tool_name] = deque()
+                self._locks[tool_name] = threading.Lock()
+            return self._timestamps[tool_name], self._locks[tool_name]
+
+    def _resolve_limit(self, tool_name: str) -> tuple[int, int]:
+        """Return ``(max_calls, window_seconds)`` for the given tool."""
+        return self._limits.get(tool_name, (self._default_calls, self._default_window))
+
+    def check(self, tool_name: str) -> None:
+        """Record a call attempt and raise if the rate limit is exceeded.
+
+        This method is thread-safe.  It slides the observation window by
+        evicting timestamps that are older than ``window_seconds`` before
+        comparing against ``max_calls``.
+
+        Args:
+            tool_name: The MCP tool name being invoked.
+
+        Raises:
+            RateLimitExceededError: When the call count in the current window
+                exceeds the configured maximum.
+        """
+        max_calls, window_seconds = self._resolve_limit(tool_name)
+        timestamps, lock = self._get_tool_state(tool_name)
+
+        now = time.monotonic()
+        cutoff = now - window_seconds
+
+        with lock:
+            # Evict timestamps outside the sliding window.
+            while timestamps and timestamps[0] < cutoff:
+                timestamps.popleft()
+
+            if len(timestamps) >= max_calls:
+                # Calculate how long the caller must wait before the oldest
+                # call ages out of the window.
+                oldest = timestamps[0]
+                retry_after = window_seconds - (now - oldest)
+                raise RateLimitExceededError(
+                    f"Rate limit exceeded for tool '{tool_name}': "
+                    f"{max_calls} calls per {window_seconds}s allowed. "
+                    f"Retry after {retry_after:.1f}s."
+                )
+
+            timestamps.append(now)
+
+
+# Module-level singleton populated from project defaults + env overrides.
+_rate_limiter = RateLimiter(limits=_EFFECTIVE_RATE_LIMITS)
+
+
+_USE_MODULE_RATE_LIMITER = object()  # sentinel: resolve _rate_limiter via sys.modules at call time
+
+
+# ---------------------------------------------------------------------------
+# Analytics protocol and PostHog implementation
+# ---------------------------------------------------------------------------
 
 
 class Analytics(Protocol):
@@ -149,12 +316,19 @@ class PostHogAnalytics:
             logger.debug("Closed analytics")
 
 
+# ---------------------------------------------------------------------------
+# with_analytics decorator
+# ---------------------------------------------------------------------------
+
+
 def with_analytics(
     analytics_instance: "Callable[[], Analytics | None] | Analytics | None",
     tool_name: str,
+    *,
+    rate_limiter: "RateLimiter | None | object" = _USE_MODULE_RATE_LIMITER,
 ):
     """
-    Decorator to wrap tool functions with analytics tracking.
+    Decorator to wrap tool functions with analytics tracking and rate limiting.
 
     ``analytics_instance`` may be:
     - A zero-argument callable (e.g. ``lambda: analytics``) whose return value is
@@ -162,11 +336,35 @@ def with_analytics(
       decoration time (the common case in ``__main__.py``).
     - An ``Analytics`` instance resolved before decoration.
     - ``None`` to disable tracking entirely.
+
+    ``rate_limiter`` defaults to the module-level ``_rate_limiter`` singleton,
+    resolved at each call so that test patches to ``_rate_limiter`` are respected.
+    Pass ``rate_limiter=None`` to disable rate limiting for a specific tool.
+    Pass an explicit ``RateLimiter`` instance to use a custom limiter.
     """
 
     def decorator(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
         @wraps(func)
         async def wrapper(*args, **kwargs) -> T:
+            # Resolve the rate limiter at call time.
+            # When the sentinel is present, look up the module-level
+            # ``_rate_limiter`` via sys.modules so that both test patches and
+            # importlib.reload() side-effects are always visible.
+            # When rate_limiter is an explicit RateLimiter or None, use it as-is.
+            if rate_limiter is _USE_MODULE_RATE_LIMITER or not isinstance(
+                rate_limiter, (RateLimiter, type(None))
+            ):
+                import sys
+
+                mod = sys.modules.get(__name__)
+                effective_limiter = getattr(mod, "_rate_limiter", None) if mod else None
+            else:
+                effective_limiter = rate_limiter  # type: ignore[assignment]
+
+            # Enforce rate limit before doing any work.
+            if effective_limiter is not None:
+                effective_limiter.check(tool_name)
+
             # Resolve the analytics instance at call time so that late
             # assignment (e.g. inside an async lifespan) is picked up.
             # Objects that implement the Analytics protocol (have track_tool)
