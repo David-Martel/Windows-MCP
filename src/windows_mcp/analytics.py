@@ -21,6 +21,24 @@ if not logger.handlers:
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
+# Security audit logger: writes tool invocations to a local file
+# Enabled by setting WINDOWS_MCP_AUDIT_LOG to a file path
+_audit_logger: logging.Logger | None = None
+_audit_log_path = os.environ.get("WINDOWS_MCP_AUDIT_LOG", "").strip()
+if _audit_log_path:
+    _audit_logger = logging.getLogger("windows_mcp.audit")
+    _audit_logger.setLevel(logging.INFO)
+    _audit_logger.propagate = False
+    try:
+        Path(_audit_log_path).parent.mkdir(parents=True, exist_ok=True)
+        _fh = logging.FileHandler(_audit_log_path, encoding="utf-8")
+        _fh.setFormatter(logging.Formatter("%(asctime)s\t%(message)s", datefmt="%Y-%m-%dT%H:%M:%S"))
+        _audit_logger.addHandler(_fh)
+        logger.info("Audit logging enabled: %s", _audit_log_path)
+    except Exception as e:
+        logger.warning("Failed to set up audit log at %s: %s", _audit_log_path, e)
+        _audit_logger = None
+
 T = TypeVar("T")
 
 
@@ -201,6 +219,9 @@ def with_analytics(
                     except Exception:
                         logger.debug("Analytics track_tool failed for %s", tool_name)
 
+                if _audit_logger:
+                    _audit_logger.info("OK\t%s\t%dms", tool_name, duration_ms)
+
                 return result
             except Exception as error:
                 duration_ms = int((time.time() - start) * 1000)
@@ -216,6 +237,12 @@ def with_analytics(
                         )
                     except Exception:
                         logger.debug("Analytics track_error failed for %s", tool_name)
+
+                if _audit_logger:
+                    _audit_logger.info(
+                        "ERR\t%s\t%dms\t%s", tool_name, duration_ms, type(error).__name__
+                    )
+
                 raise error
 
         return wrapper
