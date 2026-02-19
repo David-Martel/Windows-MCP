@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import threading
+from collections.abc import Generator
 from contextlib import contextmanager
 from locale import getpreferredencoding
 from time import time
@@ -33,7 +34,7 @@ import windows_mcp.uia as uia  # noqa: E402
 
 
 class Desktop:
-    def __init__(self):
+    def __init__(self) -> None:
         from windows_mcp.input import InputService
         from windows_mcp.process import ProcessService
         from windows_mcp.registry import RegistryService
@@ -233,7 +234,7 @@ class Desktop:
     def execute_command(self, command: str, timeout: int = 10) -> tuple[str, int]:
         return self._shell.execute(command, timeout)
 
-    def is_window_browser(self, node: uia.Control):
+    def is_window_browser(self, node: uia.Control) -> bool:
         """Return True if the UIA control belongs to a browser process."""
         return self._window.is_window_browser(node)
 
@@ -283,7 +284,7 @@ class Desktop:
         name: str | None = None,
         loc: tuple[int, int] | None = None,
         size: tuple[int, int] | None = None,
-    ):
+    ) -> str:
         if name is None and mode in ("launch", "switch"):
             return "Application name is required for launch/switch mode."
 
@@ -394,7 +395,7 @@ class Desktop:
             ctypes.windll.kernel32.CloseHandle(sei.hProcess)
         return pid
 
-    def switch_app(self, name: str):
+    def switch_app(self, name: str) -> tuple[str, int]:
         try:
             # Refresh state if desktop_state is None or has no windows
             with self._state_lock:
@@ -432,7 +433,7 @@ class Desktop:
         except Exception as e:
             return (f"Error switching app: {str(e)}", 1)
 
-    def bring_window_to_top(self, target_handle: int):
+    def bring_window_to_top(self, target_handle: int) -> None:
         self._window.bring_window_to_top(target_handle)
 
     def get_element_handle_from_label(self, label: int) -> uia.Control:
@@ -456,7 +457,7 @@ class Desktop:
         bounding_rectangle = element_handle.BoundingRectangle
         return bounding_rectangle.xcenter(), bounding_rectangle.ycenter()
 
-    def click(self, loc: tuple[int, int], button: str = "left", clicks: int = 1):
+    def click(self, loc: tuple[int, int], button: str = "left", clicks: int = 1) -> None:
         return self._input.click(loc, button, clicks)
 
     def type(
@@ -466,7 +467,7 @@ class Desktop:
         caret_position: Literal["start", "idle", "end"] = "idle",
         clear: bool | str = False,
         press_enter: bool | str = False,
-    ):
+    ) -> None:
         return self._input.type(loc, text, caret_position, clear, press_enter)
 
     def scroll(
@@ -478,21 +479,21 @@ class Desktop:
     ) -> str | None:
         return self._input.scroll(loc, type, direction, wheel_times)
 
-    def drag(self, loc: tuple[int, int]):
+    def drag(self, loc: tuple[int, int]) -> None:
         return self._input.drag(loc)
 
-    def move(self, loc: tuple[int, int]):
+    def move(self, loc: tuple[int, int]) -> None:
         return self._input.move(loc)
 
-    def shortcut(self, shortcut: str):
+    def shortcut(self, shortcut: str) -> None:
         return self._input.shortcut(shortcut)
 
     def multi_select(
         self, press_ctrl: bool | str = False, locs: list[tuple[int, int]] | None = None
-    ):
+    ) -> None:
         return self._input.multi_select(press_ctrl, locs)
 
-    def multi_edit(self, locs: list[tuple[int, int, str]]):
+    def multi_edit(self, locs: list[tuple[int, int, str]]) -> None:
         return self._input.multi_edit(locs)
 
     # --- Scraper facade (delegates to ScraperService) ---
@@ -506,7 +507,7 @@ class Desktop:
     def is_overlay_window(self, element: uia.Control) -> bool:
         return self._window.is_overlay_window(element)
 
-    def get_controls_handles(self, optimized: bool = False):
+    def get_controls_handles(self, optimized: bool = False) -> set[int]:
         return self._window.get_controls_handles(optimized)
 
     def get_active_window(self, windows: list[Window] | None = None) -> Window | None:
@@ -525,7 +526,7 @@ class Desktop:
 
     _MAX_PARENT_DEPTH = 64
 
-    def get_xpath_from_element(self, element: uia.Control):
+    def get_xpath_from_element(self, element: uia.Control) -> str:
         current = element
         if current is None:
             return ""
@@ -761,6 +762,6 @@ class Desktop:
         return self._registry.registry_list(path)
 
     @contextmanager
-    def auto_minimize(self):
+    def auto_minimize(self) -> Generator[None, None, None]:
         with self._window.auto_minimize():
             yield

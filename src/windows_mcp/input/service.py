@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class InputService:
     """Simulate mouse clicks, keyboard input, scrolling, and drag operations."""
 
-    def click(self, loc: tuple[int, int], button: str = "left", clicks: int = 1):
+    def click(self, loc: tuple[int, int], button: str = "left", clicks: int = 1) -> None:
         """Click at screen coordinates.
 
         Args:
@@ -52,7 +52,7 @@ class InputService:
         caret_position: Literal["start", "idle", "end"] = "idle",
         clear: bool | str = False,
         press_enter: bool | str = False,
-    ):
+    ) -> None:
         """Click a field and type text into it.
 
         Args:
@@ -194,7 +194,7 @@ class InputService:
             uia.WheelDown(wheel_times)
         return None
 
-    def drag(self, loc: tuple[int, int]):
+    def drag(self, loc: tuple[int, int]) -> None:
         """Drag the cursor to screen coordinates (mouse-down, move, mouse-up).
 
         Args:
@@ -208,7 +208,7 @@ class InputService:
         pg.sleep(0.5)
         pg.dragTo(x, y, duration=0.6)
 
-    def move(self, loc: tuple[int, int]):
+    def move(self, loc: tuple[int, int]) -> None:
         """Move the mouse cursor to screen coordinates without clicking.
 
         Args:
@@ -219,7 +219,7 @@ class InputService:
         if result is None:
             pg.moveTo(x, y, duration=0.1)
 
-    def shortcut(self, shortcut: str):
+    def shortcut(self, shortcut: str) -> None:
         """Send a keyboard shortcut or single key press.
 
         Args:
@@ -233,7 +233,7 @@ class InputService:
 
     def multi_select(
         self, press_ctrl: bool | str = False, locs: list[tuple[int, int]] | None = None
-    ):
+    ) -> None:
         """Click multiple locations, optionally holding Ctrl for multi-selection.
 
         Args:
@@ -256,7 +256,7 @@ class InputService:
             if hold_ctrl:
                 pg.keyUp("ctrl")
 
-    def multi_edit(self, locs: list[tuple[int, int, str]]):
+    def multi_edit(self, locs: list[tuple[int, int, str]]) -> None:
         """Type text into multiple fields, clearing each before typing.
 
         Args:

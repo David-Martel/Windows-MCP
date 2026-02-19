@@ -8,6 +8,7 @@ and bring-to-top operations.
 import ctypes
 import logging
 import threading
+from collections.abc import Generator
 from contextlib import contextmanager
 
 import win32con
@@ -29,7 +30,7 @@ _PROCESS_CACHE_MAX = 512
 class WindowService:
     """Window enumeration, status, and focus management."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._process_name_cache: dict[int, str] = {}
         self._process_cache_lock = threading.Lock()
 
@@ -324,7 +325,7 @@ class WindowService:
                 return window
         return None
 
-    def bring_window_to_top(self, target_handle: int):
+    def bring_window_to_top(self, target_handle: int) -> None:
         """Bring a window to the foreground using Win32 thread attachment."""
         if not win32gui.IsWindow(target_handle):
             raise ValueError("Invalid window handle")
@@ -376,7 +377,7 @@ class WindowService:
             logger.exception("Failed to bring window to top: %s", e)
 
     @contextmanager
-    def auto_minimize(self):
+    def auto_minimize(self) -> Generator[None, None, None]:
         """Context manager that minimizes the foreground window and restores on exit."""
         handle = uia.GetForegroundWindow()
         if not handle:
