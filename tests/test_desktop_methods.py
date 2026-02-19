@@ -34,8 +34,6 @@ def _make_bare_desktop():
     d._app_cache_time = 0.0
     d._APP_CACHE_TTL = 3600.0
     d._app_cache_lock = threading.Lock()
-    d._process_name_cache = {}
-    d._process_cache_lock = threading.Lock()
     d.tree = MagicMock()
     d._input = MagicMock()
     d._screen = MagicMock()

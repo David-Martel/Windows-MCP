@@ -65,12 +65,6 @@ class Desktop:
 
         return ShellService.ps_quote(value)
 
-    @staticmethod
-    def _validate_url(url: str) -> None:
-        from windows_mcp.scraper import ScraperService
-
-        ScraperService.validate_url(url)
-
     def get_state(
         self,
         use_annotation: bool | str = True,
@@ -228,18 +222,8 @@ class Desktop:
                     apps[name] = lnk_path
         return apps
 
-    # --- Shell facade (delegates to ShellService) ---
-
-    @staticmethod
-    def _check_shell_blocklist(command: str) -> str | None:
-        from windows_mcp.shell import ShellService
-
-        return ShellService.check_blocklist(command)
-
     def execute_command(self, command: str, timeout: int = 10) -> tuple[str, int]:
         return self._shell.execute(command, timeout)
-
-    _PROCESS_CACHE_MAX = 256
 
     def is_window_browser(self, node: uia.Control):
         """Return True if the UIA control belongs to a browser process."""
@@ -277,8 +261,11 @@ class Desktop:
             return (f"{active_window.name} resized to {width}x{height} at {x},{y}.", 0)
 
     def is_app_running(self, name: str) -> bool:
-        windows, _ = self._window.get_windows()
-        windows_dict = {window.name: window for window in windows}
+        try:
+            windows, _ = self._window.get_windows()
+        except Exception:
+            return False
+        windows_dict = {window.name: window for window in windows if window.name}
         return process.extractOne(name, list(windows_dict.keys()), score_cutoff=60) is not None
 
     def app(
@@ -505,11 +492,11 @@ class Desktop:
                 break
             children = parent.GetChildren()
             same_type_children = [
-                "-".join(map(lambda x: str(x), child.GetRuntimeId()))
+                "-".join(map(str, child.GetRuntimeId()))
                 for child in children
                 if child.ControlType == current.ControlType
             ]
-            current_id = "-".join(map(lambda x: str(x), current.GetRuntimeId()))
+            current_id = "-".join(map(str, current.GetRuntimeId()))
             try:
                 index = same_type_children.index(current_id)
             except ValueError:
@@ -676,7 +663,10 @@ class Desktop:
         return f"{'Force killed' if force else 'Terminated'}: {', '.join(killed)}"
 
     def lock_screen(self) -> str:
-        ctypes.windll.user32.LockWorkStation()
+        try:
+            ctypes.windll.user32.LockWorkStation()
+        except Exception as e:
+            return f"Failed to lock screen: {e}"
         return "Screen locked."
 
     def get_system_info(self) -> str:
