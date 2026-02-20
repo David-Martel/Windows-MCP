@@ -167,3 +167,7 @@ cython_debug/
 sandbox
 *.ipynb
 *.mcpb
+
+# Binary artifacts
+*.dll
+*.asc
