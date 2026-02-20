@@ -1,25 +1,55 @@
-# Python Context Slice -- Windows-MCP
+# Python Context Slice -- Windows-MCP (2026-02-20)
 
-## Key Performance Issues
-- `desktop/service.py` -- Serial PowerShell subprocess per operation (~200-500ms each)
-- `tree/service.py` -- ThreadPoolExecutor() without max_workers, recursive traversal (no depth guard)
-- `desktop/service.py:875` -- PIL ImageDraw in ThreadPoolExecutor (NOT thread-safe)
-- `pyautogui.PAUSE = 1.0` global pause after every action
-- `analytics.py:97` -- print() to stdout in production (interleaves with MCP protocol)
+## Architecture (Post-Decomposition)
 
-## Critical Bugs
-- Analytics decorator captures None at decoration time (telemetry does nothing)
-- COM objects shared across thread apartment boundaries (tree/service.py:583-584)
-- _AutomationClient singleton has TOCTOU race (uia/core.py:53-57)
-- analytics.py:107 -- broken traceback (both branches produce str(error))
+Desktop service fully decomposed into 8 extracted services:
+- InputService, WindowService, ScreenService, VisionService
+- ProcessService, ShellService, ScraperService, RegistryService
+- Desktop remains as thin facade/orchestrator (683 lines)
 
-## Code Quality
-- Desktop class: 1087 lines, God Object (6-7 responsibilities)
-- 13 constants copy-pasted across uia/core.py, controls.py, patterns.py
-- Boolean coercion pattern repeated 6+ times (needs utility function)
-- ipykernel unused dependency in pyproject.toml
+Tool registration decomposed into 3 modules:
+- tools/input_tools.py (9 tools), tools/state_tools.py (5 tools), tools/system_tools.py (10 tools)
+
+## Performance Status (All Phase 1 DONE)
+- pg.PAUSE = 0.05 (not 1.0)
+- ImageDraw thread safety fixed (sequential)
+- PowerShell replaced with stdlib (winreg, locale, platform)
+- analytics print() removed
+- watchdog print() -> logger.debug
+- ThreadPoolExecutor bounded (max_workers=min(8, cpu_count))
+
+## Remaining Perf Targets
+- Single TreeScope_Subtree CacheRequest (deferred)
+- Deduplicate LegacyIAccessiblePattern calls (deferred)
+- Parallelize get_state orchestration (asyncio.gather)
+
+## Security Features
+- Shell blocklist (16 patterns, configurable)
+- BearerAuth + DPAPI key storage
+- Registry sensitive key blocking
+- File path scoping (WINDOWS_MCP_ALLOWED_PATHS)
+- SSRF protection (private IP, DNS rebinding)
+- Protected process list
+- Rate limiting (sliding window, per-tool locks, configurable)
+- Permission manifest (WINDOWS_MCP_ALLOW/DENY)
+- Audit logging (tab-separated file)
+
+## Key Patterns
+- `@with_analytics(lambda: _state.analytics, "Tool-Name")` for telemetry
+- `_state.desktop` patched in tests (not `main_module.desktop`)
+- Rust fast-paths: native functions return None on failure, Python UIA fallback
+- Test isolation: `@patch("windows_mcp.native.native_*", return_value=None)` or autouse fixture with `patch.multiple`
+- No print() to stdout (corrupts MCP protocol)
+
+## Test Coverage
+- 2115 Python tests + 25 Rust + 13 live-desktop
+- Testable modules: 82-100% coverage
+- native.py: 90%
+- COM/UIA modules: 14-42% (inherently untestable without live desktop)
+- desktop/service.py: ~73%
 
 ## Well-Designed Modules
-- filesystem/service.py -- stateless pure functions, clean error handling
-- tree/ module -- proper config/cache/views/service separation
-- uia/ layer -- solid COM abstraction
+- filesystem/service.py -- stateless pure functions
+- tree/ -- proper config/cache/views/service separation
+- analytics.py -- protocol pattern, rate limiting, audit logging, permissions
+- native.py -- centralized adapter with HAS_NATIVE guard

@@ -25,13 +25,22 @@
       "project": "windows-mcp",
       "agents_involved": ["rust-pro", "code-reviewer", "architect-reviewer", "test-automator", "security-auditor"],
       "summary": "Rust capture_tree module, COMGuard fixes, SSRF+shell security, review findings (C3/H5) fixed, import cleanup (isort/F401), 157 new tests (235->392), zero-warning build enforcement."
+    },
+    {
+      "id": "ctx-windows-mcp-20260220",
+      "file": "windows-mcp-context-20260220.md",
+      "created": "2026-02-20T00:30:00Z",
+      "project": "windows-mcp",
+      "agents_involved": ["rust-pro", "test-automator", "code-reviewer", "architect-reviewer", "security-auditor"],
+      "summary": "Rust-Native UIA Replacement Plan complete: query.rs + pattern.rs (820 lines), 9 PyO3 wrappers, Find+Invoke tool fast-paths, 25 Rust tests, 13 live-desktop tests, test isolation fixes. Background agents: 353+ new tests (audit, rate limiting, permissions, ProcessService, tree traversal, get_state, ValuePattern). 2115 Python + 25 Rust + 13 live tests."
     }
   ],
-  "latest": "ctx-windows-mcp-20260219b",
+  "latest": "ctx-windows-mcp-20260220",
   "slices": [
     "slices/python-slice.md",
     "slices/security-slice.md",
     "slices/rust-slice.md",
-    "slices/performance-slice.md"
+    "slices/performance-slice.md",
+    "slices/test-slice.md"
   ]
 }

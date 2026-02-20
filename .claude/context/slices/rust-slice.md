@@ -1,40 +1,58 @@
-# Rust Migration Context Slice -- Windows-MCP
+# Rust Context Slice -- Windows-MCP (2026-02-20)
 
-## Recommended Hybrid Architecture
-- Python FastMCP stays as protocol/orchestration layer
-- Rust PyO3 extension (`windows_mcp_core.pyd`) handles hot paths
-- Build via Maturin, separate sub-crate with own Cargo.toml
+## Current Rust Workspace (native/)
 
-## Primary Rust Target: Tree Traversal
-- `capture_tree(window_handles: list[int], options: dict) -> list[dict]`
-- Uses `windows-rs` IUIAutomation COM bindings (zero-cost vtable calls)
-- `rayon` for parallel per-window traversal (each thread: own STA apartment)
-- `py.allow_threads()` releases GIL during entire traversal
-- Estimated: 200-800ms (Python optimized) -> 50-200ms (Rust)
+4-crate workspace, all compiling with zero warnings:
 
-## Secondary Targets
-- Screenshot: DXGI Output Duplication + `image` crate (55-150ms -> 12-35ms)
-- Win32 operations: Toast notifications (WinRT), locale, OS version, app launch
+```
+wmcp-core/     Pure Rust lib (NO PyO3)
+  src/lib.rs, errors.rs, com.rs, system_info.rs, input.rs,
+  tree/, screenshot.rs, query.rs, pattern.rs
+wmcp-pyo3/     PyO3 wrappers -> windows_mcp_core.pyd (24 functions)
+wmcp-ffi/      C ABI DLL -> windows_mcp_ffi.dll (12 exports)
+wmcp-cli/      CLI binaries (wmcp-worker: JSON-RPC over stdin/stdout)
+```
+
+## Implemented Modules
+
+| Module | Functions | Status |
+|--------|-----------|--------|
+| system_info | system_info() | Complete, Rust fast-path in Desktop.get_system_info() |
+| input | send_text_raw, send_key_raw, send_hotkey_raw, send_click_raw, send_mouse_move_raw, send_scroll_raw, send_drag_raw | Complete, wired into InputService |
+| tree | capture_tree_raw | Complete, wired into Tree.get_window_wise_nodes() |
+| screenshot | capture_raw, capture_png | Complete, DXGI Output Duplication |
+| query | element_from_point, find_elements, get_screen_metrics | NEW -- wired into Find tool |
+| pattern | invoke_at, toggle_at, set_value_at, expand_at, collapse_at, select_at | NEW -- wired into Invoke tool |
+
+## Build Patterns
+- **sccache port 4226 blocked**: Use `RUSTC_WRAPPER=""` to bypass
+- **PYO3_PYTHON**: Must point to `.venv/Scripts/python.exe`
+- **Install**: cargo build, then copy .pyd/.dll to `.venv/Lib/site-packages/`
+- **Target dir**: `T:\RustCache\cargo-target\release/`
 
 ## Key Crates
-- `windows` v0.62+ (Microsoft official, `Win32::UI::Accessibility`)
-- `uiautomation-rs` v0.24+ (higher-level wrapper, `!Send + !Sync` by design)
-- `pyo3` v0.23+ with `extension-module` feature
-- `rayon` v1.10+ for parallel iterators
-- `image` v0.25+ for screenshot annotation
+- `windows` v0.62+ (Win32_UI_Accessibility, Win32_Graphics_Gdi, etc.)
+- `pyo3` v0.23+ with extension-module feature
+- `rayon` for parallel tree traversal
+- `sysinfo` for system_info
+- `thiserror` for error types
 
-## COM Threading Risk
-- Python process has STA apartment on main thread (via comtypes `CoInitialize`)
-- Rust extension threads must call `CoInitializeEx(COINIT_MULTITHREADED)` independently
-- `uiautomation-rs` UIAutomation is `!Send + !Sync` -- one instance per thread required
-- Cleanest option: dedicated Rust threads (not rayon pool) with explicit COM init
+## COM Threading
+- COMGuard RAII pattern: `CoInitializeEx(COINIT_MULTITHREADED)` per thread
+- `py.allow_threads()` releases GIL during all COM operations
+- Each function creates its own `CUIAutomation` instance (no sharing)
 
-## Build Integration
-- Current: hatchling build backend
-- Recommended: Keep hatchling for Python, separate Rust sub-crate with Maturin
-- Install Rust extension as optional dependency
+## Rust Unit Tests (25 total)
+- query.rs: FindCriteria defaults, ScreenMetrics struct, ElementInfo serde
+- pattern.rs: PatternResult serde, toggle state names
+- input.rs: empty string, too-long text, empty/too-many hotkeys, normalise_coords
+- tree/mod.rs: control_type_name mapping, empty handles, zero handle, max depth
 
-## Port Complexity
-- `tree_traversal` is ~400 lines with complex branching (browser detection, DOM mode, role filtering)
-- Must replicate classification logic exactly (interactive/scrollable/informative)
-- Mitigation: shadow mode -- run both implementations, diff outputs per-window
+## Lessons Learned
+- ctypes `c_char_p` causes double-free with `wmcp_free_string` -- use `c_void_p`
+- sysinfo CPU: needs double-refresh + 200ms gap for non-zero readings
+- SM_CXVIRTUALSCREEN (not SM_CXSCREEN) for SendInput MOUSEEVENTF_ABSOLUTE
+- OnceLock bad for screen dims (resolution can change) -- call GetSystemMetrics each time
+- `windows::core::Interface` trait required for `.cast()` on COM objects
+- `UIA_PATTERN_ID` is a newtype wrapper -- use `UIA_InvokePatternId.0` for raw i32
+- `CreatePropertyCondition` returns `IUIAutomationPropertyCondition` -- must `.cast::<IUIAutomationCondition>()` for `FindAll`
