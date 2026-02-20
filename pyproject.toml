@@ -77,3 +77,6 @@ asyncio_mode = "auto"
 filterwarnings = [
     "ignore::RuntimeWarning:unittest.mock",  # AsyncMockMixin coroutine GC noise
 ]
+markers = [
+    "live_desktop: requires live Windows desktop with UIA (deselect with -m 'not live_desktop')",
+]

@@ -246,3 +246,162 @@ def native_capture_screenshot_raw(monitor_index: int = 0) -> dict | None:
     except Exception:
         logger.warning("native_capture_screenshot_raw failed, falling back", exc_info=True)
         return None
+
+
+# ---------------------------------------------------------------------------
+# UIA query functions
+# ---------------------------------------------------------------------------
+
+
+def native_element_from_point(x: int, y: int) -> dict | None:
+    """Query the UIA element at screen coordinates via Rust.
+
+    Returns a dict with keys: name, automation_id, control_type,
+    localized_control_type, class_name, bounding_rect, is_enabled,
+    is_offscreen, has_keyboard_focus, supported_patterns.
+    Returns None if the native extension is unavailable.
+    """
+    if not HAS_NATIVE:
+        return None
+    try:
+        return windows_mcp_core.element_from_point(x, y)
+    except Exception:
+        logger.warning("native_element_from_point failed, falling back", exc_info=True)
+        return None
+
+
+def native_find_elements(
+    name: str | None = None,
+    control_type: str | None = None,
+    automation_id: str | None = None,
+    window_handle: int | None = None,
+    limit: int = 20,
+) -> list[dict] | None:
+    """Search for UIA elements matching criteria via Rust.
+
+    Args:
+        name: Substring match (case-insensitive).
+        control_type: Exact match (e.g. "Button").
+        automation_id: Exact match.
+        window_handle: Scope to specific window.
+        limit: Maximum results (default 20, max 100).
+
+    Returns a list of ElementInfo dicts, or None if unavailable.
+    """
+    if not HAS_NATIVE:
+        return None
+    try:
+        return windows_mcp_core.find_elements(
+            name=name,
+            control_type=control_type,
+            automation_id=automation_id,
+            window_handle=window_handle,
+            limit=limit,
+        )
+    except Exception:
+        logger.warning("native_find_elements failed, falling back", exc_info=True)
+        return None
+
+
+def native_get_screen_metrics() -> dict | None:
+    """Query primary and virtual screen dimensions via Rust.
+
+    Returns dict with keys: primary_width, primary_height,
+    virtual_width, virtual_height. Returns None if unavailable.
+    """
+    if not HAS_NATIVE:
+        return None
+    try:
+        return windows_mcp_core.get_screen_metrics()
+    except Exception:
+        logger.warning("native_get_screen_metrics failed, falling back", exc_info=True)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# UIA pattern functions
+# ---------------------------------------------------------------------------
+
+
+def native_invoke_at(x: int, y: int) -> dict | None:
+    """Invoke the InvokePattern on the element at (x, y) via Rust.
+
+    Returns a PatternResult dict, or None if unavailable.
+    """
+    if not HAS_NATIVE:
+        return None
+    try:
+        return windows_mcp_core.invoke_at(x, y)
+    except Exception:
+        logger.warning("native_invoke_at failed, falling back", exc_info=True)
+        return None
+
+
+def native_toggle_at(x: int, y: int) -> dict | None:
+    """Toggle the TogglePattern on the element at (x, y) via Rust.
+
+    Returns a PatternResult dict, or None if unavailable.
+    """
+    if not HAS_NATIVE:
+        return None
+    try:
+        return windows_mcp_core.toggle_at(x, y)
+    except Exception:
+        logger.warning("native_toggle_at failed, falling back", exc_info=True)
+        return None
+
+
+def native_set_value_at(x: int, y: int, value: str) -> dict | None:
+    """Set value via ValuePattern on the element at (x, y) via Rust.
+
+    Returns a PatternResult dict, or None if unavailable.
+    """
+    if not HAS_NATIVE:
+        return None
+    try:
+        return windows_mcp_core.set_value_at(x, y, value)
+    except Exception:
+        logger.warning("native_set_value_at failed, falling back", exc_info=True)
+        return None
+
+
+def native_expand_at(x: int, y: int) -> dict | None:
+    """Expand via ExpandCollapsePattern on the element at (x, y) via Rust.
+
+    Returns a PatternResult dict, or None if unavailable.
+    """
+    if not HAS_NATIVE:
+        return None
+    try:
+        return windows_mcp_core.expand_at(x, y)
+    except Exception:
+        logger.warning("native_expand_at failed, falling back", exc_info=True)
+        return None
+
+
+def native_collapse_at(x: int, y: int) -> dict | None:
+    """Collapse via ExpandCollapsePattern on the element at (x, y) via Rust.
+
+    Returns a PatternResult dict, or None if unavailable.
+    """
+    if not HAS_NATIVE:
+        return None
+    try:
+        return windows_mcp_core.collapse_at(x, y)
+    except Exception:
+        logger.warning("native_collapse_at failed, falling back", exc_info=True)
+        return None
+
+
+def native_select_at(x: int, y: int) -> dict | None:
+    """Select via SelectionItemPattern on the element at (x, y) via Rust.
+
+    Returns a PatternResult dict, or None if unavailable.
+    """
+    if not HAS_NATIVE:
+        return None
+    try:
+        return windows_mcp_core.select_at(x, y)
+    except Exception:
+        logger.warning("native_select_at failed, falling back", exc_info=True)
+        return None

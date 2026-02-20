@@ -308,6 +308,163 @@ fn capture_screenshot_png(py: Python<'_>, monitor_index: u32) -> PyResult<PyObje
 }
 
 // ---------------------------------------------------------------------------
+// UIA query functions
+// ---------------------------------------------------------------------------
+
+/// Convert an [`ElementInfo`] to a Python dict.
+fn element_info_to_dict(
+    py: Python<'_>,
+    info: &wmcp_core::query::ElementInfo,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("name", &info.name)?;
+    dict.set_item("automation_id", &info.automation_id)?;
+    dict.set_item("control_type", &info.control_type)?;
+    dict.set_item("localized_control_type", &info.localized_control_type)?;
+    dict.set_item("class_name", &info.class_name)?;
+    dict.set_item("bounding_rect", info.bounding_rect.to_vec())?;
+    dict.set_item("is_enabled", info.is_enabled)?;
+    dict.set_item("is_offscreen", info.is_offscreen)?;
+    dict.set_item("has_keyboard_focus", info.has_keyboard_focus)?;
+    dict.set_item("supported_patterns", &info.supported_patterns)?;
+    Ok(dict.into())
+}
+
+/// Convert a [`PatternResult`] to a Python dict.
+fn pattern_result_to_dict(
+    py: Python<'_>,
+    r: &wmcp_core::pattern::PatternResult,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    dict.set_item("element_name", &r.element_name)?;
+    dict.set_item("element_type", &r.element_type)?;
+    dict.set_item("action", &r.action)?;
+    dict.set_item("success", r.success)?;
+    dict.set_item("detail", &r.detail)?;
+    Ok(dict.into())
+}
+
+/// Query the UIA element at screen coordinates.
+#[pyfunction]
+#[pyo3(signature = (x, y))]
+fn element_from_point(py: Python<'_>, x: i32, y: i32) -> PyResult<PyObject> {
+    let info = py
+        .allow_threads(move || wmcp_core::query::element_from_point(x, y))
+        .map_err(to_py_err)?;
+    element_info_to_dict(py, &info)
+}
+
+/// Search for UIA elements matching criteria.
+#[pyfunction]
+#[pyo3(signature = (name=None, control_type=None, automation_id=None, window_handle=None, limit=20))]
+fn find_elements(
+    py: Python<'_>,
+    name: Option<String>,
+    control_type: Option<String>,
+    automation_id: Option<String>,
+    window_handle: Option<isize>,
+    limit: usize,
+) -> PyResult<PyObject> {
+    let criteria = wmcp_core::query::FindCriteria {
+        name,
+        control_type,
+        automation_id,
+        window_handle,
+        limit,
+    };
+
+    let results = py
+        .allow_threads(move || wmcp_core::query::find_elements(&criteria))
+        .map_err(to_py_err)?;
+
+    let list = PyList::empty(py);
+    for info in &results {
+        list.append(element_info_to_dict(py, info)?)?;
+    }
+    Ok(list.into())
+}
+
+/// Query primary and virtual screen dimensions.
+#[pyfunction]
+fn get_screen_metrics(py: Python<'_>) -> PyResult<PyObject> {
+    let metrics = py
+        .allow_threads(wmcp_core::query::get_screen_metrics)
+        .map_err(to_py_err)?;
+
+    let dict = PyDict::new(py);
+    dict.set_item("primary_width", metrics.primary_width)?;
+    dict.set_item("primary_height", metrics.primary_height)?;
+    dict.set_item("virtual_width", metrics.virtual_width)?;
+    dict.set_item("virtual_height", metrics.virtual_height)?;
+    Ok(dict.into())
+}
+
+// ---------------------------------------------------------------------------
+// UIA pattern functions
+// ---------------------------------------------------------------------------
+
+/// Invoke the InvokePattern on the element at (x, y).
+#[pyfunction]
+#[pyo3(signature = (x, y))]
+fn invoke_at(py: Python<'_>, x: i32, y: i32) -> PyResult<PyObject> {
+    let result = py
+        .allow_threads(move || wmcp_core::pattern::invoke_at(x, y))
+        .map_err(to_py_err)?;
+    pattern_result_to_dict(py, &result)
+}
+
+/// Toggle the TogglePattern on the element at (x, y).
+#[pyfunction]
+#[pyo3(signature = (x, y))]
+fn toggle_at(py: Python<'_>, x: i32, y: i32) -> PyResult<PyObject> {
+    let result = py
+        .allow_threads(move || wmcp_core::pattern::toggle_at(x, y))
+        .map_err(to_py_err)?;
+    pattern_result_to_dict(py, &result)
+}
+
+/// Set a value via ValuePattern on the element at (x, y).
+#[pyfunction]
+#[pyo3(signature = (x, y, value))]
+fn set_value_at(py: Python<'_>, x: i32, y: i32, value: &str) -> PyResult<PyObject> {
+    let value_owned = value.to_owned();
+    let result = py
+        .allow_threads(move || wmcp_core::pattern::set_value_at(x, y, &value_owned))
+        .map_err(to_py_err)?;
+    pattern_result_to_dict(py, &result)
+}
+
+/// Expand via ExpandCollapsePattern on the element at (x, y).
+#[pyfunction]
+#[pyo3(signature = (x, y))]
+fn expand_at(py: Python<'_>, x: i32, y: i32) -> PyResult<PyObject> {
+    let result = py
+        .allow_threads(move || wmcp_core::pattern::expand_at(x, y))
+        .map_err(to_py_err)?;
+    pattern_result_to_dict(py, &result)
+}
+
+/// Collapse via ExpandCollapsePattern on the element at (x, y).
+#[pyfunction]
+#[pyo3(signature = (x, y))]
+fn collapse_at(py: Python<'_>, x: i32, y: i32) -> PyResult<PyObject> {
+    let result = py
+        .allow_threads(move || wmcp_core::pattern::collapse_at(x, y))
+        .map_err(to_py_err)?;
+    pattern_result_to_dict(py, &result)
+}
+
+/// Select via SelectionItemPattern on the element at (x, y).
+#[pyfunction]
+#[pyo3(signature = (x, y))]
+fn select_at(py: Python<'_>, x: i32, y: i32) -> PyResult<PyObject> {
+    let result = py
+        .allow_threads(move || wmcp_core::pattern::select_at(x, y))
+        .map_err(to_py_err)?;
+    pattern_result_to_dict(py, &result)
+}
+
+// ---------------------------------------------------------------------------
 // Module registration
 // ---------------------------------------------------------------------------
 
@@ -329,6 +486,17 @@ fn windows_mcp_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(list_windows, m)?)?;
     m.add_function(wrap_pyfunction!(capture_screenshot_raw, m)?)?;
     m.add_function(wrap_pyfunction!(capture_screenshot_png, m)?)?;
+    // UIA query functions
+    m.add_function(wrap_pyfunction!(element_from_point, m)?)?;
+    m.add_function(wrap_pyfunction!(find_elements, m)?)?;
+    m.add_function(wrap_pyfunction!(get_screen_metrics, m)?)?;
+    // UIA pattern functions
+    m.add_function(wrap_pyfunction!(invoke_at, m)?)?;
+    m.add_function(wrap_pyfunction!(toggle_at, m)?)?;
+    m.add_function(wrap_pyfunction!(set_value_at, m)?)?;
+    m.add_function(wrap_pyfunction!(expand_at, m)?)?;
+    m.add_function(wrap_pyfunction!(collapse_at, m)?)?;
+    m.add_function(wrap_pyfunction!(select_at, m)?)?;
 
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add("__doc__", "Native Rust acceleration layer for Windows-MCP.")?;

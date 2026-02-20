@@ -224,8 +224,7 @@ def register(mcp):  # noqa: C901
                 if name and name.lower() not in element_name.lower():
                     return
                 result_holder.append(
-                    f"Event '{event}' fired: '{element_name}' "
-                    f"({element.ControlTypeName})"
+                    f"Event '{event}' fired: '{element_name}' ({element.ControlTypeName})"
                 )
                 matched.set()
             except Exception:
@@ -257,7 +256,9 @@ def register(mcp):  # noqa: C901
 
         if result_holder:
             return result_holder[0]
-        return f"Timeout: no '{event}' event{f' matching {name!r}' if name else ''} within {timeout}s."
+        return (
+            f"Timeout: no '{event}' event{f' matching {name!r}' if name else ''} within {timeout}s."
+        )
 
     @mcp.tool(
         name="Find",
@@ -285,6 +286,31 @@ def register(mcp):  # noqa: C901
         if not name and not control_type and not window:
             return "Error: at least one of name, control_type, or window must be specified."
 
+        # --- Rust native fast-path (when no window filter) ---
+        if window is None:
+            from windows_mcp.native import native_find_elements
+
+            results = native_find_elements(name=name, control_type=control_type, limit=limit)
+            if results is not None:
+                if not results:
+                    criteria = []
+                    if name:
+                        criteria.append(f"name='{name}'")
+                    if control_type:
+                        criteria.append(f"type='{control_type}'")
+                    return f"No elements found matching {', '.join(criteria)}."
+                matches = []
+                for i, el in enumerate(results):
+                    br = el.get("bounding_rect", [0, 0, 0, 0])
+                    cx = int((br[0] + br[2]) / 2)
+                    cy = int((br[1] + br[3]) / 2)
+                    matches.append(
+                        f"[{i}] '{el.get('name', '')}' ({el.get('control_type', '')}) "
+                        f"at ({cx},{cy})"
+                    )
+                return f"Found {len(matches)} element(s):\n" + "\n".join(matches)
+
+        # --- Python UIA fallback ---
         desktop_state = _state.desktop.get_state(use_vision=False, use_dom=False)
         tree_state = desktop_state.tree_state
         if not tree_state:

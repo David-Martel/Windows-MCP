@@ -209,6 +209,62 @@ def register(mcp):  # noqa: C901
         elements_str = ", ".join([f"({x},{y}) with text '{text}'" for x, y, text in validated])
         return f"Multi-edited elements at: {elements_str}"
 
+    def _format_pattern_result(r: dict, x: int, y: int) -> str:
+        """Format a Rust PatternResult dict into a user-facing string."""
+        name = r.get("element_name") or "unnamed"
+        etype = r.get("element_type") or "unknown"
+        action = r.get("action", "")
+        if not r.get("success"):
+            return f"Error: element '{name}' does not support {r.get('detail', action)}."
+        if action == "invoke":
+            return f"Invoked '{name}' ({etype}) at ({x},{y})."
+        if action == "toggle":
+            state = r.get("detail", "")
+            return f"Toggled '{name}' ({etype}) at ({x},{y}). {state}."
+        if action == "set_value":
+            detail = r.get("detail", "")
+            return f"Set value on '{name}' ({etype}) at ({x},{y}). {detail}."
+        if action == "expand":
+            return f"Expanded '{name}' ({etype}) at ({x},{y})."
+        if action == "collapse":
+            return f"Collapsed '{name}' ({etype}) at ({x},{y})."
+        if action == "select":
+            return f"Selected '{name}' ({etype}) at ({x},{y})."
+        return f"{action} on '{name}' ({etype}) at ({x},{y})."
+
+    def _try_native_pattern(x: int, y: int, action: str, value: str | None) -> str | None:
+        """Try Rust native UIA pattern invocation. Returns formatted string or None."""
+        from windows_mcp.native import (
+            native_collapse_at,
+            native_expand_at,
+            native_invoke_at,
+            native_select_at,
+            native_set_value_at,
+            native_toggle_at,
+        )
+
+        if action == "set_value":
+            if value is None:
+                return "Error: value parameter required for set_value action."
+            if len(value) > 10000:
+                return f"Error: value too long ({len(value)} chars, max 10000)."
+            result = native_set_value_at(x, y, value)
+        else:
+            fn = {
+                "invoke": native_invoke_at,
+                "toggle": native_toggle_at,
+                "expand": native_expand_at,
+                "collapse": native_collapse_at,
+                "select": native_select_at,
+            }.get(action)
+            if fn is None:
+                return None  # Unknown action, let fallback handle it
+            result = fn(x, y)
+
+        if result is None:
+            return None  # Native unavailable, fall back to Python UIA
+        return _format_pattern_result(result, x, y)
+
     @mcp.tool(
         name="Invoke",
         description=(
@@ -232,12 +288,18 @@ def register(mcp):  # noqa: C901
         value: str | None = None,
         ctx: Context = None,
     ) -> str:
-        from windows_mcp.uia import ControlFromPoint, PatternId
-
         try:
             x, y = _validate_loc(loc)
         except ValueError:
             return "Error: loc must be [x, y] with integer coordinates."
+
+        # --- Rust native fast-path ---
+        result = _try_native_pattern(x, y, action, value)
+        if result is not None:
+            return result
+
+        # --- Python UIA fallback ---
+        from windows_mcp.uia import ControlFromPoint, PatternId
 
         element = ControlFromPoint(x, y)
         if not element:
