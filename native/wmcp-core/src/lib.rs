@@ -16,10 +16,14 @@
 //! | [`input`] | `SendInput` keyboard/mouse simulation |
 //! | [`tree`] | UIA accessibility tree traversal via `windows-rs` + Rayon |
 //! | [`screenshot`] | DXGI Output Duplication desktop capture (PNG + raw BGRA) |
+//! | [`query`] | UIA element queries: `ElementFromPoint`, `FindAll`, screen metrics |
+//! | [`pattern`] | UIA pattern invocation: Invoke, Toggle, SetValue, Expand, etc. |
 
 pub mod com;
 pub mod errors;
 pub mod input;
+pub mod pattern;
+pub mod query;
 pub mod screenshot;
 pub mod system_info;
 pub mod tree;

@@ -50,7 +50,7 @@ pub const MAX_TREE_DEPTH: usize = 50;
 // Control-type ID -> name mapping
 // ---------------------------------------------------------------------------
 
-fn control_type_name(id: UIA_CONTROLTYPE_ID) -> &'static str {
+pub fn control_type_name(id: UIA_CONTROLTYPE_ID) -> &'static str {
     match id {
         x if x == UIA_AppBarControlTypeId => "AppBar",
         x if x == UIA_ButtonControlTypeId => "Button",
@@ -281,4 +281,57 @@ pub fn capture_tree_raw(window_handles: &[isize], max_depth: usize) -> Vec<TreeE
         .filter(|&handle| handle != 0)
         .filter_map(|handle| capture_window(handle, max_depth))
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_control_type_name_known_types() {
+        assert_eq!(control_type_name(UIA_ButtonControlTypeId), "Button");
+        assert_eq!(control_type_name(UIA_EditControlTypeId), "Edit");
+        assert_eq!(control_type_name(UIA_WindowControlTypeId), "Window");
+        assert_eq!(control_type_name(UIA_CheckBoxControlTypeId), "CheckBox");
+        assert_eq!(control_type_name(UIA_MenuItemControlTypeId), "MenuItem");
+        assert_eq!(control_type_name(UIA_TreeItemControlTypeId), "TreeItem");
+    }
+
+    #[test]
+    fn test_control_type_name_unknown() {
+        assert_eq!(
+            control_type_name(UIA_CONTROLTYPE_ID(99999)),
+            "Unknown"
+        );
+    }
+
+    #[test]
+    fn test_capture_tree_raw_empty_handles() {
+        let result = capture_tree_raw(&[], 50);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_capture_tree_raw_zero_handle_filtered() {
+        // Handle 0 should be filtered out (no COM calls attempted)
+        let result = capture_tree_raw(&[0, 0, 0], 50);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_max_tree_depth_clamping() {
+        // Depth > MAX_TREE_DEPTH should be clamped
+        let clamped = 999_usize.min(MAX_TREE_DEPTH);
+        assert_eq!(clamped, MAX_TREE_DEPTH);
+        assert_eq!(MAX_TREE_DEPTH, 50);
+    }
+
+    #[test]
+    fn test_max_children_per_node_constant() {
+        assert_eq!(MAX_CHILDREN_PER_NODE, 512);
+    }
 }

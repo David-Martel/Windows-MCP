@@ -283,3 +283,66 @@ pub fn send_drag_raw(to_x: i32, to_y: i32, _steps: u32) -> u32 {
 
     unsafe { SendInput(&inputs, INPUT_SIZE) }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_send_text_raw_empty_string() {
+        assert_eq!(send_text_raw(""), 0);
+    }
+
+    #[test]
+    fn test_send_text_raw_too_long() {
+        let long = "a".repeat(MAX_TEXT_LENGTH + 1);
+        assert_eq!(send_text_raw(&long), 0);
+    }
+
+    #[test]
+    fn test_send_hotkey_raw_empty_codes() {
+        assert_eq!(send_hotkey_raw(&[]), 0);
+    }
+
+    #[test]
+    fn test_send_hotkey_raw_too_many_keys() {
+        let keys: Vec<u16> = (0..MAX_HOTKEY_KEYS as u16 + 1).collect();
+        assert_eq!(send_hotkey_raw(&keys), 0);
+    }
+
+    #[test]
+    fn test_max_text_length_constant() {
+        assert_eq!(MAX_TEXT_LENGTH, 10_000);
+    }
+
+    #[test]
+    fn test_max_hotkey_keys_constant() {
+        assert_eq!(MAX_HOTKEY_KEYS, 8);
+    }
+
+    #[test]
+    fn test_input_size_constant() {
+        assert_eq!(INPUT_SIZE as usize, std::mem::size_of::<INPUT>());
+    }
+
+    #[test]
+    fn test_normalise_coords_basic() {
+        // Can't test exact values without knowing screen geometry,
+        // but we can verify the function doesn't panic.
+        let (ax, ay) = normalise_coords(960, 540);
+        assert!(ax >= 0 && ax <= 65535);
+        assert!(ay >= 0 && ay <= 65535);
+    }
+
+    #[test]
+    fn test_normalise_coords_origin() {
+        let (ax, ay) = normalise_coords(0, 0);
+        // Should be near 0 (depending on virtual screen origin)
+        assert!(ax >= 0 && ax <= 65535);
+        assert!(ay >= 0 && ay <= 65535);
+    }
+}
