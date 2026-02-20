@@ -841,8 +841,9 @@ class TestWaitForEventToolDispatch:
         assert "Notepad" in result
 
 
+@patch("windows_mcp.native.native_find_elements", return_value=None)
 class TestFindToolDispatch:
-    async def test_find_by_name_returns_matching_elements(self, patched_desktop):
+    async def test_find_by_name_returns_matching_elements(self, _native, patched_desktop):
         nodes = [
             _make_tree_element(name="Submit Button", control_type="Button"),
             _make_tree_element(name="Cancel Button", control_type="Button"),
@@ -855,7 +856,7 @@ class TestFindToolDispatch:
         assert "Cancel Button" in result
         assert "Text Field" not in result
 
-    async def test_find_by_control_type_filters_correctly(self, patched_desktop):
+    async def test_find_by_control_type_filters_correctly(self, _native, patched_desktop):
         nodes = [
             _make_tree_element(name="Name", control_type="Edit"),
             _make_tree_element(name="Submit", control_type="Button"),
@@ -866,7 +867,7 @@ class TestFindToolDispatch:
         assert "Name" in result
         assert "Submit" not in result
 
-    async def test_find_by_window_filters_by_window_name(self, patched_desktop):
+    async def test_find_by_window_filters_by_window_name(self, _native, patched_desktop):
         nodes = [
             _make_tree_element(name="OK", window_name="Dialog"),
             _make_tree_element(name="Cancel", window_name="Main"),
@@ -877,20 +878,20 @@ class TestFindToolDispatch:
         assert "OK" in result
         assert "Cancel" not in result
 
-    async def test_find_returns_count_header(self, patched_desktop):
+    async def test_find_returns_count_header(self, _native, patched_desktop):
         node = _make_tree_element(name="OK Button")
         patched_desktop.get_state.return_value = _make_desktop_state(tree_nodes=[node])
         tools = await _get_tools()
         result = await tools["Find"].fn(name="OK")
         assert "Found 1 element" in result
 
-    async def test_find_no_matches_returns_not_found_message(self, patched_desktop):
+    async def test_find_no_matches_returns_not_found_message(self, _native, patched_desktop):
         patched_desktop.get_state.return_value = _make_desktop_state(tree_nodes=[])
         tools = await _get_tools()
         result = await tools["Find"].fn(name="Invisible")
         assert "No elements found" in result
 
-    async def test_find_respects_limit_parameter(self, patched_desktop):
+    async def test_find_respects_limit_parameter(self, _native, patched_desktop):
         nodes = [_make_tree_element(name=f"Button {i}") for i in range(10)]
         patched_desktop.get_state.return_value = _make_desktop_state(tree_nodes=nodes)
         tools = await _get_tools()
@@ -899,6 +900,19 @@ class TestFindToolDispatch:
 
 
 class TestInvokeToolDispatch:
+    @pytest.fixture(autouse=True)
+    def _disable_native_patterns(self):
+        with patch.multiple(
+            "windows_mcp.native",
+            native_invoke_at=MagicMock(return_value=None),
+            native_toggle_at=MagicMock(return_value=None),
+            native_set_value_at=MagicMock(return_value=None),
+            native_expand_at=MagicMock(return_value=None),
+            native_collapse_at=MagicMock(return_value=None),
+            native_select_at=MagicMock(return_value=None),
+        ):
+            yield
+
     def _make_element_mock(
         self,
         name: str = "OK",
@@ -1225,6 +1239,19 @@ class TestMissingRequiredArguments:
 
 
 class TestInvokeEdgeCases:
+    @pytest.fixture(autouse=True)
+    def _disable_native_patterns(self):
+        with patch.multiple(
+            "windows_mcp.native",
+            native_invoke_at=MagicMock(return_value=None),
+            native_toggle_at=MagicMock(return_value=None),
+            native_set_value_at=MagicMock(return_value=None),
+            native_expand_at=MagicMock(return_value=None),
+            native_collapse_at=MagicMock(return_value=None),
+            native_select_at=MagicMock(return_value=None),
+        ):
+            yield
+
     async def test_invoke_no_element_at_coordinates_returns_error(self, patched_desktop):
         with patch("windows_mcp.uia.ControlFromPoint", return_value=None):
             tools = await _get_tools()

@@ -406,7 +406,8 @@ class TestMultiEditValidation:
 
 
 class TestFindToolNullTreeState:
-    async def test_find_null_tree_state_returns_error(self, patched_desktop):
+    @patch("windows_mcp.native.native_find_elements", return_value=None)
+    async def test_find_null_tree_state_returns_error(self, _mock_native, patched_desktop):
         """When desktop_state.tree_state is None find_tool returns an error string."""
         patched_desktop.get_state.return_value = _make_desktop_state_no_tree()
         tools = await _get_tools()
@@ -414,7 +415,8 @@ class TestFindToolNullTreeState:
         assert "Error" in result
         assert "could not capture desktop state" in result
 
-    async def test_find_no_matches_returns_criteria_in_message(self, patched_desktop):
+    @patch("windows_mcp.native.native_find_elements", return_value=None)
+    async def test_find_no_matches_returns_criteria_in_message(self, _mock_native, patched_desktop):
         """When there are zero matches the error message includes the search criteria."""
         patched_desktop.get_state.return_value = _make_desktop_state(tree_nodes=[])
         tools = await _get_tools()
@@ -469,6 +471,19 @@ class TestWaitForNullTreeState:
 # ---------------------------------------------------------------------------
 
 
+def _disable_native_patterns():
+    """Context manager that disables Rust native pattern fast-path."""
+    return patch.multiple(
+        "windows_mcp.native",
+        native_invoke_at=MagicMock(return_value=None),
+        native_toggle_at=MagicMock(return_value=None),
+        native_set_value_at=MagicMock(return_value=None),
+        native_expand_at=MagicMock(return_value=None),
+        native_collapse_at=MagicMock(return_value=None),
+        native_select_at=MagicMock(return_value=None),
+    )
+
+
 class TestInvokeToolPatternVariants:
     """Each action has its own 'pattern not supported' branch that must be hit."""
 
@@ -482,66 +497,71 @@ class TestInvokeToolPatternVariants:
 
     async def test_invoke_toggle_no_pattern_returns_error(self, patched_desktop):
         elem = self._make_elem(name="MyCheckbox", control_type="checkbox")
-        with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
-            with patch("windows_mcp.uia.PatternId"):
-                tools = await _get_tools()
-                result = await tools["Invoke"].fn(loc=[100, 200], action="toggle")
+        with _disable_native_patterns():
+            with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
+                with patch("windows_mcp.uia.PatternId"):
+                    tools = await _get_tools()
+                    result = await tools["Invoke"].fn(loc=[100, 200], action="toggle")
         assert "does not support TogglePattern" in result
         assert "MyCheckbox" in result
 
     async def test_invoke_expand_no_pattern_returns_error(self, patched_desktop):
         elem = self._make_elem(name="MyCombo", control_type="combobox")
-        with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
-            with patch("windows_mcp.uia.PatternId"):
-                tools = await _get_tools()
-                result = await tools["Invoke"].fn(loc=[100, 200], action="expand")
+        with _disable_native_patterns():
+            with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
+                with patch("windows_mcp.uia.PatternId"):
+                    tools = await _get_tools()
+                    result = await tools["Invoke"].fn(loc=[100, 200], action="expand")
         assert "does not support ExpandCollapsePattern" in result
         assert "MyCombo" in result
 
     async def test_invoke_collapse_no_pattern_returns_error(self, patched_desktop):
         elem = self._make_elem(name="MyTree", control_type="treeitem")
-        with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
-            with patch("windows_mcp.uia.PatternId"):
-                tools = await _get_tools()
-                result = await tools["Invoke"].fn(loc=[100, 200], action="collapse")
+        with _disable_native_patterns():
+            with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
+                with patch("windows_mcp.uia.PatternId"):
+                    tools = await _get_tools()
+                    result = await tools["Invoke"].fn(loc=[100, 200], action="collapse")
         assert "does not support ExpandCollapsePattern" in result
         assert "MyTree" in result
 
     async def test_invoke_select_no_pattern_returns_error(self, patched_desktop):
         elem = self._make_elem(name="ListItem", control_type="listitem")
-        with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
-            with patch("windows_mcp.uia.PatternId"):
-                tools = await _get_tools()
-                result = await tools["Invoke"].fn(loc=[100, 200], action="select")
+        with _disable_native_patterns():
+            with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
+                with patch("windows_mcp.uia.PatternId"):
+                    tools = await _get_tools()
+                    result = await tools["Invoke"].fn(loc=[100, 200], action="select")
         assert "does not support SelectionItemPattern" in result
         assert "ListItem" in result
 
     async def test_invoke_set_value_no_pattern_returns_error(self, patched_desktop):
         elem = self._make_elem(name="ReadOnlyField", control_type="text")
-        with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
-            with patch("windows_mcp.uia.PatternId"):
-                tools = await _get_tools()
-                result = await tools["Invoke"].fn(loc=[100, 200], action="set_value", value="hello")
+        with _disable_native_patterns():
+            with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
+                with patch("windows_mcp.uia.PatternId"):
+                    tools = await _get_tools()
+                    result = await tools["Invoke"].fn(
+                        loc=[100, 200], action="set_value", value="hello"
+                    )
         assert "does not support ValuePattern" in result
         assert "ReadOnlyField" in result
 
     async def test_invoke_set_value_too_long_returns_error(self, patched_desktop):
         """Values exceeding 10 000 characters are rejected before any UIA call."""
-        elem = self._make_elem(name="BigInput", control_type="edit")
-        with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
-            with patch("windows_mcp.uia.PatternId"):
-                tools = await _get_tools()
-                result = await tools["Invoke"].fn(
-                    loc=[100, 200], action="set_value", value="x" * 10001
-                )
+        tools = await _get_tools()
+        result = await tools["Invoke"].fn(
+            loc=[100, 200], action="set_value", value="x" * 10001
+        )
         assert "value too long" in result
         assert "10001" in result
 
     async def test_invoke_no_element_at_coords_returns_error(self, patched_desktop):
         """ControlFromPoint returning None triggers the 'no element' error path."""
-        with patch("windows_mcp.uia.ControlFromPoint", return_value=None):
-            tools = await _get_tools()
-            result = await tools["Invoke"].fn(loc=[1, 1], action="invoke")
+        with _disable_native_patterns():
+            with patch("windows_mcp.uia.ControlFromPoint", return_value=None):
+                tools = await _get_tools()
+                result = await tools["Invoke"].fn(loc=[1, 1], action="invoke")
         assert "no element found at (1,1)" in result
 
     async def test_invoke_invalid_loc_returns_error(self, patched_desktop):
@@ -554,10 +574,11 @@ class TestInvokeToolPatternVariants:
         """An action string not in the known set returns the unknown-action error."""
         elem = self._make_elem()
         elem.GetPattern.return_value = MagicMock()  # pattern is present
-        with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
-            with patch("windows_mcp.uia.PatternId"):
-                tools = await _get_tools()
-                result = await tools["Invoke"].fn(loc=[100, 200], action="fly")
+        with _disable_native_patterns():
+            with patch("windows_mcp.uia.ControlFromPoint", return_value=elem):
+                with patch("windows_mcp.uia.PatternId"):
+                    tools = await _get_tools()
+                    result = await tools["Invoke"].fn(loc=[100, 200], action="fly")
         assert "unknown action" in result
         assert "fly" in result
 
